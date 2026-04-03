@@ -822,6 +822,75 @@ def search_line_messages(
 
 
 # ============================================================
+# LINE 群組管理
+# ============================================================
+
+@mcp.tool()
+def register_line_group(
+    group_id: str,
+    group_name: str = "",
+    group_type: str = "other",
+    notes: str = "",
+) -> str:
+    """註冊 LINE 群組。當 bot 加入新群組或老闆告知群組用途時呼叫。
+
+    Args:
+        group_id: LINE 群組 ID（從 channel tag 的 chat_id 取得）
+        group_name: 群組名稱（例：公司工作群、經銷商群）
+        group_type: 群組類型 — work（工作）| customer（客戶）| supplier（供應商）| marketing（行銷）| other
+        notes: 備註
+    """
+    db = get_db()
+    existing = db.execute("SELECT id FROM line_groups WHERE group_id = ?", (group_id,)).fetchone()
+    if existing:
+        db.execute(
+            "UPDATE line_groups SET group_name=COALESCE(NULLIF(?,'')),group_type=?,notes=COALESCE(NULLIF(?,'')),updated_at=datetime('now','localtime') WHERE group_id=?",
+            (group_name, group_type, notes, group_id),
+        )
+        db.commit()
+        return f"✅ 群組已更新：{group_name or group_id}（{group_type}）"
+    else:
+        db.execute(
+            "INSERT INTO line_groups (group_id, group_name, group_type, notes) VALUES (?,?,?,?)",
+            (group_id, group_name, group_type, notes),
+        )
+        db.commit()
+        return f"✅ 群組已註冊：{group_name or group_id}（{group_type}）"
+
+
+@mcp.tool()
+def list_line_groups(group_type: str = "") -> str:
+    """列出所有已註冊的 LINE 群組。
+
+    Args:
+        group_type: 篩選類型 — work | customer | supplier | marketing | other | 留空=全部
+    """
+    db = get_db()
+    if group_type:
+        rows = db.execute(
+            "SELECT group_id, group_name, group_type, notes, created_at FROM line_groups WHERE group_type=? ORDER BY created_at",
+            (group_type,),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT group_id, group_name, group_type, notes, created_at FROM line_groups ORDER BY created_at"
+        ).fetchall()
+
+    if not rows:
+        return "目前沒有已註冊的 LINE 群組。"
+
+    type_icon = {"work": "💼", "customer": "👤", "supplier": "🏭", "marketing": "📢", "other": "💬"}
+    lines = [f"## LINE 群組（{len(rows)} 個）\n"]
+    for g in rows:
+        icon = type_icon.get(g["group_type"], "💬")
+        name = g["group_name"] or g["group_id"][:12]
+        lines.append(f"- {icon} **{name}** ({g['group_type']}) — chat_id={g['group_id']}")
+        if g["notes"]:
+            lines.append(f"  備註：{g['notes']}")
+    return "\n".join(lines)
+
+
+# ============================================================
 # 客戶管理（3 工具）
 # ============================================================
 

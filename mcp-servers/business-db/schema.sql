@@ -228,6 +228,16 @@ CREATE TABLE IF NOT EXISTS daily_snapshots (
     created_at DATETIME DEFAULT (datetime('now', 'localtime'))
 );
 
+CREATE TABLE IF NOT EXISTS line_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id TEXT NOT NULL UNIQUE,
+    group_name TEXT,
+    group_type TEXT DEFAULT 'other',
+    notes TEXT,
+    created_at DATETIME DEFAULT (datetime('now', 'localtime')),
+    updated_at DATETIME DEFAULT (datetime('now', 'localtime'))
+);
+
 -- ============================================================
 -- Indexes
 -- ============================================================
@@ -251,3 +261,5 @@ CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(transaction_dat
 CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_snapshots_date ON daily_snapshots(snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_line_groups_type ON line_groups(group_type);
+CREATE INDEX IF NOT EXISTS idx_line_messages_group ON line_messages(group_id) WHERE group_id IS NOT NULL;
