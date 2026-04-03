@@ -9,6 +9,7 @@ import json
 import os
 import importlib
 import platform
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -123,6 +124,9 @@ def generate_mcp_json():
     python_bin = str(ROOT / ".venv" / "bin" / "python3")
     db_path = str(ROOT / "data" / "business.db")
 
+    # 找 bun 的絕對路徑（Mac 上 Claude Code 的 PATH 可能不含 brew/bun）
+    bun_bin = shutil.which("bun") or "bun"
+
     # ── Claude Code 用的 .mcp.json ──
 
     code_config = {
@@ -147,7 +151,7 @@ def generate_mcp_json():
 
         code_config["mcpServers"]["line"] = {
             "type": "channel",
-            "command": "bun",
+            "command": bun_bin,
             "args": ["run", str(ROOT / "mcp-servers" / "line-channel" / "server.ts")],
             "env": line_env,
         }

@@ -2,7 +2,12 @@
 # ═══════════════════════════════════════════════════════
 #  SME-AI-Kit 安裝精靈
 #  支援 macOS + Linux (WSL)
-#  入口：雙擊此檔或 bash install.sh
+#
+#  用法：
+#    1. cp .env.template .env   ← 填入 4 個設定值
+#    2. bash install.sh         ← 全自動
+#
+#  或不建 .env，直接跑 install.sh 會互動詢問。
 # ═══════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -29,13 +34,30 @@ elif [[ "$OS" == "Linux" ]]; then
     IS_LINUX=true
 fi
 
-# ── 輸入函式（Mac = 原生對話框，Linux = terminal）────
+# ── 讀 .env ──────────────────────────────────────────
+
+load_env() {
+    if [[ -f "$ROOT/.env" ]]; then
+        step "讀取 .env"
+        # 只讀非註解、非空白的行
+        while IFS='=' read -r key val; do
+            key="$(echo "$key" | xargs)"
+            val="$(echo "$val" | xargs)"
+            [[ -z "$key" || "$key" == \#* ]] && continue
+            export "$key=$val"
+            ok "$key = ...${val: -8}"
+        done < "$ROOT/.env"
+        return 0
+    fi
+    return 1
+}
+
+# ── 輸入函式 ─────────────────────────────────────────
 
 ask_text() {
     local prompt="$1" default="${2:-}"
     if $IS_MAC; then
-        local cmd="text returned of (display dialog \"$prompt\" default answer \"$default\" with title \"SME-AI-Kit\")"
-        osascript -e "$cmd" 2>/dev/null || echo "$default"
+        osascript -e "text returned of (display dialog \"$prompt\" default answer \"$default\" with title \"SME-AI-Kit\")" 2>/dev/null || echo "$default"
     else
         local result
         if [[ -n "$default" ]]; then
@@ -51,25 +73,12 @@ ask_text() {
 ask_secret() {
     local prompt="$1"
     if $IS_MAC; then
-        local cmd="text returned of (display dialog \"$prompt\" default answer \"\" with hidden answer with title \"SME-AI-Kit\")"
-        osascript -e "$cmd" 2>/dev/null || echo ""
+        osascript -e "text returned of (display dialog \"$prompt\" default answer \"\" with hidden answer with title \"SME-AI-Kit\")" 2>/dev/null || echo ""
     else
         local result
         read -rsp "  $prompt: " result
         echo "$result"
-        echo >&2  # newline after hidden input
-    fi
-}
-
-ask_confirm() {
-    local prompt="$1"
-    if $IS_MAC; then
-        osascript -e "display dialog \"$prompt\" buttons {\"取消\", \"確定\"} default button \"確定\" with title \"SME-AI-Kit\"" >/dev/null 2>&1
-        return $?
-    else
-        local yn
-        read -rp "  $prompt (y/N): " yn
-        [[ "$yn" =~ ^[Yy]$ ]]
+        echo >&2
     fi
 }
 
@@ -110,7 +119,7 @@ install_dependencies() {
             warn "正在安裝 Bun..."
             brew install oven-sh/bun/bun
         fi
-        ok "Bun"
+        ok "Bun → $(which bun)"
 
         # ngrok
         if ! command -v ngrok &>/dev/null; then
@@ -119,7 +128,7 @@ install_dependencies() {
         fi
         ok "ngrok"
 
-        # Node/npm（Claude Code 需要）
+        # Node/npm
         if ! command -v npm &>/dev/null; then
             warn "正在安裝 Node.js..."
             brew install node
@@ -131,20 +140,19 @@ install_dependencies() {
             warn "正在安裝 Claude Code..."
             npm install -g @anthropic-ai/claude-code
         fi
-        ok "Claude Code"
+        if command -v claude &>/dev/null; then
+            ok "Claude Code"
+        fi
 
-        # expect（macOS 內建）
         ok "expect（macOS 內建）"
 
     elif $IS_LINUX; then
-        # Python
         if ! command -v python3 &>/dev/null; then
             warn "正在安裝 Python..."
             sudo apt-get update -qq && sudo apt-get install -y -qq python3 python3-venv
         fi
         ok "Python $(python3 --version | cut -d' ' -f2)"
 
-        # Bun
         if ! command -v bun &>/dev/null; then
             warn "正在安裝 Bun..."
             curl -fsSL https://bun.sh/install | bash
@@ -152,7 +160,6 @@ install_dependencies() {
         fi
         ok "Bun"
 
-        # ngrok
         if ! command -v ngrok &>/dev/null; then
             warn "正在安裝 ngrok..."
             curl -fsSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
@@ -161,20 +168,16 @@ install_dependencies() {
         fi
         ok "ngrok"
 
-        # expect
         if ! command -v expect &>/dev/null; then
             warn "正在安裝 expect..."
             sudo apt-get install -y -qq expect
         fi
         ok "expect"
 
-        # Claude Code
         if ! command -v claude &>/dev/null; then
             if command -v npm &>/dev/null; then
                 warn "正在安裝 Claude Code..."
                 npm install -g @anthropic-ai/claude-code
-            else
-                warn "npm 未安裝，跳過 Claude Code（請手動安裝）"
             fi
         fi
         if command -v claude &>/dev/null; then
@@ -186,45 +189,52 @@ install_dependencies() {
 # ── 2. 收集密鑰 ──────────────────────────────────────
 
 collect_credentials() {
-    step "收集設定資訊"
+    # 已從 .env 載入就跳過
+    if [[ -n "${LINE_TOKEN:-}" && -n "${LINE_SECRET:-}" && -n "${NGROK_AUTHTOKEN:-}" && -n "${NGROK_DOMAIN:-}" ]]; then
+        step "密鑰已從 .env 載入"
+        return
+    fi
 
-    echo -e "  ${DIM}需要以下資訊（顧問應已事先準備好）：${RESET}"
-    echo -e "  ${DIM}  • LINE Channel Access Token + Secret${RESET}"
-    echo -e "  ${DIM}  • ngrok Authtoken + 固定域名${RESET}"
+    step "收集設定資訊"
+    echo -e "  ${DIM}提示：也可以先填 .env 檔再跑 install.sh，就不用在這裡輸入${RESET}"
+    echo -e "  ${DIM}  cp .env.template .env && nano .env${RESET}"
     echo ""
 
-    # LINE
-    export LINE_TOKEN
-    LINE_TOKEN="$(ask_secret "LINE Channel Access Token")"
-    if [[ -z "$LINE_TOKEN" ]]; then
-        err "LINE Token 為必填"; exit 1
+    if [[ -z "${LINE_TOKEN:-}" ]]; then
+        export LINE_TOKEN
+        LINE_TOKEN="$(ask_secret "LINE Channel Access Token")"
+        [[ -z "$LINE_TOKEN" ]] && { err "LINE Token 為必填"; exit 1; }
+        ok "LINE Token: ...${LINE_TOKEN: -8}"
     fi
-    ok "LINE Token: ...${LINE_TOKEN: -8}"
 
-    export LINE_SECRET
-    LINE_SECRET="$(ask_secret "LINE Channel Secret")"
-    if [[ -z "$LINE_SECRET" ]]; then
-        err "LINE Secret 為必填"; exit 1
+    if [[ -z "${LINE_SECRET:-}" ]]; then
+        export LINE_SECRET
+        LINE_SECRET="$(ask_secret "LINE Channel Secret")"
+        [[ -z "$LINE_SECRET" ]] && { err "LINE Secret 為必填"; exit 1; }
+        ok "LINE Secret: ...${LINE_SECRET: -6}"
     fi
-    ok "LINE Secret: ...${LINE_SECRET: -6}"
 
-    # ngrok
-    export NGROK_AUTHTOKEN
-    NGROK_AUTHTOKEN="$(ask_secret "ngrok Authtoken")"
-    if [[ -z "$NGROK_AUTHTOKEN" ]]; then
-        err "ngrok Authtoken 為必填"; exit 1
+    if [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then
+        export NGROK_AUTHTOKEN
+        NGROK_AUTHTOKEN="$(ask_secret "ngrok Authtoken")"
+        [[ -z "$NGROK_AUTHTOKEN" ]] && { err "ngrok Authtoken 為必填"; exit 1; }
     fi
-    ngrok config add-authtoken "$NGROK_AUTHTOKEN" 2>/dev/null
-    ok "ngrok Authtoken 已設定"
 
-    export NGROK_DOMAIN
-    NGROK_DOMAIN="$(ask_text "ngrok 固定域名（例：xxx-yyy.ngrok-free.dev）")"
-    if [[ -z "$NGROK_DOMAIN" ]]; then
-        err "ngrok 域名為必填"; exit 1
+    if [[ -z "${NGROK_DOMAIN:-}" ]]; then
+        export NGROK_DOMAIN
+        NGROK_DOMAIN="$(ask_text "ngrok 固定域名（例：xxx-yyy.ngrok-free.dev）")"
+        [[ -z "$NGROK_DOMAIN" ]] && { err "ngrok 域名為必填"; exit 1; }
     fi
+
+    # 清理域名格式
     NGROK_DOMAIN="${NGROK_DOMAIN#https://}"
     NGROK_DOMAIN="${NGROK_DOMAIN#http://}"
     NGROK_DOMAIN="${NGROK_DOMAIN%/}"
+    export NGROK_DOMAIN
+
+    # 設定 ngrok authtoken
+    ngrok config add-authtoken "$NGROK_AUTHTOKEN" 2>/dev/null
+    ok "ngrok Authtoken 已設定"
     ok "ngrok 域名：$NGROK_DOMAIN"
 }
 
@@ -245,8 +255,15 @@ setup_autostart() {
         local label="com.sme-ai-kit.daemon"
         local plist_dir="$HOME/Library/LaunchAgents"
         local plist_path="$plist_dir/$label.plist"
-        local bun_path
-        bun_path="$(dirname "$(which bun)")"
+
+        # 組合 PATH（確保 brew/bun/node 都找得到）
+        local extra_path="/usr/local/bin:/opt/homebrew/bin:$HOME/.bun/bin"
+        if command -v bun &>/dev/null; then
+            extra_path="$(dirname "$(which bun)"):$extra_path"
+        fi
+        if command -v node &>/dev/null; then
+            extra_path="$(dirname "$(which node)"):$extra_path"
+        fi
 
         mkdir -p "$plist_dir"
 
@@ -274,7 +291,7 @@ setup_autostart() {
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$HOME/.bun/bin:$bun_path</string>
+        <string>$extra_path:/usr/bin:/bin</string>
     </dict>
 </dict>
 </plist>
@@ -286,14 +303,11 @@ PLIST
         warn "建議：系統設定 → 電池 → 永不休眠"
 
     elif $IS_WSL; then
-        # WSL: 用 crontab @reboot
         local cron_line="@reboot cd $ROOT && ./start.sh >> $ROOT/data/daemon.log 2>&1"
         (crontab -l 2>/dev/null | grep -v "sme-ai-kit"; echo "$cron_line") | crontab -
         ok "crontab @reboot 已設定"
-        warn "注意：WSL 重啟後需要手動啟動或設定 Windows Task Scheduler"
 
     elif $IS_LINUX; then
-        # systemd user service
         local service_dir="$HOME/.config/systemd/user"
         mkdir -p "$service_dir"
 
@@ -316,7 +330,7 @@ SERVICE
 
         systemctl --user daemon-reload
         systemctl --user enable sme-ai-kit.service
-        ok "systemd user service 已設定（開機自動啟動）"
+        ok "systemd user service 已設定"
     fi
 }
 
@@ -336,10 +350,11 @@ main() {
         echo -e "  ${DIM}系統：Linux${RESET}"
     fi
 
-    install_dependencies   # 1. 系統依賴
-    collect_credentials    # 2. 密鑰
-    run_install_py         # 3. 核心安裝
-    setup_autostart        # 4. 開機自啟
+    load_env || true          # 1. 嘗試讀 .env
+    install_dependencies      # 2. 系統依賴
+    collect_credentials       # 3. 密鑰（.env 有就跳過）
+    run_install_py            # 4. 核心安裝
+    setup_autostart           # 5. 開機自啟
 
     notify "安裝完成！"
 
