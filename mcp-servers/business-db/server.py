@@ -408,6 +408,7 @@ def create_task(
     priority: str = "normal",
     category: str = "general",
     tags: str = "",
+    business_unit: str = "",
     due_date: str = "",
     parent_task_id: int = 0,
     created_by: str = "",
@@ -421,6 +422,7 @@ def create_task(
         priority: 優先級 — urgent | normal | low
         category: 分類（如 general, production, content, design, delivery, meeting, admin, rock）
         tags: 標籤（逗號分隔，可多標籤，如 q2-goal,urgent,客戶A相關）
+        business_unit: 所屬事業體（如 product, design, content），留空=不分
         due_date: 截止日期（YYYY-MM-DD）
         parent_task_id: 父任務 ID（建立子任務時用，0=獨立任務）
         created_by: 建立者
@@ -437,8 +439,8 @@ def create_task(
                 return f"ERROR: 找不到父任務 #{parent_task_id}"
 
         cursor = db.execute(
-            "INSERT INTO tasks (title, description, assignee, priority, category, tags, due_date, parent_task_id, created_by) VALUES (?,?,?,?,?,?,?,?,?)",
-            (title, description or None, assignee or None, priority, category, tags or None, due_date or None, parent_task_id or None, created_by or None),
+            "INSERT INTO tasks (title, description, assignee, priority, category, tags, business_unit, due_date, parent_task_id, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (title, description or None, assignee or None, priority, category, tags or None, business_unit or None, due_date or None, parent_task_id or None, created_by or None),
         )
         task_id = cursor.lastrowid
         db.execute(
@@ -513,19 +515,20 @@ def update_task(
 
 
 @mcp.tool()
-def list_tasks(status: str = "", assignee: str = "", category: str = "", parent_task_id: int = 0, limit: int = 20) -> str:
+def list_tasks(status: str = "", assignee: str = "", category: str = "", business_unit: str = "", parent_task_id: int = 0, limit: int = 20) -> str:
     """列出任務。
 
     Args:
         status: 篩選狀態（pending, in_progress, done, cancelled），空白=全部
         assignee: 篩選指派對象
         category: 篩選分類
+        business_unit: 篩選事業體（留空=全部）
         parent_task_id: 列出指定父任務的子任務（0=列出頂層任務）
         limit: 最多顯示幾筆
     """
     db = get_db()
     try:
-        query = "SELECT id, title, assignee, status, priority, category, due_date, parent_task_id, created_at FROM tasks WHERE 1=1"
+        query = "SELECT id, title, assignee, status, priority, category, business_unit, due_date, parent_task_id, created_at FROM tasks WHERE 1=1"
         params: list = []
         if status:
             query += " AND status = ?"
@@ -536,6 +539,9 @@ def list_tasks(status: str = "", assignee: str = "", category: str = "", parent_
         if category:
             query += " AND category = ?"
             params.append(category)
+        if business_unit:
+            query += " AND business_unit = ?"
+            params.append(business_unit)
         if parent_task_id:
             query += " AND parent_task_id = ?"
             params.append(parent_task_id)
@@ -1219,6 +1225,7 @@ def record_transaction(
     related_customer_id: int = 0,
     related_order_id: int = 0,
     related_invoice: str = "",
+    business_unit: str = "",
     payment_status: str = "paid",
     due_date: str = "",
     recorded_by: str = "",
@@ -1234,6 +1241,7 @@ def record_transaction(
         related_customer_id: 關聯客戶 ID（可選）
         related_order_id: 關聯訂單 ID（可選，用於追蹤預收款或訂單付款）
         related_invoice: 關聯發票號碼（可選）
+        business_unit: 所屬事業體（如 product, design, content），留空=不分
         payment_status: 付款狀態 — paid（已付）| pending（待收/待付）| overdue（逾期）
         due_date: 帳期到期日（YYYY-MM-DD），B2B 應收應付用
         recorded_by: 記錄者
@@ -1265,11 +1273,11 @@ def record_transaction(
 
         cursor = db.execute(
             """INSERT INTO transactions (type, amount, category, description, transaction_date,
-               related_customer_id, related_order_id, related_invoice, payment_status, due_date, paid_amount, recorded_by)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+               related_customer_id, related_order_id, related_invoice, business_unit, payment_status, due_date, paid_amount, recorded_by)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (type, amount, category, description or None, transaction_date,
              related_customer_id or None, related_order_id or None, related_invoice or None,
-             payment_status, due_date or None, paid, recorded_by or None),
+             business_unit or None, payment_status, due_date or None, paid, recorded_by or None),
         )
         txn_id = cursor.lastrowid
         db.execute(
@@ -1292,6 +1300,7 @@ def list_transactions(
     end_date: str = "",
     type: str = "",
     category: str = "",
+    business_unit: str = "",
     limit: int = 30,
 ) -> str:
     """查詢收支記錄。
@@ -1301,6 +1310,7 @@ def list_transactions(
         end_date: 結束日期（YYYY-MM-DD），空白=今天
         type: 篩選類型 — income | expense，空白=全部
         category: 篩選分類，空白=全部
+        business_unit: 篩選事業體（留空=全部）
         limit: 最多顯示幾筆
     """
     if not start_date:
@@ -1319,6 +1329,9 @@ def list_transactions(
         if category:
             query += " AND category = ?"
             params.append(category)
+        if business_unit:
+            query += " AND business_unit = ?"
+            params.append(business_unit)
 
         query += " ORDER BY transaction_date DESC, id DESC LIMIT ?"
         params.append(limit)
@@ -1342,35 +1355,44 @@ def list_transactions(
 
 
 @mcp.tool()
-def monthly_summary(year_month: str = "") -> str:
+def monthly_summary(year_month: str = "", business_unit: str = "") -> str:
     """月度收支彙總。
 
     Args:
         year_month: 年月（YYYY-MM），空白=本月
+        business_unit: 篩選事業體（留空=全部合計）
     """
     if not year_month:
         year_month = _now()[:7]
 
     db = get_db()
     try:
+        bu_filter = ""
+        params: list = [f"{year_month}%"]
+        if business_unit:
+            bu_filter = " AND business_unit = ?"
+            params.append(business_unit)
+
         rows = db.execute(
-            """SELECT type, category, SUM(amount) as total, COUNT(*) as count
+            f"""SELECT type, category, SUM(amount) as total, COUNT(*) as count
                FROM transactions
-               WHERE transaction_date LIKE ?
+               WHERE transaction_date LIKE ?{bu_filter}
                GROUP BY type, category
                ORDER BY type, total DESC""",
-            (f"{year_month}%",),
+            params,
         ).fetchall()
 
         if not rows:
-            return f"{year_month} 沒有收支記錄。"
+            bu_label = f"（{business_unit}）" if business_unit else ""
+            return f"{year_month}{bu_label} 沒有收支記錄。"
 
         income_rows = [r for r in rows if r["type"] == "income"]
         expense_rows = [r for r in rows if r["type"] == "expense"]
         total_income = sum(r["total"] for r in income_rows)
         total_expense = sum(r["total"] for r in expense_rows)
 
-        lines = [f"## 📊 {year_month} 月度收支彙總"]
+        bu_label = f"（{business_unit}）" if business_unit else ""
+        lines = [f"## 📊 {year_month} 月度收支彙總{bu_label}"]
         lines.append(f"**收入**: NT${total_income:,.0f} | **支出**: NT${total_expense:,.0f} | **淨額**: NT${total_income - total_expense:,.0f}\n")
 
         if income_rows:
@@ -1382,6 +1404,28 @@ def monthly_summary(year_month: str = "") -> str:
             lines.append("\n### 💸 支出明細")
             for r in expense_rows:
                 lines.append(f"- [{r['category'] or '未分類'}] NT${r['total']:,.0f}（{r['count']} 筆）")
+
+        # 如果沒指定 business_unit 且有多個事業體，附加分類摘要
+        if not business_unit:
+            bu_rows = db.execute(
+                f"""SELECT business_unit, type, SUM(amount) as total
+                    FROM transactions
+                    WHERE transaction_date LIKE ? AND business_unit IS NOT NULL
+                    GROUP BY business_unit, type
+                    ORDER BY business_unit""",
+                (f"{year_month}%",),
+            ).fetchall()
+            if bu_rows:
+                lines.append("\n### 📂 事業體分類")
+                bus = {}
+                for r in bu_rows:
+                    bu = r["business_unit"]
+                    if bu not in bus:
+                        bus[bu] = {"income": 0, "expense": 0}
+                    bus[bu][r["type"]] = r["total"]
+                for bu, vals in bus.items():
+                    net = vals["income"] - vals["expense"]
+                    lines.append(f"- **{bu}**: 收入 NT${vals['income']:,.0f} / 支出 NT${vals['expense']:,.0f} / 淨額 NT${net:,.0f}")
 
         return "\n".join(lines)
     finally:
@@ -1597,13 +1641,14 @@ def record_payment(transaction_id: int, amount: float, notes: str = "") -> str:
 # ============================================================
 
 @mcp.tool()
-def create_order(customer_id: int, items_json: str, notes: str = "", created_by: str = "") -> str:
+def create_order(customer_id: int, items_json: str, notes: str = "", business_unit: str = "", created_by: str = "") -> str:
     """建立訂單。
 
     Args:
         customer_id: 客戶 ID
         items_json: 訂單品項 JSON，格式：[{"sku":"A200","name":"特殊零件","qty":10,"price":350}]
         notes: 備註
+        business_unit: 所屬事業體（如 product, design, content），留空=不分
         created_by: 建立者
     """
     db = get_db()
@@ -1622,8 +1667,8 @@ def create_order(customer_id: int, items_json: str, notes: str = "", created_by:
         total = sum(item.get("qty", 0) * item.get("price", 0) for item in items)
 
         cursor = db.execute(
-            "INSERT INTO orders (customer_id, total_amount, items, notes, created_by) VALUES (?,?,?,?,?)",
-            (customer_id, total, json.dumps(items, ensure_ascii=False), notes or None, created_by or None),
+            "INSERT INTO orders (customer_id, total_amount, items, business_unit, notes, created_by) VALUES (?,?,?,?,?,?)",
+            (customer_id, total, json.dumps(items, ensure_ascii=False), business_unit or None, notes or None, created_by or None),
         )
         order_id = cursor.lastrowid
         db.execute(
@@ -1752,12 +1797,13 @@ def update_order(order_id: int, status: str = "", notes: str = "", driver: str =
 
 
 @mcp.tool()
-def list_orders(customer_id: int = 0, status: str = "", limit: int = 20) -> str:
+def list_orders(customer_id: int = 0, status: str = "", business_unit: str = "", limit: int = 20) -> str:
     """列出訂單。
 
     Args:
         customer_id: 篩選客戶（0=全部）
         status: 篩選狀態（空白=全部）
+        business_unit: 篩選事業體（留空=全部）
         limit: 最多顯示幾筆
     """
     db = get_db()
@@ -1770,6 +1816,9 @@ def list_orders(customer_id: int = 0, status: str = "", limit: int = 20) -> str:
         if status:
             query += " AND o.status = ?"
             params.append(status)
+        if business_unit:
+            query += " AND o.business_unit = ?"
+            params.append(business_unit)
         query += " ORDER BY o.created_at DESC LIMIT ?"
         params.append(limit)
 
