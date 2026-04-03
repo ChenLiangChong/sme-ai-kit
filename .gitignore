@@ -1,0 +1,29 @@
+# 資料庫
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# 使用者資料
+data/media/
+data/*.log
+
+# 密鑰
+.mcp.json
+.env
+
+# 打包產物
+dist/
+
+# 客戶資產（含圖片等敏感資料）
+docs/*-assets/
+
+# 執行環境
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+bun.lockb
+
+# OS
+.DS_Store
+Thumbs.db
