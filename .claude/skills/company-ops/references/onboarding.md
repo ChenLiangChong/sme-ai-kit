@@ -38,9 +38,8 @@ register_employee(name, role, department, permissions, phone)
 1. Channel 收到訊息 → Claude 觸發 line-comms 流程
 2. `lookup_employee(訊息中的名字)` 搜尋
 3. 找到且 line_user_id 為空 → 詢問確認：「你是 {部門} 的 {名字} 嗎？」
-4. 員工確認 → 用 `register_employee` 更新 LINE 綁定：
-   `register_employee(name=姓名, line_user_id=新的LINE_ID, role=原角色, department=原部門, permissions=原權限)`
-   ⚠️ 注意：必須帶上所有原有欄位值（從 `lookup_employee` 的回傳值取得），避免被覆蓋為預設值
+4. 員工確認 → 用 `update_employee` 綁定 LINE ID：
+   `update_employee(employee_id=員工ID, line_user_id='Uxxxx')`
 5. 回覆：「綁定成功！」→ 發送歡迎訊息
 
 ### 同名處理

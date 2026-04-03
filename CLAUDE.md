@@ -22,11 +22,17 @@
 1. 從 `<channel>` tag 的 `user_id` 取得 LINE User ID
 2. 呼叫 `lookup_employee(user_id)` — 是員工嗎？
 3. 不是員工 → 呼叫 `find_customer(user_id)` — 是客戶嗎？
-4. 都不是 → **不要回覆對方**。改為通知老闆：
+4. 都不是 → 嘗試用 LINE 暱稱比對未綁定的員工：
+   - `lookup_employee(暱稱)` — 用 `<channel>` tag 的 `user` 欄位
+   - 如果找到一位 `line_user_id` 為空的員工 → 回覆對方確認：「你是 {部門} 的 {姓名} 嗎？」
+   - 對方確認 → `update_employee(employee_id, line_user_id=user_id)` 完成綁定
+   - 找不到或多人同名 → 走陌生人流程（下方）
+5. 陌生人處理 → **不要回覆對方**。改為通知老闆：
    ```
    reply(chat_id=老闆的LINE_user_id, text="有人傳了訊息：\n暱稱：{user}\n內容：{content}\nUser ID: {user_id}")
    ```
    然後 `mark_read(chat_id=user_id)`
+6. 老闆回覆「這是 XXX」→ 綁定到對應的員工或客戶記錄
 
 老闆的 LINE user_id：查 `employees` 表 `role='boss'`。
 
@@ -61,10 +67,13 @@
 收到使用者第一句話時，先執行：
 
 1. `get_context_summary(scope='full')` — 系統狀態
-2. `low_stock_alerts()` — 庫存警報
-3. `check_overdue()` — 逾期帳款
-4. 檢查 `daily_snapshots` 表有沒有今天的紀錄 → 沒有就 `save_daily_snapshot()`
-5. 簡短報告後處理使用者的問題
+2. **判斷是否為首次啟動**：
+   - 如果員工數 = 0 → 這是全新系統，自動載入 knowledge-capture 的「系統導入標準流程」（Step 1-9），引導老闆完成初始設定
+   - 如果員工數 > 0 → 正常啟動，繼續下面的步驟
+3. `low_stock_alerts()` — 庫存警報
+4. `check_overdue()` — 逾期帳款
+5. 檢查 `daily_snapshots` 表有沒有今天的紀錄 → 沒有就 `save_daily_snapshot()`
+6. 簡短報告後處理使用者的問題
 
 ## 反捏造原則
 
