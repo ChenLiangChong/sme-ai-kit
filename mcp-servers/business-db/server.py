@@ -812,10 +812,11 @@ def search_line_messages(
         arrow = "→" if m["direction"] == "outbound" else "←"
         src = ""
         if m["source_type"] == "group" and m["group_id"]:
-            src = f" [群組]"
+            src = f" [群組 {m['group_id']}]"
         name = m["user_name"] or m["user_id"][:8]
+        chat_id = m["group_id"] if m["source_type"] == "group" and m["group_id"] else m["user_id"]
         lines.append(
-            f"- {arrow} [{m['created_at']}] **{name}**{src}: {m['content'][:200]}"
+            f"- {arrow} [{m['created_at']}] **{name}**{src} (chat_id={chat_id}): {m['content'][:200]}"
         )
     return "\n".join(lines)
 
