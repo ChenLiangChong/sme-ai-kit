@@ -385,163 +385,186 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 // 連接 Claude Code
 await mcp.connect(new StdioServerTransport())
 
+// === 偵測 port 是否已被佔用 ===
+
+async function isPortInUse(port: number): Promise<boolean> {
+  try {
+    const res = await fetch(`http://localhost:${port}/`, { signal: AbortSignal.timeout(2000) })
+    const text = await res.text()
+    return text.includes('LINE Channel OK')
+  } catch {
+    return false
+  }
+}
+
+const portAlreadyInUse = await isPortInUse(WEBHOOK_PORT)
+
 // === Webhook HTTP Server ===
 
 const profileCache = new Map<string, string>()
 
-Bun.serve({
-  port: WEBHOOK_PORT,
-  hostname: '0.0.0.0',
-  async fetch(req) {
-    const url = new URL(req.url)
+if (portAlreadyInUse) {
+  process.stderr.write(`line-channel: port ${WEBHOOK_PORT} 已有另一個 instance 在跑，共用現有 webhook server\n`)
+} else {
+  Bun.serve({
+    port: WEBHOOK_PORT,
+    hostname: '0.0.0.0',
+    async fetch(req) {
+      const url = new URL(req.url)
 
-    // Health check
-    if (req.method === 'GET') {
-      return new Response('LINE Channel OK')
-    }
+      // Health check
+      if (req.method === 'GET') {
+        return new Response('LINE Channel OK')
+      }
 
-    if (req.method !== 'POST' || (url.pathname !== '/' && url.pathname !== '/webhook')) {
-      return new Response('404', { status: 404 })
-    }
+      if (req.method !== 'POST' || (url.pathname !== '/' && url.pathname !== '/webhook')) {
+        return new Response('404', { status: 404 })
+      }
 
-    const body = await req.text()
-    const signature = req.headers.get('x-line-signature') ?? ''
+      const body = await req.text()
+      const signature = req.headers.get('x-line-signature') ?? ''
 
-    if (!verifySignature(body, signature)) {
-      return new Response('invalid signature', { status: 401 })
-    }
+      if (!verifySignature(body, signature)) {
+        return new Response('invalid signature', { status: 401 })
+      }
 
-    const payload = JSON.parse(body)
+      const payload = JSON.parse(body)
 
-    for (const event of payload.events ?? []) {
-      const userId = event.source?.userId ?? ''
-      const chatId = event.source?.groupId ?? event.source?.roomId ?? userId
-      const sourceType = event.source?.type ?? 'user'  // user | group | room
+      for (const event of payload.events ?? []) {
+        const userId = event.source?.userId ?? ''
+        const chatId = event.source?.groupId ?? event.source?.roomId ?? userId
+        const sourceType = event.source?.type ?? 'user'  // user | group | room
 
-      // 群組訊息：只處理 @mention
-      if (sourceType === 'group' || sourceType === 'room') {
-        if (event.type === 'message' && event.message?.type === 'text') {
-          const mention = event.message.mention
-          if (!mention?.mentionees?.length) continue  // 沒 @，跳過
-          // 去掉 @mention 文字
-          let text = event.message.text as string
-          for (const m of [...mention.mentionees].sort((a: any, b: any) => (b.index ?? 0) - (a.index ?? 0))) {
-            text = text.slice(0, m.index ?? 0) + text.slice((m.index ?? 0) + (m.length ?? 0))
+        // 群組訊息：只處理 @mention
+        if (sourceType === 'group' || sourceType === 'room') {
+          if (event.type === 'message' && event.message?.type === 'text') {
+            const mention = event.message.mention
+            if (!mention?.mentionees?.length) continue  // 沒 @，跳過
+            // 去掉 @mention 文字
+            let text = event.message.text as string
+            for (const m of [...mention.mentionees].sort((a: any, b: any) => (b.index ?? 0) - (a.index ?? 0))) {
+              text = text.slice(0, m.index ?? 0) + text.slice((m.index ?? 0) + (m.length ?? 0))
+            }
+            event.message.text = text.trim()
+          } else {
+            continue  // 群組中非文字或沒 @，跳過
           }
-          event.message.text = text.trim()
-        } else {
-          continue  // 群組中非文字或沒 @，跳過
+        }
+
+        // Access control：只推送允許名單中的用戶
+        const access = loadAccess()
+        if (access.allowFrom.length > 0 && !access.allowFrom.includes(userId)) {
+          continue  // 不在允許清單，靜默忽略
+        }
+
+        // 取得用戶暱稱（快取）
+        let displayName = profileCache.get(userId)
+        if (!displayName) {
+          const profile = await lineGetProfile(userId)
+          displayName = profile.displayName
+          profileCache.set(userId, displayName)
+        }
+
+        if (event.type === 'message') {
+          const msg = event.message
+          let content = ''
+
+          switch (msg.type) {
+            case 'text':
+              content = msg.text ?? ''
+              break
+            case 'image': {
+              try {
+                const imgPath = await downloadLineContent(String(msg.id), 'image')
+                content = `[圖片] ${imgPath}`
+              } catch {
+                content = '[圖片] (下載失敗)'
+              }
+              break
+            }
+            case 'video':
+              content = '[影片] (語音/影片辨識需額外 STT 工具，暫不支援)'
+              break
+            case 'audio':
+              content = '[語音] (語音辨識需額外 STT 工具，暫不支援)'
+              break
+            case 'sticker':
+              content = `[貼圖]`
+              break
+            case 'location':
+              content = `[位置: ${msg.title ?? ''} ${msg.address ?? ''}]`
+              break
+            case 'file': {
+              try {
+                const filePath = await downloadLineContent(String(msg.id), 'file', (msg as any).fileName)
+                content = `[檔案] ${filePath} (${(msg as any).fileName ?? '未知檔名'})`
+              } catch {
+                content = `[檔案: ${(msg as any).fileName ?? ''}] (下載失敗)`
+              }
+              break
+            }
+            default:
+              content = `[${msg.type}]`
+          }
+
+          // 寫入 DB（不管 Claude 有沒有處理，訊息都會被記錄）
+          saveMessageToDb(
+            String(msg.id ?? ''), String(userId), String(displayName),
+            String(sourceType), sourceType !== 'user' ? String(chatId) : null,
+            'inbound', content, String(msg.type), 'queued'
+          )
+
+          // 推送進 Claude session
+          process.stderr.write(`line-channel: 推送訊息 from=${displayName} content=${content.slice(0, 50)}\n`)
+          mcp.notification({
+            method: 'notifications/claude/channel',
+            params: {
+              content,
+              meta: {
+                chat_id: String(chatId),
+                message_id: String(msg.id ?? ''),
+                user: String(displayName),
+                user_id: String(userId),
+                source_type: String(sourceType),
+                ts: new Date(event.timestamp ?? Date.now()).toISOString(),
+              },
+            },
+          }).catch(err => {
+            process.stderr.write(`line-channel: notification 失敗: ${err}\n`)
+          })
+        } else if (event.type === 'follow') {
+          await mcp.notification({
+            method: 'notifications/claude/channel',
+            params: {
+              content: `${displayName} 加入追蹤`,
+              meta: {
+                chat_id: String(userId),
+                user: String(displayName),
+                user_id: String(userId),
+                event_type: 'follow',
+              },
+            },
+          })
         }
       }
 
-      // Access control：只推送允許名單中的用戶
-      const access = loadAccess()
-      if (access.allowFrom.length > 0 && !access.allowFrom.includes(userId)) {
-        continue  // 不在允許清單，靜默忽略
-      }
+      return new Response('ok')
+    },
+  })
 
-      // 取得用戶暱稱（快取）
-      let displayName = profileCache.get(userId)
-      if (!displayName) {
-        const profile = await lineGetProfile(userId)
-        displayName = profile.displayName
-        profileCache.set(userId, displayName)
-      }
-
-      if (event.type === 'message') {
-        const msg = event.message
-        let content = ''
-
-        switch (msg.type) {
-          case 'text':
-            content = msg.text ?? ''
-            break
-          case 'image': {
-            try {
-              const imgPath = await downloadLineContent(String(msg.id), 'image')
-              content = `[圖片] ${imgPath}`
-            } catch {
-              content = '[圖片] (下載失敗)'
-            }
-            break
-          }
-          case 'video':
-            content = '[影片] (語音/影片辨識需額外 STT 工具，暫不支援)'
-            break
-          case 'audio':
-            content = '[語音] (語音辨識需額外 STT 工具，暫不支援)'
-            break
-          case 'sticker':
-            content = `[貼圖]`
-            break
-          case 'location':
-            content = `[位置: ${msg.title ?? ''} ${msg.address ?? ''}]`
-            break
-          case 'file': {
-            try {
-              const filePath = await downloadLineContent(String(msg.id), 'file', (msg as any).fileName)
-              content = `[檔案] ${filePath} (${(msg as any).fileName ?? '未知檔名'})`
-            } catch {
-              content = `[檔案: ${(msg as any).fileName ?? ''}] (下載失敗)`
-            }
-            break
-          }
-          default:
-            content = `[${msg.type}]`
-        }
-
-        // 寫入 DB（不管 Claude 有沒有處理，訊息都會被記錄）
-        saveMessageToDb(
-          String(msg.id ?? ''), String(userId), String(displayName),
-          String(sourceType), sourceType !== 'user' ? String(chatId) : null,
-          'inbound', content, String(msg.type), 'queued'
-        )
-
-        // 推送進 Claude session
-        process.stderr.write(`line-channel: 推送訊息 from=${displayName} content=${content.slice(0, 50)}\n`)
-        mcp.notification({
-          method: 'notifications/claude/channel',
-          params: {
-            content,
-            meta: {
-              chat_id: String(chatId),
-              message_id: String(msg.id ?? ''),
-              user: String(displayName),
-              user_id: String(userId),
-              source_type: String(sourceType),
-              ts: new Date(event.timestamp ?? Date.now()).toISOString(),
-            },
-          },
-        }).catch(err => {
-          process.stderr.write(`line-channel: notification 失敗: ${err}\n`)
-        })
-      } else if (event.type === 'follow') {
-        await mcp.notification({
-          method: 'notifications/claude/channel',
-          params: {
-            content: `${displayName} 加入追蹤`,
-            meta: {
-              chat_id: String(userId),
-              user: String(displayName),
-              user_id: String(userId),
-              event_type: 'follow',
-            },
-          },
-        })
-      }
-    }
-
-    return new Response('ok')
-  },
-})
-
-process.stderr.write(`line-channel: webhook 監聽中 http://localhost:${WEBHOOK_PORT}/webhook\n`)
+  process.stderr.write(`line-channel: webhook 監聽中 http://localhost:${WEBHOOK_PORT}/webhook\n`)
+}
 
 // === ngrok 固定域名 + LINE Webhook 自動設定 ===
 
 const NGROK_DOMAIN = process.env.NGROK_DOMAIN ?? 'eddy-unmarked-lakenya.ngrok-free.dev'
 
 async function autoSetupNgrok(): Promise<void> {
+  if (portAlreadyInUse) {
+    process.stderr.write(`line-channel: 跳過 ngrok（已有 instance 在處理）\n`)
+    return
+  }
+
   // 殺掉舊的 ngrok（避免 port 衝突）
   try {
     Bun.spawnSync(['pkill', '-f', 'ngrok'])
