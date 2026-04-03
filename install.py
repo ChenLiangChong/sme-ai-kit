@@ -237,23 +237,9 @@ def ensure_claude_md():
         ok("CLAUDE.md 已存在")
         return
 
-    template = ROOT / "CLAUDE.md.template"
-    if not template.exists():
-        err("CLAUDE.md 和 CLAUDE.md.template 都不存在！")
-        sys.exit(1)
-
-    content = template.read_text(encoding="utf-8")
-    for key, val in {
-        "company_name": "本公司",
-        "boss_title": "老闆",
-        "boss_name": "（待設定）",
-        "industry": "（待設定）",
-        "employee_count": "（待設定）",
-        "business_hours": "（待設定）",
-        "approval_threshold": "5000",
-        "stock_threshold": "10",
-    }.items():
-        content = content.replace(f"{{{{{key}}}}}", val)
+    # CLAUDE.md 應該隨 git repo 一起下載。如果不存在代表 clone 不完整
+    err("CLAUDE.md 不存在！請確認 git clone 完整")
+    sys.exit(1)
 
     claude_md.write_text(content, encoding="utf-8")
     ok("已從 template 生成 CLAUDE.md（首次訪談時更新）")

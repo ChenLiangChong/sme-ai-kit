@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SME-AI-Kit 導入工作坊</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --surface2: #334155;
+    --accent: #38bdf8;
+    --accent2: #818cf8;
+    --green: #4ade80;
+    --yellow: #fbbf24;
+    --red: #f87171;
+    --text: #e2e8f0;
+    --text2: #94a3b8;
+    --border: #475569;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+  }
+
+  .hero {
+    text-align: center;
+    padding: 80px 20px 60px;
+    background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .hero h1 {
+    font-size: 2.8em;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 16px;
+  }
+
+  .hero .subtitle {
+    font-size: 1.3em;
+    color: var(--text2);
+    max-width: 600px;
+    margin: 0 auto 32px;
+  }
+
+  .hero-stats {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    flex-wrap: wrap;
+  }
+
+  .hero-stat {
+    text-align: center;
+  }
+
+  .hero-stat .num {
+    font-size: 2.2em;
+    font-weight: 800;
+    color: var(--accent);
+  }
+
+  .hero-stat .label {
+    font-size: 0.85em;
+    color: var(--text2);
+  }
+
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  section {
+    padding: 60px 0;
+    border-bottom: 1px solid var(--surface2);
+  }
+
+  section:last-child { border-bottom: none; }
+
+  h2 {
+    font-size: 1.8em;
+    margin-bottom: 8px;
+    color: var(--accent);
+  }
+
+  h2 .num {
+    display: inline-block;
+    width: 40px;
+    height: 40px;
+    line-height: 40px;
+    text-align: center;
+    background: var(--accent);
+    color: var(--bg);
+    border-radius: 10px;
+    font-size: 0.7em;
+    font-weight: 800;
+    margin-right: 12px;
+    vertical-align: middle;
+  }
+
+  h3 {
+    font-size: 1.15em;
+    color: var(--text);
+    margin: 28px 0 12px;
+  }
+
+  p, li { color: var(--text); }
+  p { margin-bottom: 12px; }
+
+  .section-desc {
+    color: var(--text2);
+    font-size: 1.05em;
+    margin-bottom: 32px;
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+    margin: 20px 0;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--surface2);
+    border-radius: 12px;
+    padding: 24px;
+  }
+
+  .card.highlight {
+    border-color: var(--accent);
+    background: linear-gradient(135deg, var(--surface), #1e293b);
+  }
+
+  .card h4 {
+    font-size: 1em;
+    margin-bottom: 8px;
+    color: var(--accent);
+  }
+
+  .card p, .card li {
+    font-size: 0.9em;
+    color: var(--text2);
+  }
+
+  .steps {
+    position: relative;
+    padding-left: 32px;
+  }
+
+  .steps::before {
+    content: '';
+    position: absolute;
+    left: 11px;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background: var(--surface2);
+  }
+
+  .step {
+    position: relative;
+    margin-bottom: 28px;
+  }
+
+  .step::before {
+    content: '';
+    position: absolute;
+    left: -27px;
+    top: 8px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+  }
+
+  .step.done::before { background: var(--green); }
+  .step.active::before {
+    background: var(--yellow);
+    box-shadow: 0 0 12px var(--yellow);
+  }
+
+  .step-title {
+    font-weight: 700;
+    font-size: 1.05em;
+    margin-bottom: 4px;
+  }
+
+  .step-detail {
+    color: var(--text2);
+    font-size: 0.9em;
+  }
+
+  .step-time {
+    display: inline-block;
+    background: var(--surface2);
+    color: var(--text2);
+    font-size: 0.75em;
+    padding: 2px 10px;
+    border-radius: 20px;
+    margin-left: 8px;
+  }
+
+  code {
+    background: var(--surface);
+    color: var(--green);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-family: "SF Mono", "Fira Code", monospace;
+  }
+
+  .code-block {
+    background: var(--surface);
+    border: 1px solid var(--surface2);
+    border-radius: 8px;
+    padding: 20px;
+    margin: 16px 0;
+    overflow-x: auto;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 0.9em;
+    line-height: 1.8;
+    color: var(--green);
+  }
+
+  .code-block .comment { color: var(--text2); }
+  .code-block .prompt { color: var(--accent); }
+
+  .table-wrap {
+    overflow-x: auto;
+    margin: 16px 0;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  th, td {
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--surface2);
+    font-size: 0.9em;
+  }
+
+  th {
+    color: var(--text2);
+    font-weight: 600;
+    font-size: 0.8em;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  td { color: var(--text); }
+
+  .tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.8em;
+    font-weight: 600;
+  }
+
+  .tag.green { background: #166534; color: var(--green); }
+  .tag.yellow { background: #713f12; color: var(--yellow); }
+  .tag.blue { background: #1e3a5f; color: var(--accent); }
+  .tag.purple { background: #3b0764; color: var(--accent2); }
+
+  .arch-diagram {
+    background: var(--surface);
+    border: 1px solid var(--surface2);
+    border-radius: 12px;
+    padding: 32px;
+    margin: 24px 0;
+    text-align: center;
+    font-family: "SF Mono", monospace;
+    font-size: 0.85em;
+    line-height: 2;
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  .checklist {
+    list-style: none;
+    margin: 16px 0;
+  }
+
+  .checklist li {
+    padding: 8px 0;
+    padding-left: 28px;
+    position: relative;
+    color: var(--text2);
+  }
+
+  .checklist li::before {
+    content: '☐';
+    position: absolute;
+    left: 0;
+    font-size: 1.1em;
+  }
+
+  .flow-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 12px 0;
+    flex-wrap: wrap;
+  }
+
+  .flow-box {
+    background: var(--surface);
+    border: 1px solid var(--surface2);
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 0.9em;
+    white-space: nowrap;
+  }
+
+  .flow-box.active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .flow-arrow {
+    color: var(--text2);
+    font-size: 1.2em;
+  }
+
+  .warning {
+    background: #451a03;
+    border: 1px solid #92400e;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 16px 0;
+    font-size: 0.9em;
+    color: var(--yellow);
+  }
+
+  .info {
+    background: #0c1929;
+    border: 1px solid #1e3a5f;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 16px 0;
+    font-size: 0.9em;
+    color: var(--accent);
+  }
+
+  .cost-table td:last-child {
+    font-weight: 700;
+    color: var(--green);
+  }
+
+  footer {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text2);
+    font-size: 0.85em;
+  }
+
+  @media (max-width: 600px) {
+    .hero h1 { font-size: 2em; }
+    .hero-stats { gap: 20px; }
+    .card-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ HERO ============ -->
+<div class="hero">
+  <h1>SME-AI-Kit</h1>
+  <p class="subtitle">台灣中小企業 AI 營運中樞<br>導入工作坊</p>
+  <div class="hero-stats">
+    <div class="hero-stat">
+      <div class="num">38</div>
+      <div class="label">MCP Tools</div>
+    </div>
+    <div class="hero-stat">
+      <div class="num">35</div>
+      <div class="label">Skill Modules</div>
+    </div>
+    <div class="hero-stat">
+      <div class="num">1</div>
+      <div class="label">安裝指令</div>
+    </div>
+    <div class="hero-stat">
+      <div class="num">$100</div>
+      <div class="label">/月 全公司</div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ============ 課程大綱 ============ -->
+<section>
+  <h2><span class="num">0</span>課程大綱</h2>
+  <p class="section-desc">整個工作坊約 90 分鐘，帶你從零到能用。</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>階段</th><th>內容</th><th>時間</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>觀念說明</td><td>這套東西是什麼、怎麼運作、要花多少錢</td><td>15 min</td></tr>
+        <tr><td>事前準備</td><td>LINE OA 設定、ngrok 帳號</td><td>15 min</td></tr>
+        <tr><td>安裝</td><td><code>git clone</code> + <code>bash install.sh</code></td><td>15 min</td></tr>
+        <tr><td>首次訪談</td><td>Claude 引導設定公司資訊、員工、商品</td><td>30 min</td></tr>
+        <tr><td>實際操作</td><td>LINE 收發、任務管理、記帳、庫存</td><td>15 min</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 這是什麼 ============ -->
+<section>
+  <h2><span class="num">1</span>這是什麼</h2>
+  <p class="section-desc">用 Claude 當你的數位管家 — 管任務、管庫存、管帳、管客戶、管 LINE，全部用講的。</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <h4>老闆用 Claude Desktop</h4>
+      <p>直接下指令、看報表、做決策。支援 Cowork 協作和 Dispatch 手機遙控。</p>
+    </div>
+    <div class="card">
+      <h4>員工用 LINE</h4>
+      <p>傳 LINE 就能查庫存、回報進度、提交報銷。Claude 背景常駐即時處理。</p>
+    </div>
+    <div class="card">
+      <h4>資料存在你電腦</h4>
+      <p>SQLite 本地資料庫，不經過任何第三方伺服器。資料 100% 在你手上。</p>
+    </div>
+  </div>
+
+  <div class="arch-diagram">
+┌─────────────────────────────────────────────────┐
+│                   Claude Max                     │
+├─────────────────────┬───────────────────────────┤
+│    Claude Code      │     Claude Desktop        │
+│    (背景 daemon)    │     (老闆直接用)          │
+│    + LINE Channel   │     + Cowork / Dispatch   │
+├─────────────────────┴───────────────────────────┤
+│               共用 SQLite DB                     │
+│         business-db MCP (38 tools)               │
+├─────────────────────────────────────────────────┤
+│    Skills: company-ops (12) + social-media (23)  │
+└─────────────────────────────────────────────────┘</div>
+
+  <h3>每月成本</h3>
+  <div class="table-wrap">
+    <table class="cost-table">
+      <thead><tr><th>項目</th><th>費用</th></tr></thead>
+      <tbody>
+        <tr><td>Claude Max 訂閱（老闆 + 全公司共用）</td><td>NT$3,200/月</td></tr>
+        <tr><td>LINE Official Account</td><td>免費</td></tr>
+        <tr><td>ngrok（固定域名）</td><td>免費</td></tr>
+        <tr><td><strong>總計</strong></td><td><strong>NT$3,200/月</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 事前準備 ============ -->
+<section>
+  <h2><span class="num">2</span>事前準備</h2>
+  <p class="section-desc">課前需要完成以下準備。建議講師協助學員逐一設定。</p>
+
+  <h3>A. LINE Official Account + Messaging API</h3>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-title">建立 LINE Business Account</div>
+      <div class="step-detail">到 <code>manager.line.biz</code> 建立帳號，選免費方案即可。</div>
+    </div>
+    <div class="step">
+      <div class="step-title">進入 LINE Developers Console</div>
+      <div class="step-detail">到 <code>developers.line.biz/console/</code>，建立 Provider。</div>
+    </div>
+    <div class="step">
+      <div class="step-title">建立 Messaging API Channel</div>
+      <div class="step-detail">在 Provider 下建立新的 Messaging API Channel。填入公司名稱、描述。</div>
+    </div>
+    <div class="step">
+      <div class="step-title">取得 Channel Access Token</div>
+      <div class="step-detail">Channel 設定頁 → Messaging API → Issue Channel Access Token（長效）。<br><strong>複製保存，安裝時要用。</strong></div>
+    </div>
+    <div class="step">
+      <div class="step-title">取得 Channel Secret</div>
+      <div class="step-detail">Channel 設定頁 → Basic settings → Channel Secret。<br><strong>複製保存，安裝時要用。</strong></div>
+    </div>
+    <div class="step">
+      <div class="step-title">開啟群組功能</div>
+      <div class="step-detail">Messaging API → Allow bot to join groups and multi-person chats → <strong>Enabled</strong></div>
+    </div>
+  </div>
+
+  <h3>B. ngrok 帳號</h3>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-title">註冊 ngrok</div>
+      <div class="step-detail">到 <code>ngrok.com</code> 註冊免費帳號。</div>
+    </div>
+    <div class="step">
+      <div class="step-title">取得 Authtoken</div>
+      <div class="step-detail">Dashboard → Your Authtoken → 複製。<br><strong>安裝時要用。</strong></div>
+    </div>
+    <div class="step">
+      <div class="step-title">取得固定域名</div>
+      <div class="step-detail">Dashboard → Domains → 建立一個免費的固定域名（例：<code>xxx-yyy.ngrok-free.dev</code>）。<br><strong>安裝時要用。</strong></div>
+    </div>
+  </div>
+
+  <h3>C. Claude 帳號</h3>
+  <div class="steps">
+    <div class="step">
+      <div class="step-title">訂閱 Claude Max</div>
+      <div class="step-detail">到 <code>claude.ai</code> 註冊並訂閱 Max 方案（$100 USD/月）。</div>
+    </div>
+  </div>
+
+  <div class="info">
+    <strong>課前檢查清單</strong> — 確認每位學員手上有以下四樣東西：<br>
+    ☐ LINE Channel Access Token<br>
+    ☐ LINE Channel Secret<br>
+    ☐ ngrok Authtoken<br>
+    ☐ ngrok 固定域名
+  </div>
+</section>
+
+<!-- ============ 安裝 ============ -->
+<section>
+  <h2><span class="num">3</span>安裝</h2>
+  <p class="section-desc">一行指令裝完。支援 macOS 和 Windows (WSL)。</p>
+
+  <div class="code-block">
+<span class="comment"># 下載</span>
+<span class="prompt">$</span> git clone https://github.com/ChenLiangChong/sme-ai-kit.git
+<span class="prompt">$</span> cd sme-ai-kit
+
+<span class="comment"># 安裝（全自動）</span>
+<span class="prompt">$</span> bash install.sh
+  </div>
+
+  <h3>install.sh 會做什麼</h3>
+  <div class="steps">
+    <div class="step done">
+      <div class="step-title">檢查 & 安裝系統依賴 <span class="step-time">自動</span></div>
+      <div class="step-detail">Python、Bun、ngrok、expect、Claude Code — 缺的自動裝（Mac 用 brew）</div>
+    </div>
+    <div class="step active">
+      <div class="step-title">收集設定 <span class="step-time">互動</span></div>
+      <div class="step-detail">macOS 跳出原生對話框、Linux 在 terminal 輸入。貼上四組密鑰。</div>
+    </div>
+    <div class="step done">
+      <div class="step-title">建立 Python 虛擬環境 <span class="step-time">自動</span></div>
+      <div class="step-detail">建 .venv、安裝 MCP server 依賴。</div>
+    </div>
+    <div class="step done">
+      <div class="step-title">安裝 LINE Channel 依賴 <span class="step-time">自動</span></div>
+      <div class="step-detail">bun install — LINE webhook 接收器。</div>
+    </div>
+    <div class="step done">
+      <div class="step-title">生成 MCP 設定 <span class="step-time">自動</span></div>
+      <div class="step-detail">Claude Code 的 <code>.mcp.json</code> + Claude Desktop 的全局設定，一次寫好。</div>
+    </div>
+    <div class="step done">
+      <div class="step-title">初始化資料庫 <span class="step-time">自動</span></div>
+      <div class="step-detail">空白 SQLite DB — 14 張表、20+ 索引。</div>
+    </div>
+    <div class="step done">
+      <div class="step-title">設定開機自啟 <span class="step-time">自動</span></div>
+      <div class="step-detail">macOS: LaunchAgent / WSL: crontab — 電腦開機就自動跑 daemon。</div>
+    </div>
+    <div class="step done">
+      <div class="step-title">驗證 <span class="step-time">自動</span></div>
+      <div class="step-detail">DB 14 張表 ✓ / 38 個 MCP tools ✓ / Skills 載入 ✓ / ngrok ✓</div>
+    </div>
+  </div>
+
+  <div class="warning">
+    <strong>Windows 使用者注意</strong>：必須先安裝 WSL（Windows Subsystem for Linux）。在 PowerShell 執行 <code>wsl --install</code>，重開機後進入 Ubuntu 再跑安裝指令。
+  </div>
+</section>
+
+<!-- ============ 首次訪談 ============ -->
+<section>
+  <h2><span class="num">4</span>首次訪談</h2>
+  <p class="section-desc">安裝完成後，開啟 Claude。它會自動引導你完成公司設定。</p>
+
+  <div class="code-block">
+<span class="comment"># 啟動 Claude Code</span>
+<span class="prompt">$</span> cd ~/sme-ai-kit && claude
+
+<span class="comment"># 或開啟 Claude Desktop / Cowork，打開 sme-ai-kit 資料夾</span>
+  </div>
+
+  <h3>Claude 會引導你完成</h3>
+  <div class="card-grid">
+    <div class="card highlight">
+      <h4>1. 公司基本資料</h4>
+      <p>公司名稱、產業、營運時間、員工人數。存入資料庫，AI 會記住。</p>
+    </div>
+    <div class="card highlight">
+      <h4>2. 員工名冊 + LINE 綁定</h4>
+      <p>每位員工的姓名、職位、權限等級。掃 QR code 加 LINE OA 好友後綁定 LINE ID。</p>
+    </div>
+    <div class="card">
+      <h4>3. 商品 / 服務清單</h4>
+      <p>SKU、名稱、庫存數量、安全庫存。Claude 會開始幫你追蹤。</p>
+    </div>
+    <div class="card">
+      <h4>4. 客戶 / 供應商 / 經銷商</h4>
+      <p>名稱、電話、類型。可以之後慢慢補，不需一次到位。</p>
+    </div>
+    <div class="card">
+      <h4>5. 品牌語氣</h4>
+      <p>對外回覆的語氣風格。給 Claude 看幾封範例信件或文案即可。</p>
+    </div>
+    <div class="card">
+      <h4>6. 營運規則 + 審核門檻</h4>
+      <p>多少金額需要老闆核准？退貨規則？折扣政策？用講的就好。</p>
+    </div>
+  </div>
+
+  <div class="info">
+    <strong>反捏造機制</strong>：老闆講的規則會標記為「明確指示」並附上原話。Claude 自己推斷的會標記為「推斷」並主動確認。絕不會把推斷偽裝成老闆的指示。
+  </div>
+</section>
+
+<!-- ============ LINE 設定 ============ -->
+<section>
+  <h2><span class="num">5</span>LINE 連結</h2>
+  <p class="section-desc">讓全公司都能透過 LINE 跟 AI 助理互動。</p>
+
+  <h3>員工加好友</h3>
+  <div class="flow-row">
+    <div class="flow-box">LINE OA 管理後台</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box active">取得 QR Code</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box">員工手機掃碼</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box">加好友</div>
+  </div>
+
+  <h3>綁定 LINE ID</h3>
+  <p>員工加好友後，傳一句話給 LINE OA。Claude 會收到訊息並顯示 User ID。<br>告訴 Claude「這是 XXX」，它就會自動綁定。</p>
+
+  <h3>加入公司群組</h3>
+  <p>在公司 LINE 群組中邀請 LINE OA 加入。群組中 Claude 只回應被 <code>@</code> 的訊息，不會亂插話。</p>
+
+  <h3>訊息處理流程</h3>
+  <div class="flow-row">
+    <div class="flow-box">LINE 訊息進來</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box">辨識身份</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box">檢查權限</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box active">處理 + 回覆</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box">標記已讀</div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>身份</th><th>處理方式</th></tr></thead>
+      <tbody>
+        <tr><td><span class="tag green">員工</span></td><td>根據權限（basic / manager / admin）處理請求</td></tr>
+        <tr><td><span class="tag blue">客戶</span></td><td>查詢客戶記錄，用品牌語氣回覆</td></tr>
+        <tr><td><span class="tag yellow">陌生人</span></td><td>不回覆，轉發給老闆決定</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 功能速覽 ============ -->
+<section>
+  <h2><span class="num">6</span>功能速覽</h2>
+  <p class="section-desc">不需要記任何指令 — 用自然語言描述你要做的事。</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>你說</th><th>Claude 做</th><th>模組</th></tr></thead>
+      <tbody>
+        <tr><td>「今天有什麼事？」</td><td>顯示待處理任務、庫存警報、逾期帳款</td><td><span class="tag blue">ops-dashboard</span></td></tr>
+        <tr><td>「幫我建一個任務：下週三前完成打版確認」</td><td>建立任務、設截止日、可指派給員工</td><td><span class="tag blue">task-ops</span></td></tr>
+        <tr><td>「A200 還有幾個？」</td><td>查庫存、顯示安全庫存和最近進出記錄</td><td><span class="tag blue">inventory-ops</span></td></tr>
+        <tr><td>「記一筆支出 3500 買包材」</td><td>記帳、分類、如果超過門檻會先送審核</td><td><span class="tag blue">accounting-ops</span></td></tr>
+        <tr><td>「XXX 公司下了 50 組，幫我開單」</td><td>建立訂單、自動算金額</td><td><span class="tag blue">order-ops</span></td></tr>
+        <tr><td>「這筆訂單可以出貨了」</td><td>扣庫存 + 建帳目 + 更新訂單狀態</td><td><span class="tag blue">order-ops</span></td></tr>
+        <tr><td>「用 LINE 跟王經理說明天到貨」</td><td>查王經理的 LINE ID → 發送訊息</td><td><span class="tag blue">line-comms</span></td></tr>
+        <tr><td>「我們的退貨規則是七天內可退」</td><td>存入規則，標記為老闆明確指示</td><td><span class="tag blue">knowledge</span></td></tr>
+        <tr><td>「本月營收多少？」</td><td>彙總收入/支出/淨額/待收</td><td><span class="tag blue">report-gen</span></td></tr>
+        <tr><td>「幫我寫一篇新品上市的 IG 貼文」</td><td>根據品牌語氣產出文案</td><td><span class="tag purple">social-media</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 日常營運 ============ -->
+<section>
+  <h2><span class="num">7</span>日常營運節奏</h2>
+  <p class="section-desc">導入後的一天長什麼樣。</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-title">早上 — 開工</div>
+      <div class="step-detail">Claude 自動跑開機流程：營運摘要 + 庫存警報 + 逾期帳款。老闆打開 Desktop 看一眼就知道今天要做什麼。</div>
+    </div>
+    <div class="step">
+      <div class="step-title">白天 — LINE 處理</div>
+      <div class="step-detail">員工傳 LINE 回報進度、查庫存、提交報銷。客戶傳 LINE 詢問訂單。Claude 即時處理，需要老闆決定的自動轉發。</div>
+    </div>
+    <div class="step">
+      <div class="step-title">隨時 — 審核</div>
+      <div class="step-detail">超過門檻的操作（大額支出、行銷訊息、批量修改）→ Claude 建立審核請求 → LINE 通知老闆 → 老闆核准 → 自動執行。</div>
+    </div>
+    <div class="step">
+      <div class="step-title">傍晚 — 收工</div>
+      <div class="step-detail">Claude 自動保存每日快照（任務完成數、收支、庫存、客戶數）。隔天可以看趨勢。</div>
+    </div>
+    <div class="step">
+      <div class="step-title">月底 — 報表</div>
+      <div class="step-detail">「出月報」→ Claude 彙整所有數據，產出結構化報表。可匯出 PDF/Excel。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 注意事項 ============ -->
+<section>
+  <h2><span class="num">8</span>注意事項</h2>
+
+  <div class="card-grid">
+    <div class="card">
+      <h4>電腦不能休眠</h4>
+      <p>daemon 跑在背景，電腦睡了就斷。Mac 建議設定「永不休眠」。</p>
+    </div>
+    <div class="card">
+      <h4>資料備份</h4>
+      <p><code>data/business.db</code> 是所有資料的核心。建議定期備份到雲端硬碟。</p>
+    </div>
+    <div class="card">
+      <h4>密鑰安全</h4>
+      <p><code>.mcp.json</code> 包含 LINE 密鑰，已加入 .gitignore。不要手動上傳到任何地方。</p>
+    </div>
+    <div class="card">
+      <h4>更新</h4>
+      <p>講師推送更新後，學員只需要 <code>git pull</code>。DB 和設定不會被覆蓋。</p>
+    </div>
+  </div>
+
+  <div class="warning">
+    <strong>LINE 免費方案限制</strong>：每月 200 則免費推播訊息。員工主動傳給 bot 的不算。如果需要大量群發，考慮升級 LINE OA 方案。
+  </div>
+</section>
+
+<!-- ============ Q&A ============ -->
+<section>
+  <h2><span class="num">Q</span>常見問題</h2>
+
+  <h3>LINE 訊息沒有收到？</h3>
+  <p>檢查 daemon 是否在跑（<code>ps aux | grep claude</code>）。檢查 ngrok 是否正常（<code>curl https://你的域名/webhook</code>）。</p>
+
+  <h3>Claude 回覆很慢？</h3>
+  <p>正常。Claude 需要讀取技能、查資料庫、組織回覆。第一次回覆可能需要 5-10 秒。</p>
+
+  <h3>可以多人同時用嗎？</h3>
+  <p>可以。SQLite WAL mode 支援多人同時讀寫。Claude Code daemon 處理 LINE，Claude Desktop 老闆用，不衝突。</p>
+
+  <h3>資料會上傳到 Anthropic 嗎？</h3>
+  <p>對話內容會經過 Claude API（Anthropic 的伺服器），但資料庫存在你本地電腦。Anthropic 不會用 Claude Max 的對話訓練模型。</p>
+
+  <h3>想加新功能怎麼辦？</h3>
+  <p>跟 Claude 說就好。它可以讀 skills 裡的知識，也可以直接操作資料庫。複雜需求聯繫講師。</p>
+</section>
+
+</div>
+
+<footer>
+  SME-AI-Kit — Built for Taiwan SMEs<br>
+  <span style="color: var(--text2);">Claude Max + LINE + SQLite = 開箱即用的 AI 營運中樞</span>
+</footer>
+
+</body>
+</html>

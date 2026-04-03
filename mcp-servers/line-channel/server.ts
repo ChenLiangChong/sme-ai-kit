@@ -37,6 +37,25 @@ function getDb(): InstanceType<typeof Database> {
     db = new Database(DB_PATH)
     db.run('PRAGMA journal_mode=WAL')
     db.run('PRAGMA foreign_keys=ON')
+    // 確保表存在（line-channel 可能比 business-db 先啟動）
+    db.run(`CREATE TABLE IF NOT EXISTS line_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      line_message_id TEXT, user_id TEXT NOT NULL, user_name TEXT,
+      source_type TEXT DEFAULT 'user', group_id TEXT,
+      direction TEXT NOT NULL, content TEXT NOT NULL,
+      msg_type TEXT DEFAULT 'text', status TEXT DEFAULT 'queued',
+      session_id TEXT, reply_content TEXT, replied_at DATETIME,
+      created_at DATETIME DEFAULT (datetime('now','localtime')),
+      CHECK (direction IN ('inbound','outbound','broadcast')),
+      CHECK (status IN ('queued','processed','replied'))
+    )`)
+    db.run(`CREATE TABLE IF NOT EXISTS line_groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id TEXT NOT NULL UNIQUE, group_name TEXT,
+      group_type TEXT DEFAULT 'other', notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`)
   }
   return db
 }
@@ -406,162 +425,191 @@ const profileCache = new Map<string, string>()
 if (portAlreadyInUse) {
   process.stderr.write(`line-channel: port ${WEBHOOK_PORT} 已有另一個 instance 在跑，共用現有 webhook server\n`)
 } else {
-  Bun.serve({
-    port: WEBHOOK_PORT,
-    hostname: '0.0.0.0',
-    async fetch(req) {
-      const url = new URL(req.url)
+  try {
+    Bun.serve({
+      port: WEBHOOK_PORT,
+      hostname: '0.0.0.0',
+      async fetch(req) {
+        const url = new URL(req.url)
 
-      // Health check
-      if (req.method === 'GET') {
-        return new Response('LINE Channel OK')
-      }
-
-      if (req.method !== 'POST' || (url.pathname !== '/' && url.pathname !== '/webhook')) {
-        return new Response('404', { status: 404 })
-      }
-
-      const body = await req.text()
-      const signature = req.headers.get('x-line-signature') ?? ''
-
-      if (!verifySignature(body, signature)) {
-        return new Response('invalid signature', { status: 401 })
-      }
-
-      const payload = JSON.parse(body)
-
-      for (const event of payload.events ?? []) {
-        const userId = event.source?.userId ?? ''
-        const chatId = event.source?.groupId ?? event.source?.roomId ?? userId
-        const sourceType = event.source?.type ?? 'user'  // user | group | room
-
-        // 群組訊息：只處理 @mention
-        if (sourceType === 'group' || sourceType === 'room') {
-          if (event.type === 'message' && event.message?.type === 'text') {
-            const mention = event.message.mention
-            if (!mention?.mentionees?.length) continue  // 沒 @，跳過
-            // 去掉 @mention 文字
-            let text = event.message.text as string
-            for (const m of [...mention.mentionees].sort((a: any, b: any) => (b.index ?? 0) - (a.index ?? 0))) {
-              text = text.slice(0, m.index ?? 0) + text.slice((m.index ?? 0) + (m.length ?? 0))
-            }
-            event.message.text = text.trim()
-          } else {
-            continue  // 群組中非文字或沒 @，跳過
-          }
+        // Health check
+        if (req.method === 'GET') {
+          return new Response('LINE Channel OK')
         }
 
-        // Access control：只推送允許名單中的用戶
-        const access = loadAccess()
-        if (access.allowFrom.length > 0 && !access.allowFrom.includes(userId)) {
-          continue  // 不在允許清單，靜默忽略
+        if (req.method !== 'POST' || (url.pathname !== '/' && url.pathname !== '/webhook')) {
+          return new Response('404', { status: 404 })
         }
 
-        // 取得用戶暱稱（快取）
-        let displayName = profileCache.get(userId)
-        if (!displayName) {
-          const profile = await lineGetProfile(userId)
-          displayName = profile.displayName
-          profileCache.set(userId, displayName)
+        const body = await req.text()
+        const signature = req.headers.get('x-line-signature') ?? ''
+
+        if (!verifySignature(body, signature)) {
+          return new Response('invalid signature', { status: 401 })
         }
 
-        if (event.type === 'message') {
-          const msg = event.message
-          let content = ''
+        try {
+          const payload = JSON.parse(body)
 
-          switch (msg.type) {
-            case 'text':
-              content = msg.text ?? ''
-              break
-            case 'image': {
-              try {
-                const imgPath = await downloadLineContent(String(msg.id), 'image')
-                content = `[圖片] ${imgPath}`
-              } catch {
-                content = '[圖片] (下載失敗)'
+          for (const event of payload.events ?? []) {
+            const userId = event.source?.userId ?? ''
+            const chatId = event.source?.groupId ?? event.source?.roomId ?? userId
+            const sourceType = event.source?.type ?? 'user'  // user | group | room
+
+            // 群組訊息：只處理 @mention
+            if (sourceType === 'group' || sourceType === 'room') {
+              if (event.type === 'message' && event.message?.type === 'text') {
+                const mention = event.message.mention
+                if (!mention?.mentionees?.length) continue  // 沒 @，跳過
+                // 去掉 @mention 文字
+                let text = event.message.text as string
+                for (const m of [...mention.mentionees].sort((a: any, b: any) => (b.index ?? 0) - (a.index ?? 0))) {
+                  text = text.slice(0, m.index ?? 0) + text.slice((m.index ?? 0) + (m.length ?? 0))
+                }
+                event.message.text = text.trim()
+              } else if (event.type !== 'join') {
+                continue  // 群組中非文字、非 join、沒 @，跳過
               }
-              break
             }
-            case 'video':
-              content = '[影片] (語音/影片辨識需額外 STT 工具，暫不支援)'
-              break
-            case 'audio':
-              content = '[語音] (語音辨識需額外 STT 工具，暫不支援)'
-              break
-            case 'sticker':
-              content = `[貼圖]`
-              break
-            case 'location':
-              content = `[位置: ${msg.title ?? ''} ${msg.address ?? ''}]`
-              break
-            case 'file': {
-              try {
-                const filePath = await downloadLineContent(String(msg.id), 'file', (msg as any).fileName)
-                content = `[檔案] ${filePath} (${(msg as any).fileName ?? '未知檔名'})`
-              } catch {
-                content = `[檔案: ${(msg as any).fileName ?? ''}] (下載失敗)`
+
+            // Access control：只推送允許名單中的用戶
+            const access = loadAccess()
+            if (access.allowFrom.length > 0 && !access.allowFrom.includes(userId)) {
+              continue  // 不在允許清單，靜默忽略
+            }
+
+            // 取得用戶暱稱（快取）
+            let displayName = profileCache.get(userId)
+            if (!displayName && userId) {
+              const profile = await lineGetProfile(userId)
+              displayName = profile.displayName
+              profileCache.set(userId, displayName)
+            }
+            displayName = displayName || 'unknown'
+
+            if (event.type === 'message') {
+              const msg = event.message
+              let content = ''
+
+              switch (msg.type) {
+                case 'text':
+                  content = msg.text ?? ''
+                  break
+                case 'image': {
+                  try {
+                    const imgPath = await downloadLineContent(String(msg.id), 'image')
+                    content = `[圖片] ${imgPath}`
+                  } catch {
+                    content = '[圖片] (下載失敗)'
+                  }
+                  break
+                }
+                case 'video':
+                  content = '[影片] (語音/影片辨識需額外 STT 工具，暫不支援)'
+                  break
+                case 'audio':
+                  content = '[語音] (語音辨識需額外 STT 工具，暫不支援)'
+                  break
+                case 'sticker':
+                  content = `[貼圖]`
+                  break
+                case 'location':
+                  content = `[位置: ${msg.title ?? ''} ${msg.address ?? ''}]`
+                  break
+                case 'file': {
+                  try {
+                    const filePath = await downloadLineContent(String(msg.id), 'file', (msg as any).fileName)
+                    content = `[檔案] ${filePath} (${(msg as any).fileName ?? '未知檔名'})`
+                  } catch {
+                    content = `[檔案: ${(msg as any).fileName ?? ''}] (下載失敗)`
+                  }
+                  break
+                }
+                default:
+                  content = `[${msg.type}]`
               }
-              break
+
+              // 寫入 DB（不管 Claude 有沒有處理，訊息都會被記錄）
+              saveMessageToDb(
+                String(msg.id ?? ''), String(userId), String(displayName),
+                String(sourceType), sourceType !== 'user' ? String(chatId) : null,
+                'inbound', content, String(msg.type), 'queued'
+              )
+
+              // 推送進 Claude session
+              process.stderr.write(`line-channel: 推送訊息 from=${displayName} content=${content.slice(0, 50)}\n`)
+              await mcp.notification({
+                method: 'notifications/claude/channel',
+                params: {
+                  content,
+                  meta: {
+                    chat_id: String(chatId),
+                    message_id: String(msg.id ?? ''),
+                    user: String(displayName),
+                    user_id: String(userId),
+                    source_type: String(sourceType),
+                    ts: new Date(event.timestamp ?? Date.now()).toISOString(),
+                  },
+                },
+              })
+            } else if (event.type === 'follow') {
+              await mcp.notification({
+                method: 'notifications/claude/channel',
+                params: {
+                  content: `${displayName} 加入追蹤`,
+                  meta: {
+                    chat_id: String(userId),
+                    user: String(displayName),
+                    user_id: String(userId),
+                    event_type: 'follow',
+                  },
+                },
+              })
+            } else if (event.type === 'join') {
+              // Bot 被加入群組
+              const groupId = event.source?.groupId ?? chatId
+              process.stderr.write(`line-channel: Bot 被加入群組 ${groupId}\n`)
+              await mcp.notification({
+                method: 'notifications/claude/channel',
+                params: {
+                  content: `Bot 被加入新的 LINE 群組`,
+                  meta: {
+                    chat_id: String(groupId),
+                    event_type: 'join',
+                    source_type: String(sourceType),
+                    ts: new Date(event.timestamp ?? Date.now()).toISOString(),
+                  },
+                },
+              })
             }
-            default:
-              content = `[${msg.type}]`
           }
 
-          // 寫入 DB（不管 Claude 有沒有處理，訊息都會被記錄）
-          saveMessageToDb(
-            String(msg.id ?? ''), String(userId), String(displayName),
-            String(sourceType), sourceType !== 'user' ? String(chatId) : null,
-            'inbound', content, String(msg.type), 'queued'
-          )
-
-          // 推送進 Claude session
-          process.stderr.write(`line-channel: 推送訊息 from=${displayName} content=${content.slice(0, 50)}\n`)
-          mcp.notification({
-            method: 'notifications/claude/channel',
-            params: {
-              content,
-              meta: {
-                chat_id: String(chatId),
-                message_id: String(msg.id ?? ''),
-                user: String(displayName),
-                user_id: String(userId),
-                source_type: String(sourceType),
-                ts: new Date(event.timestamp ?? Date.now()).toISOString(),
-              },
-            },
-          }).catch(err => {
-            process.stderr.write(`line-channel: notification 失敗: ${err}\n`)
-          })
-        } else if (event.type === 'follow') {
-          await mcp.notification({
-            method: 'notifications/claude/channel',
-            params: {
-              content: `${displayName} 加入追蹤`,
-              meta: {
-                chat_id: String(userId),
-                user: String(displayName),
-                user_id: String(userId),
-                event_type: 'follow',
-              },
-            },
-          })
+          return new Response('ok')
+        } catch (err) {
+          process.stderr.write(`line-channel: webhook 處理失敗: ${err}\n`)
+          return new Response('internal error', { status: 500 })
         }
-      }
-
-      return new Response('ok')
-    },
-  })
-
-  process.stderr.write(`line-channel: webhook 監聽中 http://localhost:${WEBHOOK_PORT}/webhook\n`)
+      },
+    })
+    process.stderr.write(`line-channel: webhook 監聽中 http://localhost:${WEBHOOK_PORT}/webhook\n`)
+  } catch (e) {
+    process.stderr.write(`line-channel: port ${WEBHOOK_PORT} 綁定失敗: ${e}\n`)
+    process.stderr.write(`line-channel: webhook server 未啟動，僅 MCP tools 可用\n`)
+  }
 }
 
 // === ngrok 固定域名 + LINE Webhook 自動設定 ===
 
-const NGROK_DOMAIN = process.env.NGROK_DOMAIN ?? 'eddy-unmarked-lakenya.ngrok-free.dev'
+const NGROK_DOMAIN = process.env.NGROK_DOMAIN ?? ''
 
 async function autoSetupNgrok(): Promise<void> {
   if (portAlreadyInUse) {
     process.stderr.write(`line-channel: 跳過 ngrok（已有 instance 在處理）\n`)
+    return
+  }
+
+  if (!NGROK_DOMAIN) {
+    process.stderr.write(`line-channel: NGROK_DOMAIN 未設定，跳過 ngrok 自動設定（LINE webhook 需手動配置）\n`)
     return
   }
 
@@ -578,7 +626,18 @@ async function autoSetupNgrok(): Promise<void> {
       stdout: 'ignore',
       stderr: 'ignore',
     })
-    await Bun.sleep(3000)
+    // 等 ngrok 啟動（poll 本地 API，最多 10 秒）
+    let ngrokReady = false
+    for (let i = 0; i < 20; i++) {
+      await Bun.sleep(500)
+      try {
+        const r = await fetch('http://localhost:4040/api/tunnels', { signal: AbortSignal.timeout(1000) })
+        if (r.ok) { ngrokReady = true; break }
+      } catch {}
+    }
+    if (!ngrokReady) {
+      process.stderr.write(`line-channel: ngrok 未在 10 秒內就緒，webhook 可能無法使用\n`)
+    }
   } catch (e) {
     process.stderr.write(`line-channel: ngrok 啟動失敗（可能未安裝）: ${e}\n`)
     return

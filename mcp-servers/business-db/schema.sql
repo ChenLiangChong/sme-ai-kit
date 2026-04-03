@@ -164,7 +164,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     recorded_by TEXT,
     transaction_date TEXT NOT NULL,
     created_at DATETIME DEFAULT (datetime('now', 'localtime')),
-    CHECK (type IN ('income', 'expense'))
+    CHECK (type IN ('income', 'expense')),
+    CHECK (payment_status IN ('paid', 'pending', 'overdue'))
 );
 
 -- ============================================================
@@ -178,7 +179,7 @@ CREATE TABLE IF NOT EXISTS orders (
     total_amount REAL DEFAULT 0,
     items TEXT,
     notes TEXT,
-    qc_status TEXT DEFAULT 'pending',
+    qc_status TEXT DEFAULT 'pending' CHECK (qc_status IN ('pending', 'passed', 'failed', 'partial')),
     qc_notes TEXT,
     qc_checked_by TEXT,
     qc_checked_at DATETIME,
@@ -187,7 +188,8 @@ CREATE TABLE IF NOT EXISTS orders (
     delivered_at DATETIME,
     created_by TEXT,
     created_at DATETIME DEFAULT (datetime('now', 'localtime')),
-    updated_at DATETIME DEFAULT (datetime('now', 'localtime'))
+    updated_at DATETIME DEFAULT (datetime('now', 'localtime')),
+    CHECK (status IN ('pending', 'confirmed', 'shipped', 'delivered', 'paid', 'cancelled'))
 );
 
 -- ============================================================
@@ -253,6 +255,7 @@ CREATE INDEX IF NOT EXISTS idx_line_messages_dir ON line_messages(direction, sta
 CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
 CREATE INDEX IF NOT EXISTS idx_rules_category ON business_rules(category);
 CREATE INDEX IF NOT EXISTS idx_rules_active ON business_rules(id) WHERE superseded_by IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rules_unique_active ON business_rules(category, title) WHERE superseded_by IS NULL;
 CREATE INDEX IF NOT EXISTS idx_inventory_alert ON inventory(id) WHERE current_stock <= min_stock;
 CREATE INDEX IF NOT EXISTS idx_employees_line ON employees(line_user_id) WHERE line_user_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_interaction_log_time ON interaction_log(created_at);

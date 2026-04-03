@@ -27,7 +27,7 @@ description: "公司營運技能包。當使用者或 LINE 訊息涉及以下情
 
 1. **早安開工**：ops-dashboard → 看有什麼事 + 逾期帳款 → 逐一處理
 2. **LINE 訊息處理**：line-comms → 辨識身份 → 根據內容調用對應模組 → 回覆或 mark_read
-3. **訂單處理**：crm-ops（查客戶）→ order-ops（建單→QC→出貨→收款）→ line-comms（通知）
+3. **訂單處理**：crm-ops（查客戶）→ inventory-ops（確認庫存）→ order-ops（建單→QC→出貨）→ accounting-ops（記帳→收款）→ line-comms（通知客戶）
 4. **客戶行銷**：crm-ops（選客群）→ brand-voice（套語氣）→ line-comms（發送）
 5. **月底結帳**：accounting-ops（核對收支）→ inventory-ops（盤點）→ report-gen（出報表）
 6. **知識建檔**：knowledge-capture（訪談）→ 寫入 DB → 所有模組自動受益
