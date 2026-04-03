@@ -753,6 +753,74 @@ def list_employees(active_only: bool = True) -> str:
 
 
 # ============================================================
+# LINE 訊息查詢
+# ============================================================
+
+@mcp.tool()
+def search_line_messages(
+    query: str = "",
+    user_id: str = "",
+    user_name: str = "",
+    direction: str = "",
+    days: int = 7,
+    limit: int = 30,
+) -> str:
+    """查詢 LINE 訊息歷史紀錄。
+
+    Args:
+        query: 搜尋關鍵字（模糊比對訊息內容）
+        user_id: 篩選特定用戶的 LINE user ID
+        user_name: 篩選特定用戶暱稱（模糊比對）
+        direction: 篩選方向 — inbound（收到）| outbound（發出）| 留空=全部
+        days: 查詢最近幾天（預設 7 天）
+        limit: 最多回傳幾則（預設 30）
+    """
+    db = get_db()
+    conditions = []
+    params: list = []
+
+    if query:
+        conditions.append("content LIKE ?")
+        params.append(f"%{query}%")
+    if user_id:
+        conditions.append("user_id = ?")
+        params.append(user_id)
+    if user_name:
+        conditions.append("user_name LIKE ?")
+        params.append(f"%{user_name}%")
+    if direction:
+        conditions.append("direction = ?")
+        params.append(direction)
+
+    conditions.append("created_at >= datetime('now', 'localtime', ?)")
+    params.append(f"-{days} days")
+
+    where = " AND ".join(conditions)
+    params.append(limit)
+
+    rows = db.execute(
+        f"SELECT id, user_id, user_name, direction, content, msg_type, source_type, group_id, status, created_at "
+        f"FROM line_messages WHERE {where} ORDER BY created_at DESC LIMIT ?",
+        params,
+    ).fetchall()
+
+    if not rows:
+        return "沒有找到符合條件的 LINE 訊息。"
+
+    lines = [f"## LINE 訊息（{len(rows)} 則）\n"]
+    for m in rows:
+        arrow = "→" if m["direction"] == "outbound" else "←"
+        src = ""
+        if m["source_type"] == "group" and m["group_id"]:
+            src = f" [群組]"
+        name = m["user_name"] or m["user_id"][:8]
+        lines.append(
+            f"- {arrow} [{m['created_at']}] **{name}**{src}: {m['content'][:200]}"
+        )
+    return "\n".join(lines)
+
+
+# ============================================================
 # 客戶管理（3 工具）
 # ============================================================
 

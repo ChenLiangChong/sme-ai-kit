@@ -138,7 +138,32 @@ Phase 1 用文字回覆（不用 Postback 按鈕）：
 
 ---
 
-## 八、LINE OA 額度管理
+## 八、LINE 訊息歷史查詢
+
+所有 LINE 收發訊息都自動存入 `line_messages` 表。用 `search_line_messages` 查詢：
+
+### 常見查詢
+
+| 使用者說 | 怎麼查 |
+|---------|--------|
+| 「王經理上週傳了什麼」 | `search_line_messages(user_name='王', days=7)` |
+| 「最近有誰提到退貨」 | `search_line_messages(query='退貨')` |
+| 「今天收到幾則 LINE」 | `search_line_messages(direction='inbound', days=1)` |
+| 「我們回了什麼給張小姐」 | `search_line_messages(user_name='張', direction='outbound')` |
+| 「群組裡最近的討論」 | `search_line_messages(days=3)` 然後過濾 [群組] 標記 |
+
+### 參數
+
+- `query` — 關鍵字（模糊搜尋訊息內容）
+- `user_id` — 精確比對 LINE user ID
+- `user_name` — 模糊比對暱稱
+- `direction` — `inbound`（收到）/ `outbound`（發出）/ 留空=全部
+- `days` — 最近幾天（預設 7）
+- `limit` — 最多幾則（預設 30）
+
+---
+
+## 九、LINE OA 額度管理
 
 免費方案每月 200 則 push message。
 
@@ -156,7 +181,7 @@ Phase 1 用文字回覆（不用 Postback 按鈕）：
 
 ---
 
-## 九、注意事項
+## 十、注意事項
 
 - LINE 是員工最常用的介面，回覆要快、要準、要簡短
 - 不確定的事不要回，轉給老闆
