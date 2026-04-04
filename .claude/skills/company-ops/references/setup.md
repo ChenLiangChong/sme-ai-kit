@@ -133,3 +133,50 @@ ngrok config add-authtoken <authtoken>
 - Claude Desktop 只能用 business-db（查 DB），不能收發 LINE
 - 密鑰存在 .mcp.json 裡（已 .gitignore），不要手動上傳到任何地方
 - ngrok 免費帳號每月有流量限制，正常使用足夠
+
+---
+
+## 多 LINE OA 設定
+
+### 何時需要
+
+公司有多個品牌/LINE OA，想用同一個系統管理。
+
+### Step 1：建立 data/line-channels.json
+
+```json
+{
+  "channels": {
+    "brand-a": {
+      "name": "品牌A 官方帳號",
+      "access_token": "從 LINE Developers Console 取得",
+      "channel_secret": "從 LINE Developers Console 取得",
+      "business_unit": "品牌A"
+    },
+    "brand-b": {
+      "name": "品牌B 官方帳號",
+      "access_token": "...",
+      "channel_secret": "...",
+      "business_unit": "品牌B"
+    }
+  },
+  "default_channel": "brand-a"
+}
+```
+
+### Step 2：更新 .mcp.json
+
+移除 `CHANNEL_ACCESS_TOKEN` 和 `CHANNEL_SECRET` env vars（改由 line-channels.json 管理）。保留 `LINE_CHANNEL_PORT`、`NGROK_DOMAIN`、`SME_DB_PATH`。
+
+### Step 3：重啟
+
+`/exit` 然後重新 `claude`。啟動時 stderr 會顯示每個 OA 的 webhook 設定：
+```
+line-channel: 多 OA 模式，載入 2 個 channel（預設: brand-a）
+line-channel: 品牌A 官方帳號 webhook = https://xxx.ngrok-free.app/webhook/brand-a ✅
+line-channel: 品牌B 官方帳號 webhook = https://xxx.ngrok-free.app/webhook/brand-b ✅
+```
+
+### 向下相容
+
+沒有 `data/line-channels.json` 時，系統自動 fallback 到 `.mcp.json` 的 env vars（單 OA 模式）。現有部署不受影響。

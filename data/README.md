@@ -5,6 +5,7 @@
 ```
 data/
 ├── business.db                  ← SQLite 企業資料庫
+├── line-channels.json           ← LINE OA 多品牌設定檔（敏感憑證，已 gitignore）
 └── media/
     ├── line/                    ← LINE 收到的原始媒體
     │   ├── images/              ← 圖片（.jpg）

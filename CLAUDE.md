@@ -8,7 +8,7 @@
 
 ## MCP 工具
 - **business-db**：企業資料庫（42 tools — 知識/任務/員工/客戶/庫存/帳務/訂單/審核/附件/快照/公司設定/LINE 訊息搜尋/LINE 群組）
-- **line**：LINE Channel（6 tools — reply/reply_flex/multicast/add_allowed_user/list_allowed_users/mark_read）
+- **line**：LINE Channel（7 tools — reply/reply_flex/multicast/add_allowed_user/list_allowed_users/mark_read/list_channels）
 - **social**：社群媒體（19 tools — FB/IG/Threads 讀取）
 
 ---
@@ -18,10 +18,11 @@
 當收到 `<channel source="line">` 訊息時，**載入 line-comms.md 按完整流程處理**。
 
 核心原則：
-1. **先辨識身份**：員工 → 客戶 → 暱稱比對 → 陌生人分層路由
-2. **陌生人不直接回覆**，依意圖路由通知對應負責人（詳見 line-comms.md 第二節）
-3. **每則訊息必須有結局**：`reply`（已回覆）或 `mark_read`（已處理）
-4. **對外行銷訊息需 HITL 審核**
+1. **先辨識 OA**：訊息帶 `channel_id` 和 `channel_name`，回覆時傳回同一個 `channel_id`
+2. **先辨識身份**：員工 → 客戶 → 暱稱比對 → 陌生人分層路由
+3. **陌生人不直接回覆**，依意圖路由通知對應負責人（詳見 line-comms.md 第二節）
+4. **每則訊息必須有結局**：`reply`（已回覆）或 `mark_read`（已處理）
+5. **對外行銷訊息需 HITL 審核**
 
 完整的四步驟流程、權限表、陌生人路由邏輯，統一定義在 **line-comms.md**（唯一來源）。
 

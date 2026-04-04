@@ -260,3 +260,35 @@ Phase 1 用文字回覆（不用 Postback 按鈕）：
 - 不確定的事不要回，轉給老闆
 - 每則訊息處理完都要標記狀態
 - 所有對外發送（非回覆員工問題的）都 log_interaction
+
+---
+
+## 多 LINE OA 注意事項
+
+系統支援多個 LINE OA（品牌帳號）同時運作。
+
+### 識別來源
+
+每則 LINE 訊息的 meta 帶有 `channel_id` 和 `channel_name`：
+- `channel_id` = 設定檔中的 key（如 `wia`、`york`）
+- `channel_name` = OA 顯示名稱
+
+### 回覆規則
+
+- **回覆時必須傳入正確的 `channel_id`**：`reply(channel_id='wia', chat_id='U...', text='...')`
+- 從哪個 OA 收到訊息，就用哪個 OA 回覆
+- 省略 `channel_id` 時使用預設 channel
+
+### 查詢 OA 清單
+
+`list_channels` 列出所有已設定的 LINE OA 及其 channel_id。
+
+### 跨 OA 通知
+
+如果需要用特定 OA 通知某人（如用 WIA 帳號通知客戶）：
+1. 確認該人是該 OA 的好友
+2. 用對應的 channel_id 發送：`reply(channel_id='wia', chat_id='U...', text='...')`
+
+### 搜尋歷史訊息
+
+`search_line_messages(channel_id='wia')` 可按 OA 篩選訊息歷史。

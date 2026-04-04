@@ -10,6 +10,7 @@ data/*.log
 # 密鑰
 .mcp.json
 .env
+data/line-channels.json
 
 # 打包產物
 dist/

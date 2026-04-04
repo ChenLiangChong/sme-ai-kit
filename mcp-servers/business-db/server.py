@@ -38,6 +38,8 @@ def init_db():
         "ALTER TABLE customers ADD COLUMN line_user_id TEXT",
         "ALTER TABLE customers ADD COLUMN discount_rate REAL DEFAULT 0",
         "ALTER TABLE customers ADD COLUMN payment_terms TEXT DEFAULT 'net30'",
+        "ALTER TABLE line_messages ADD COLUMN channel_id TEXT DEFAULT 'default'",
+        "ALTER TABLE line_groups ADD COLUMN channel_id TEXT DEFAULT 'default'",
     ]:
         try:
             db.execute(stmt)
@@ -823,6 +825,7 @@ def search_line_messages(
     user_id: str = "",
     user_name: str = "",
     direction: str = "",
+    channel_id: str = "",
     days: int = 7,
     limit: int = 30,
 ) -> str:
@@ -833,6 +836,7 @@ def search_line_messages(
         user_id: 篩選特定用戶的 LINE user ID
         user_name: 篩選特定用戶暱稱（模糊比對）
         direction: 篩選方向 — inbound（收到）| outbound（發出）| 留空=全部
+        channel_id: 篩選 LINE OA channel（多品牌模式），留空=全部
         days: 查詢最近幾天（預設 7 天）
         limit: 最多回傳幾則（預設 30）
     """
@@ -853,6 +857,9 @@ def search_line_messages(
         if direction:
             conditions.append("direction = ?")
             params.append(direction)
+        if channel_id:
+            conditions.append("channel_id = ?")
+            params.append(channel_id)
 
         conditions.append("created_at >= datetime('now', 'localtime', ?)")
         params.append(f"-{days} days")
@@ -894,6 +901,7 @@ def register_line_group(
     group_id: str,
     group_name: str = "",
     group_type: str = "other",
+    channel_id: str = "",
     notes: str = "",
 ) -> str:
     """註冊 LINE 群組。當 bot 加入新群組或老闆告知群組用途時呼叫。
@@ -902,6 +910,7 @@ def register_line_group(
         group_id: LINE 群組 ID（從 channel tag 的 chat_id 取得）
         group_name: 群組名稱（例：公司工作群、經銷商群）
         group_type: 群組類型 — work（工作）| customer（客戶）| supplier（供應商）| marketing（行銷）| other
+        channel_id: 來自哪個 LINE OA（多品牌模式），留空=default
         notes: 備註
     """
     db = get_db()
@@ -916,8 +925,8 @@ def register_line_group(
             return f"✅ 群組已更新：{group_name or group_id}（{group_type}）"
         else:
             db.execute(
-                "INSERT INTO line_groups (group_id, group_name, group_type, notes) VALUES (?,?,?,?)",
-                (group_id, group_name, group_type, notes),
+                "INSERT INTO line_groups (group_id, group_name, group_type, channel_id, notes) VALUES (?,?,?,?,?)",
+                (group_id, group_name, group_type, channel_id or "default", notes),
             )
             db.commit()
             return f"✅ 群組已註冊：{group_name or group_id}（{group_type}）"
@@ -926,23 +935,28 @@ def register_line_group(
 
 
 @mcp.tool()
-def list_line_groups(group_type: str = "") -> str:
+def list_line_groups(group_type: str = "", channel_id: str = "") -> str:
     """列出所有已註冊的 LINE 群組。
 
     Args:
         group_type: 篩選類型 — work | customer | supplier | marketing | other | 留空=全部
+        channel_id: 篩選 LINE OA channel（多品牌模式），留空=全部
     """
     db = get_db()
     try:
+        conditions: list[str] = []
+        params: list = []
         if group_type:
-            rows = db.execute(
-                "SELECT group_id, group_name, group_type, notes, created_at FROM line_groups WHERE group_type=? ORDER BY created_at",
-                (group_type,),
-            ).fetchall()
-        else:
-            rows = db.execute(
-                "SELECT group_id, group_name, group_type, notes, created_at FROM line_groups ORDER BY created_at"
-            ).fetchall()
+            conditions.append("group_type = ?")
+            params.append(group_type)
+        if channel_id:
+            conditions.append("channel_id = ?")
+            params.append(channel_id)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        rows = db.execute(
+            f"SELECT group_id, group_name, group_type, channel_id, notes, created_at FROM line_groups{where} ORDER BY created_at",
+            params,
+        ).fetchall()
 
         if not rows:
             return "目前沒有已註冊的 LINE 群組。"

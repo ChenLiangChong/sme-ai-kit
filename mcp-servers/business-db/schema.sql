@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS inventory (
 
 CREATE TABLE IF NOT EXISTS line_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id TEXT DEFAULT 'default',
     line_message_id TEXT,
     user_id TEXT NOT NULL,
     user_name TEXT,
@@ -238,6 +239,7 @@ CREATE TABLE IF NOT EXISTS daily_snapshots (
 
 CREATE TABLE IF NOT EXISTS line_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id TEXT DEFAULT 'default',
     group_id TEXT NOT NULL UNIQUE,
     group_name TEXT,
     group_type TEXT DEFAULT 'other',
@@ -272,3 +274,5 @@ CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_snapshots_date ON daily_snapshots(snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_line_groups_type ON line_groups(group_type);
 CREATE INDEX IF NOT EXISTS idx_line_messages_group ON line_messages(group_id) WHERE group_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_line_messages_channel ON line_messages(channel_id);
+CREATE INDEX IF NOT EXISTS idx_line_groups_channel ON line_groups(channel_id);
