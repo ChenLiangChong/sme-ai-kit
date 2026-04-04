@@ -53,8 +53,8 @@ function getDb(): InstanceType<typeof Database> {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       group_id TEXT NOT NULL UNIQUE, group_name TEXT,
       group_type TEXT DEFAULT 'other', notes TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at DATETIME DEFAULT (datetime('now','localtime')),
+      updated_at DATETIME DEFAULT (datetime('now','localtime'))
     )`)
   }
   return db
@@ -317,18 +317,27 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         const chatId = args.chat_id as string
         const text = args.text as string
         await linePush(chatId, text)
-        // 記錄發出的訊息
+        // 記錄發出的訊息（userId 用 chatId — 群組回覆時 chatId 就是 groupId）
+        const isGroup = chatId.startsWith('C') || chatId.startsWith('R')
         saveMessageToDb(
-          `sent_${Date.now()}`, chatId, '', 'user', null,
-          'outbound', text, 'text', 'replied'
+          `sent_${Date.now()}`, isGroup ? '' : chatId, '', isGroup ? 'group' : 'user',
+          isGroup ? chatId : null, 'outbound', text, 'text', 'replied'
         )
-        // 把該用戶的未處理訊息標記為已回覆
+        // 把該 chat 的未處理訊息標記為已回覆
         try {
           const d = getDb()
-          d.run(
-            `UPDATE line_messages SET status = 'replied', reply_content = ? WHERE user_id = ? AND direction = 'inbound' AND status IN ('queued', 'processed')`,
-            [text.slice(0, 200), chatId]
-          )
+          // 群組訊息用 group_id 比對，個人訊息用 user_id 比對
+          if (isGroup) {
+            d.run(
+              `UPDATE line_messages SET status = 'replied', reply_content = ? WHERE group_id = ? AND direction = 'inbound' AND status IN ('queued', 'processed')`,
+              [text.slice(0, 200), chatId]
+            )
+          } else {
+            d.run(
+              `UPDATE line_messages SET status = 'replied', reply_content = ? WHERE user_id = ? AND direction = 'inbound' AND status IN ('queued', 'processed')`,
+              [text.slice(0, 200), chatId]
+            )
+          }
         } catch {}
         return { content: [{ type: 'text' as const, text: '✅ 已送出' }] }
       }
@@ -337,6 +346,21 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         const altText = args.alt_text as string
         const flexJson = JSON.parse(args.flex_json as string)
         await linePushFlex(chatId, altText, flexJson)
+        // 記錄 Flex Message
+        const isGroupFlex = chatId.startsWith('C') || chatId.startsWith('R')
+        saveMessageToDb(
+          `sent_${Date.now()}`, isGroupFlex ? '' : chatId, '', isGroupFlex ? 'group' : 'user',
+          isGroupFlex ? chatId : null, 'outbound', `[Flex] ${altText}`, 'flex', 'replied'
+        )
+        // 更新原訊息狀態
+        try {
+          const d = getDb()
+          const col = isGroupFlex ? 'group_id' : 'user_id'
+          d.run(
+            `UPDATE line_messages SET status = 'replied' WHERE ${col} = ? AND direction = 'inbound' AND status IN ('queued', 'processed')`,
+            [chatId]
+          )
+        } catch {}
         return { content: [{ type: 'text' as const, text: '✅ Flex Message 已送出' }] }
       }
       case 'add_allowed_user': {
@@ -371,6 +395,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           return { content: [{ type: 'text' as const, text: '❌ 單次群發上限 500 人' }], isError: true }
         }
         const sent = await lineMulticast(userIds, text)
+        // 記錄廣播
+        saveMessageToDb(
+          `broadcast_${Date.now()}`, 'system', '', 'broadcast', null,
+          'broadcast', `[群發 ${sent} 人] ${text}`, 'text', 'replied'
+        )
         return { content: [{ type: 'text' as const, text: `✅ 已群發給 ${sent} 位用戶` }] }
       }
       case 'mark_read': {

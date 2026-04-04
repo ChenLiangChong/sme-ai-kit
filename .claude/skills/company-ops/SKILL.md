@@ -5,12 +5,13 @@ description: "公司營運技能包。當使用者或 LINE 訊息涉及以下情
 
 # 公司營運技能包 (Company Ops)
 
-一站式企業營運管理 — 11 個功能模組，按需載入。
+一���式企業營運管理 — 12 個功能模組，按需載入。
 
 ## 模組總覽
 
 | 模組 | 檔案 | 觸發情境 |
 |------|------|---------|
+| 環境設定 | [setup.md](references/setup.md) | 首次啟動 / LINE 未設定 / MCP 連線問題 |
 | 營運儀表板 | [ops-dashboard.md](references/ops-dashboard.md) | 「目前狀況」「今天有什麼事」「營運報告」 |
 | 任務管理 | [task-ops.md](references/task-ops.md) | 建立/指派/追蹤/完成任務 |
 | 知識萃取 | [knowledge-capture.md](references/knowledge-capture.md) | 系統導入/老闆分享規則/SOP/決策 |

@@ -837,49 +837,52 @@ def search_line_messages(
         limit: 最多回傳幾則（預設 30）
     """
     db = get_db()
-    conditions = []
-    params: list = []
+    try:
+        conditions = []
+        params: list = []
 
-    if query:
-        conditions.append("content LIKE ?")
-        params.append(f"%{query}%")
-    if user_id:
-        conditions.append("user_id = ?")
-        params.append(user_id)
-    if user_name:
-        conditions.append("user_name LIKE ?")
-        params.append(f"%{user_name}%")
-    if direction:
-        conditions.append("direction = ?")
-        params.append(direction)
+        if query:
+            conditions.append("content LIKE ?")
+            params.append(f"%{query}%")
+        if user_id:
+            conditions.append("user_id = ?")
+            params.append(user_id)
+        if user_name:
+            conditions.append("user_name LIKE ?")
+            params.append(f"%{user_name}%")
+        if direction:
+            conditions.append("direction = ?")
+            params.append(direction)
 
-    conditions.append("created_at >= datetime('now', 'localtime', ?)")
-    params.append(f"-{days} days")
+        conditions.append("created_at >= datetime('now', 'localtime', ?)")
+        params.append(f"-{days} days")
 
-    where = " AND ".join(conditions)
-    params.append(limit)
+        where = " AND ".join(conditions)
+        params.append(limit)
 
-    rows = db.execute(
-        f"SELECT id, user_id, user_name, direction, content, msg_type, source_type, group_id, status, created_at "
-        f"FROM line_messages WHERE {where} ORDER BY created_at DESC LIMIT ?",
-        params,
-    ).fetchall()
+        rows = db.execute(
+            f"SELECT id, user_id, user_name, direction, content, msg_type, source_type, group_id, status, created_at "
+            f"FROM line_messages WHERE {where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
 
-    if not rows:
-        return "沒有找到符合條件的 LINE 訊息。"
+        if not rows:
+            return "沒有找到符合條件的 LINE 訊息。"
 
-    lines = [f"## LINE 訊息（{len(rows)} 則）\n"]
-    for m in rows:
-        arrow = "→" if m["direction"] == "outbound" else "←"
-        src = ""
-        if m["source_type"] == "group" and m["group_id"]:
-            src = f" [群組 {m['group_id']}]"
-        name = m["user_name"] or m["user_id"][:8]
-        chat_id = m["group_id"] if m["source_type"] == "group" and m["group_id"] else m["user_id"]
-        lines.append(
-            f"- {arrow} [{m['created_at']}] **{name}**{src} (chat_id={chat_id}): {m['content'][:200]}"
-        )
-    return "\n".join(lines)
+        lines = [f"## LINE 訊息（{len(rows)} 則）\n"]
+        for m in rows:
+            arrow = "→" if m["direction"] == "outbound" else "←"
+            src = ""
+            if m["source_type"] == "group" and m["group_id"]:
+                src = f" [群組 {m['group_id']}]"
+            name = m["user_name"] or m["user_id"][:8]
+            chat_id = m["group_id"] if m["source_type"] == "group" and m["group_id"] else m["user_id"]
+            lines.append(
+                f"- {arrow} [{m['created_at']}] **{name}**{src} (chat_id={chat_id}): {m['content'][:200]}"
+            )
+        return "\n".join(lines)
+    finally:
+        db.close()
 
 
 # ============================================================
@@ -902,21 +905,24 @@ def register_line_group(
         notes: 備註
     """
     db = get_db()
-    existing = db.execute("SELECT id FROM line_groups WHERE group_id = ?", (group_id,)).fetchone()
-    if existing:
-        db.execute(
-            "UPDATE line_groups SET group_name=COALESCE(NULLIF(?,'')),group_type=?,notes=COALESCE(NULLIF(?,'')),updated_at=datetime('now','localtime') WHERE group_id=?",
-            (group_name, group_type, notes, group_id),
-        )
-        db.commit()
-        return f"✅ 群組已更新：{group_name or group_id}（{group_type}）"
-    else:
-        db.execute(
-            "INSERT INTO line_groups (group_id, group_name, group_type, notes) VALUES (?,?,?,?)",
-            (group_id, group_name, group_type, notes),
-        )
-        db.commit()
-        return f"✅ 群組已註冊：{group_name or group_id}（{group_type}）"
+    try:
+        existing = db.execute("SELECT id FROM line_groups WHERE group_id = ?", (group_id,)).fetchone()
+        if existing:
+            db.execute(
+                "UPDATE line_groups SET group_name=COALESCE(NULLIF(?,'')),group_type=?,notes=COALESCE(NULLIF(?,'')),updated_at=datetime('now','localtime') WHERE group_id=?",
+                (group_name, group_type, notes, group_id),
+            )
+            db.commit()
+            return f"✅ 群組已更新：{group_name or group_id}（{group_type}）"
+        else:
+            db.execute(
+                "INSERT INTO line_groups (group_id, group_name, group_type, notes) VALUES (?,?,?,?)",
+                (group_id, group_name, group_type, notes),
+            )
+            db.commit()
+            return f"✅ 群組已註冊：{group_name or group_id}（{group_type}）"
+    finally:
+        db.close()
 
 
 @mcp.tool()
@@ -927,28 +933,31 @@ def list_line_groups(group_type: str = "") -> str:
         group_type: 篩選類型 — work | customer | supplier | marketing | other | 留空=全部
     """
     db = get_db()
-    if group_type:
-        rows = db.execute(
-            "SELECT group_id, group_name, group_type, notes, created_at FROM line_groups WHERE group_type=? ORDER BY created_at",
-            (group_type,),
-        ).fetchall()
-    else:
-        rows = db.execute(
-            "SELECT group_id, group_name, group_type, notes, created_at FROM line_groups ORDER BY created_at"
-        ).fetchall()
+    try:
+        if group_type:
+            rows = db.execute(
+                "SELECT group_id, group_name, group_type, notes, created_at FROM line_groups WHERE group_type=? ORDER BY created_at",
+                (group_type,),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT group_id, group_name, group_type, notes, created_at FROM line_groups ORDER BY created_at"
+            ).fetchall()
 
-    if not rows:
-        return "目前沒有已註冊的 LINE 群組。"
+        if not rows:
+            return "目前沒有已註冊的 LINE 群組。"
 
-    type_icon = {"work": "💼", "customer": "👤", "supplier": "🏭", "marketing": "📢", "other": "💬"}
-    lines = [f"## LINE 群組（{len(rows)} 個）\n"]
-    for g in rows:
-        icon = type_icon.get(g["group_type"], "💬")
-        name = g["group_name"] or g["group_id"][:12]
-        lines.append(f"- {icon} **{name}** ({g['group_type']}) — chat_id={g['group_id']}")
-        if g["notes"]:
-            lines.append(f"  備註：{g['notes']}")
-    return "\n".join(lines)
+        type_icon = {"work": "💼", "customer": "👤", "supplier": "🏭", "marketing": "📢", "other": "💬"}
+        lines = [f"## LINE 群組（{len(rows)} 個）\n"]
+        for g in rows:
+            icon = type_icon.get(g["group_type"], "💬")
+            name = g["group_name"] or g["group_id"][:12]
+            lines.append(f"- {icon} **{name}** ({g['group_type']}) — chat_id={g['group_id']}")
+            if g["notes"]:
+                lines.append(f"  備註：{g['notes']}")
+        return "\n".join(lines)
+    finally:
+        db.close()
 
 
 # ============================================================
@@ -1894,6 +1903,11 @@ def create_order(customer_id: int, items_json: str, notes: str = "", business_un
 
         total = sum(item.get("qty", 0) * item.get("price", 0) for item in items)
 
+        # 套用客戶折扣率
+        discount = customer["discount_rate"] or 0
+        if discount > 0:
+            total = round(total * (1 - discount))
+
         cursor = db.execute(
             "INSERT INTO orders (customer_id, total_amount, items, business_unit, notes, created_by) VALUES (?,?,?,?,?,?)",
             (customer_id, total, json.dumps(items, ensure_ascii=False), business_unit or None, notes or None, created_by or None),
@@ -1909,9 +1923,8 @@ def create_order(customer_id: int, items_json: str, notes: str = "", business_un
         items_str = "\n".join(f"  - {i.get('name', i.get('sku', '?'))} × {i.get('qty', 0)} @ NT${i.get('price', 0):,.0f}" for i in items)
         base_msg = f"✅ 訂單 #{order_id} 已建立\n客戶：{customer['name']}\n金額：NT${total:,.0f}\n品項：\n{items_str}"
 
-        # 建構下一步指���
+        # 建構下一步指引
         terms = customer["payment_terms"] or "net30"
-        discount = customer["discount_rate"] or 0
 
         company = db.execute("SELECT approval_threshold FROM company WHERE id = 1").fetchone()
         threshold = company["approval_threshold"] if company else 5000
@@ -1935,7 +1948,7 @@ def create_order(customer_id: int, items_json: str, notes: str = "", business_un
         next_steps.append(f"LINE 通知客戶：訂單 #{order_id} 已建立，金額 NT${total:,.0f}")
         next_steps.append(f"LINE 通知倉管/業務：新訂單 #{order_id}，請準備備貨")
 
-        warn = [f"客戶折扣率 {discount*100:.0f}%，確認品項價格已套用折扣"] if discount > 0 else None
+        warn = [f"已套用客戶折扣率 {discount*100:.0f}%"] if discount > 0 else None
         guidance = _build_guidance(next_steps=next_steps, warnings=warn)
 
         return base_msg + guidance

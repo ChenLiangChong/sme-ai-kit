@@ -1,120 +1,133 @@
 # SME-AI-Kit
 
-台灣中小企業（20-30 人）的「開箱即用」AI 營運中樞。
-
-Claude 當你的數位管家 — 管任務、管庫存、管帳、管客戶、管 LINE，全部用講的。
-
-## 成本
-
-- Claude Max $100/月（老闆 + 全公司共用）
-- LINE Official Account（免費方案即可）
-- ngrok 免費帳號
-
-## 安裝
-
-```bash
-git clone https://github.com/charlo0414/sme-ai-kit.git
-cd sme-ai-kit
-bash install.sh
-```
-
-### 前置作業（顧問事先準備）
-
-1. **LINE Messaging API** — 到 [LINE Developers Console](https://developers.line.biz/console/) 建立 Channel，取得 Access Token 和 Secret
-2. **ngrok** — 到 [ngrok](https://dashboard.ngrok.com/) 註冊，取得 Authtoken 和固定域名
-
-### install.sh 會做的事
-
-| 步驟 | macOS | WSL / Linux |
-|------|-------|-------------|
-| 安裝依賴 | `brew install` | `apt install` + `curl` |
-| 收集密鑰 | 原生對話框 | Terminal 輸入 |
-| Python venv | 自動建立 | 自動建立 |
-| Bun 依賴 | 自動安裝 | 自動安裝 |
-| .mcp.json | Claude Code + Desktop 都寫入 | Claude Code + Desktop 都寫入 |
-| 資料庫 | 空白 14 張表 | 空白 14 張表 |
-| 開機自啟 | LaunchAgent | crontab @reboot |
+台灣中小企業的 AI 營運中樞 — Claude 當你的數位管家。
 
 ## 架構
 
 ```
 ┌─────────────────────────────────────────────┐
-│                  Claude Max                  │
+│                Claude Max ($100/月)           │
 ├──────────────────┬──────────────────────────┤
 │   Claude Code    │    Claude Desktop        │
 │   (背景 daemon)  │    (老闆直接用)          │
 │   + LINE Channel │    + Cowork / Dispatch   │
 ├──────────────────┴──────────────────────────┤
 │              共用 SQLite DB                  │
-│    business-db MCP (38 tools)               │
+│     business-db MCP (42 tools)              │
 ├─────────────────────────────────────────────┤
-│   Skills: company-ops + social-media        │
-│   (10 + 23 個 reference modules)            │
+│   Skills: company-ops (12) + social-media   │
 └─────────────────────────────────────────────┘
 ```
 
-- **Claude Code daemon**：背景常駐，即時處理 LINE 訊息
-- **Claude Desktop / Cowork**：老闆的工作台，直接下指令
-- **共用 SQLite**：WAL mode + busy_timeout，兩邊同時讀寫不衝突
+## 成本
 
-## MCP Servers
+| 項目 | 費用 |
+|------|------|
+| Claude Max | NT$3,200/月 |
+| LINE Official Account | 免費 |
+| ngrok | 免費 |
 
-| Server | 語言 | 功能 |
-|--------|------|------|
-| business-db | Python (FastMCP) | 38 tools — 知識/任務/員工/客戶/庫存/帳務/訂單/審核/附件/快照 |
-| line-channel | TypeScript (Bun) | LINE 即時收發 — Channel plugin + ngrok + webhook |
-| social | Python (FastMCP) | FB/IG/Threads 讀取（20 tools） |
+---
 
-## Skills
+## 顧問安裝指南
 
-### company-ops（公司營運）
+### 事前準備
 
-營運儀表板 · 任務管理 · 知識萃取 · 客戶管理 · 庫存管理 · 帳務管理 · LINE 通訊 · 品牌語氣 · 報表生成 · 新人導引 · 訂單管理
+開始安裝前，顧問需先完成：
 
-### social-media（社群行銷）
+1. **ngrok 帳號**
+   - 到 [ngrok.com](https://ngrok.com) 註冊
+   - Dashboard → Your Authtoken → 複製
+   - Dashboard → Domains → 建立固定域名
 
-社群經營 · 社群分析 · 文案撰寫 · 內容生產 · 編輯校對 · Email 觸及 · 行銷營運 · 數據分析 · 競品心理 · 付費獲客 · 成長飛輪 · 留客防流失 · LINE 行銷 · 台灣市場 + PMM 策略模組 ×8
+2. **LINE Messaging API**
+   - [LINE Developers Console](https://developers.line.biz/console/) 建立 Provider + Messaging API Channel
+   - Channel → Messaging API → Issue Channel Access Token（長效）→ 複製
+   - Channel → Basic settings → Channel Secret → 複製
+   - Messaging API → Allow bot to join groups → Enabled
 
-## 導入流程
+3. **LINE Official Account**
+   - [LINE Official Account Manager](https://manager.line.biz/) 確認帳號已開通
 
+### 安裝
+
+```bash
+git clone https://github.com/ChenLiangChong/sme-ai-kit.git
+cd sme-ai-kit
+bash install.sh
 ```
-bash install.sh          # 環境 + 設定（約 10 分鐘）
-↓
-claude                   # 啟動 Claude Code
-↓
-首次訪談                  # Claude 自動引導：
-  → 公司名稱、產業        #   存入 DB，不用改 config
-  → 員工名冊 + LINE 綁定
-  → 商品 / 客戶 / 供應商
-  → 品牌語氣
-  → 審核門檻
-↓
-正式營運                  # LINE 訊息即時處理
+
+install.sh 會自動安裝：Python、Bun、ngrok、Claude Code、所有依賴、空白資料庫。
+
+**不需要輸入任何密鑰** — 所有設定由 Claude 互動完成。
+
+### 設定 LINE
+
+```bash
+claude
 ```
+
+Claude 啟動後偵測到 LINE 未設定，會引導你：
+1. 貼上 LINE Channel Access Token
+2. 貼上 LINE Channel Secret
+3. 貼上 ngrok Authtoken + 固定域名
+4. Claude 自動生成設定、提示重啟
+
+重啟後 Claude 會自動驗證 LINE 連線。
+
+### 常見問題
+
+| 問題 | 解法 |
+|------|------|
+| MCP tools 找不到 | 檢查 .mcp.json 的路徑是否正確（用絕對路徑） |
+| Claude Desktop 找不到 MCP | 需另外設定 Desktop config（Claude 會引導） |
+| LINE 收不到訊息 | 確認 ngrok domain 正確、LINE webhook URL 是 `https://domain/webhook` |
+| ngrok 連不上 | 確認 authtoken 正確：`ngrok config check` |
+
+---
+
+## 首次訪談
+
+LINE 設定完成後，Claude 偵測到空 DB，自動進入首次訪談：
+
+1. 公司基本資料（名稱、產業、審核門檻）
+2. 員工名冊（姓名、職位、權限）
+3. 客戶 / 供應商 / 經銷商
+4. 商品庫存 SKU
+5. 品牌語氣
+6. 營運規則 / SOP
+7. LINE 綁定（員工掃 QR code 加好友）
+
+---
 
 ## 目錄結構
 
 ```
 sme-ai-kit/
-├── install.sh              # 安裝入口（macOS + Linux）
-├── install.py              # 核心安裝邏輯
-├── start.sh                # daemon 啟動腳本（expect）
-├── CLAUDE.md               # AI 助理的操作手冊
-├── CLAUDE.md.template      # 客製化模板
+├── install.sh              # 安裝腳本
+├── start.sh                # daemon 啟動（expect 自動確認）
+├── CLAUDE.md               # AI 助理操作手冊
 ├── mcp-servers/
-│   ├── business-db/        # 企業資料庫 MCP
-│   ├── line-channel/       # LINE Channel MCP
+│   ├── business-db/        # 企業資料庫 MCP (42 tools)
+│   ├── line-channel/       # LINE Channel MCP (6 tools)
 │   └── social/             # 社群媒體 MCP
 ├── .claude/
 │   ├── skills/
-│   │   ├── company-ops/    # 公司營運技能包
-│   │   └── social-media/   # 社群行銷技能包
-│   ├── agents/             # PMM 專家 agents
-│   ├── commands/           # 快捷指令
-│   └── settings.local.json # MCP 權限
-├── data/                   # 資料庫 + 媒體（gitignored）
+│   │   ├── company-ops/    # 公司營運（12 模組）
+│   │   └── social-media/   # 社群行銷（23 模組）
+│   └── settings.local.json
+├── data/                   # DB + 媒體（gitignored）
 └── docs/                   # 文件
 ```
+
+## 日常營運
+
+| 時間 | 做什麼 |
+|------|--------|
+| 早上 | Claude 自動跑營運摘要 + 庫存警報 + 逾期帳款 |
+| 白天 | LINE 訊息即時處理、任務追蹤、記帳 |
+| 傍晚 | 自動保存每日快照 |
+| 月底 | 「出月報」→ 收支彙總 + 庫存盤點 |
 
 ## License
 

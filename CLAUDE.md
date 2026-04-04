@@ -32,14 +32,17 @@
 收到使用者第一句話時，**載入 ops-dashboard.md 執行啟動步驟**。
 
 核心邏輯：
-1. `get_context_summary(scope='full')` — 系統狀態
-2. **判斷是否為首次啟動**：
+1. **檢查 LINE 是否設定好**：嘗試呼叫任一 line tool（如 `list_allowed_users`）
+   - 失敗 → 載入 setup.md 引導環境設定（LINE token / ngrok）
+   - 成功 → 繼續
+2. `get_context_summary(scope='full')` — 系統狀態
+3. **判斷是否為首次啟動**：
    - 如果員工數 = 0 → 這是全新系統，自動載入 knowledge-capture 的「系統導入標準流程」（Step 1-9），引導老闆完成初始設定
    - 如果員工數 > 0 → 正常啟動，繼續下面的步驟
-3. `low_stock_alerts()` — 庫存警報
-4. `check_overdue()` — 逾期帳款
-5. 檢查 `daily_snapshots` 表有沒有今天的紀錄 → 沒有就 `save_daily_snapshot()`
-6. 簡短報告後處理使用者的問題
+4. `low_stock_alerts()` — 庫存警報
+5. `check_overdue()` — 逾期帳款
+6. 檢查 `daily_snapshots` 表有沒有今天的紀錄 → 沒有就 `save_daily_snapshot()`
+7. 簡短報告後處理使用者的問題
 
 ## 反捏造原則
 
