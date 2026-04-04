@@ -31,6 +31,38 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
 
 ---
 
+## 一a、中斷恢復（Context Loss Recovery）
+
+如果 session 中斷或 context 壓縮後，用以下方式快速恢復訂單處理進度：
+
+### 恢復步驟
+
+1. `get_context_summary(scope='full')` — 看「進行中訂單」區塊，每筆訂單旁有下一步提示
+2. 如需詳情 → `get_order(order_id)` — 取得完整狀態
+
+### 狀態 → 下一步對照表
+
+| status | qc_status | 下一步 |
+|--------|-----------|--------|
+| pending | * | `update_order(order_id=X, status='confirmed')` 確認訂單 |
+| confirmed | pending | `qc_order(order_id=X, result='passed')` 品檢 |
+| confirmed | passed | `fulfill_order(order_id=X)` 出貨 |
+| confirmed | failed | 通知主管，處理品質問題後重新 QC |
+| confirmed | partial | 問主管是否部分出貨 |
+| shipped | * | 等待客戶確認送達 → `update_order(order_id=X, status='delivered')` |
+| delivered | * | 收款 → `record_payment(transaction_id=Y, amount=Z)` |
+| paid | * | ✅ 完成，無需動作 |
+
+### 找到對應的應收帳款
+
+出貨後需要收款時：`list_transactions(type='income', related_order_id=X)` 或 `check_overdue()`
+
+### Tool 回傳值指引
+
+每個訂單操作的 tool（`create_order`、`qc_order`、`fulfill_order`、`record_payment`）回傳值都包含 `👉 下一步` 提示，跟著做即可。不需要背流程。
+
+---
+
 ## 二、建立訂單
 
 ### 來源
@@ -51,25 +83,50 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
    - 逐項 `check_stock(sku)` 確認庫存
    - 庫存不足 → 回報：「{品名} 目前庫存 {X} 個，訂單需要 {Y} 個，要繼續嗎？」
 
-3. **建立訂單**
+3. **計算價格**
+   - 查客戶 `discount_rate`（`find_customer` 回傳）
+   - 查商品 `sell_price`（`check_stock` 回傳）
+   - 實際價 = sell_price × (1 - discount_rate)
+   - 特殊報價 → `query_knowledge(question='客戶名 商品名 特價')` 查例外
+   - items_json 的 `price` 用計算後的實際價
+
+4. **建立訂單**
    ```
    create_order(
      customer_id=客戶ID,
-     items_json='[{"sku":"A200","name":"品名","qty":10,"unit_price":150}]',
+     items_json='[{"sku":"A200","name":"品名","qty":10,"price":150}]',
      notes='備註（如有）',
      created_by=建單人
    )
    ```
 
-4. **審核門檻檢查**
+5. **審核門檻檢查**
    - 計算訂單總金額
-   - 查門檻：`get_setting('approval_threshold')`
+   - 查門檻（`company` 表的 `approval_threshold`）
    - 超過門檻 → `create_approval(type='purchase', summary='訂單 #{id} 金額 NT${total}')` → 等主管核准
    - 門檻內 → 直接進入確認
 
-5. **通知**
+6. **通知**
    - LINE 通知客戶：「訂單 #{id} 已建立，{品項明細}，總金額 NT${total}」
    - LINE 通知相關員工（倉管/業務）：「新訂單 #{id}，請準備備貨」
+
+---
+
+## 二a、付款條件判斷
+
+建單後查客戶的 `payment_terms`（`find_customer` 回傳）：
+
+| payment_terms | 流程 |
+|--------------|------|
+| **prepaid** | 通知客戶匯款 → 等 `record_transaction(type='income', related_order_id=訂單ID)` → 付清後才 → confirmed → QC → fulfill |
+| **deposit_30** | 通知客戶付 30% 訂金 → `record_transaction(amount=總額×0.3)` → confirmed → QC → fulfill → 出貨後收尾款 |
+| **net30 / net60** | 直接 → confirmed → QC → fulfill_order（自動建應收帳款，due_date = 出貨日+30/60天） |
+| **cod** | 直接 → QC → fulfill → 送達時收款 |
+
+⚠️ `fulfill_order` 有內建付款條件檢查：
+- prepaid 客戶未付全額 → 拒絕出貨
+- deposit_30 客戶未付 30% → 拒絕出貨
+- net30/net60 → 自動帶 due_date
 
 ---
 
@@ -152,7 +209,7 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
 客戶確認收到貨時：
 
 1. `update_order(order_id, status='delivered')`
-2. `log_interaction(customer_id, type='delivery', summary='訂單 #{id} 已送達')`
+2. `log_interaction(actor='AI助理', action='delivery', target_type='order', target_id=訂單ID, detail='訂單 #{id} 已送達')`
 3. 排程售後關懷（7 天後，參考 crm-ops）：
    - 「{客戶} 您好，上次的訂單使用還順利嗎？有任何問題歡迎告訴我們。」
 
@@ -182,14 +239,8 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
 
 ### 催收邏輯
 
-配合 accounting-ops 的帳齡分類：
-
-| 帳齡 | 動作 |
-|------|------|
-| 到期前 3 天 | 友善提醒：「款項即將到期」 |
-| 逾期 1-30 天 | LINE 提醒：「款項已逾期 {X} 天」 |
-| 逾期 31-60 天 | 電話催收提醒 |
-| 逾期 > 60 天 | 通知老闆，考慮暫停出貨 |
+催收規則統一由 **accounting-ops 第六節**定義（帳齡分類、催收動作、自動通知）。
+order-ops 只負責收款操作（`record_payment`），不重複定義催收時機。
 
 ---
 

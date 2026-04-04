@@ -504,7 +504,7 @@ Surface these without being asked:
 | "Write the landing page" | Full landing page copy: H1, subhead, how it works section, FAQ, meta title + description |
 | "Plan the launch" | Pre-launch checklist, launch channel list with specific actions, outreach target list |
 | "Set up measurement" | GA4 event tracking plan, GSC setup checklist, KPI targets at 30/60/90 days |
-| "Is this tool worth building?" | ROI model (using tool_roi_estimator.py): break-even month, required traffic, lead value threshold |
+| "Is this tool worth building?" | ROI model: break-even month, required traffic, lead value threshold |
 
 
 ## Communication

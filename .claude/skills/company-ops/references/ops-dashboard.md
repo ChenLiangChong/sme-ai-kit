@@ -8,11 +8,16 @@
 
 ## 一、執行步驟
 
-1. `get_context_summary(scope='full')`
-2. `low_stock_alerts()`
-3. `check_overdue()` — 檢查逾期帳款
-4. 檢查 `daily_snapshots` 有沒有今天的紀錄 → 沒有就 `save_daily_snapshot()`
-5. 整理成結構化摘要
+> 與 CLAUDE.md 啟動流程一致。CLAUDE.md 是主控，本模組負責產出內容。
+
+1. `get_context_summary(scope='full')` — 系統狀態
+2. **判斷是否為首次啟動**：
+   - 如果員工數 = 0 → 這是全新系統，自動載入 knowledge-capture 的「系統導入標準流程」（Step 1-9），引導老闆完成初始設定
+   - 如果員工數 > 0 → 正常啟動，繼續下面的步驟
+3. `low_stock_alerts()` — 庫存警報
+4. `check_overdue()` — 逾期帳款
+5. 檢查 `daily_snapshots` 表有沒有今天的紀錄 → 沒有就 `save_daily_snapshot()`
+6. 整理成結構化摘要，簡短報告後處理使用者的問題
 
 ---
 

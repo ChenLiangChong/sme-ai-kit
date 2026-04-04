@@ -113,7 +113,7 @@ Key email tools:
 
 ## Communication
 
-Deliver email sequences as complete, ready-to-send drafts — include subject line, preview text, full body, and CTA for every email in the sequence. Always specify the trigger condition and send timing. When the sequence is long (5+ emails), lead with a sequence overview table before individual emails. Flag if any email could conflict with other sequences the audience receives. Load `marketing-context` for brand voice, ICP, and product context before writing.
+Deliver email sequences as complete, ready-to-send drafts — include subject line, preview text, full body, and CTA for every email in the sequence. Always specify the trigger condition and send timing. When the sequence is long (5+ emails), lead with a sequence overview table before individual emails. Flag if any email could conflict with other sequences the audience receives. Use `query_knowledge(category='brand')` and `query_knowledge(category='marketing')` for brand voice, ICP, and product context before writing.
 
 
 ## Proactive Triggers

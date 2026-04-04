@@ -203,7 +203,7 @@ Surface these without being asked:
 | "Audit my cancel flow" | Scorecard (0-100) with gaps, save rate benchmarks, and prioritized fixes |
 | "Set up dunning" | Retry schedule, 5-email sequence with subject lines and body copy, card updater setup checklist |
 | "Design an exit survey" | 6-8 reason categories with save offer mapping table |
-| "Model churn impact" | Run churn_impact_calculator.py with your inputs — monthly MRR saved and annual impact |
+| "Model churn impact" | Monthly MRR saved and annual impact calculation based on your inputs |
 | "Write win-back emails" | 2-email win-back sequence (7-day and 30-day) with subject lines |
 
 

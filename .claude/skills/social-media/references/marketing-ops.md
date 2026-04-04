@@ -540,7 +540,7 @@ Surface these without being asked:
 
 | When you ask for... | You get... |
 |---------------------|------------|
-| "Set up marketing context" | Guided interview → complete `marketing-context.md` |
+| "Set up marketing context" | Guided interview → save to `query_knowledge(category='brand')` / `query_knowledge(category='marketing')` |
 | "Auto-draft from codebase" | Codebase scan → V1 draft for review |
 | "Update positioning" | Targeted update of differentiation + competitive sections |
 | "Add customer quotes" | Customer language section populated with verbatim phrases |

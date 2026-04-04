@@ -261,7 +261,7 @@ Proactively offer competitor page creation when:
 
 ## Communication
 
-All competitor page outputs should be factually accurate, legally safe (no false claims), and fair to competitors. Acknowledge genuine competitor strengths — pages that only disparage competitors lose credibility with evaluators. Reference `marketing-context` for ICP and positioning before writing any comparison copy. Quality bar: every claim must be verifiable from public sources or customer quotes.
+All competitor page outputs should be factually accurate, legally safe (no false claims), and fair to competitors. Acknowledge genuine competitor strengths — pages that only disparage competitors lose credibility with evaluators. Use `query_knowledge(category='brand')` and `query_knowledge(category='marketing')` for ICP and positioning before writing any comparison copy. Quality bar: every claim must be verifiable from public sources or customer quotes.
 
 
 ## Related Skills

@@ -5,7 +5,7 @@ Social media analytics, ROI calculation, and X/Twitter growth strategy.
 ---
 
 > **台灣市場適用指引**
-> - 台灣主力平台為 FB/IG/Threads/LINE VOOM，X/Twitter 在台灣使用率低，僅作參考
+> - 台灣社群平台優先順序：LINE OA（必備）> FB > IG > YouTube > TikTok > Threads（新興），X/Twitter 在台灣使用率低，僅作參考
 > - 台灣 Meta 廣告 CPC 基準：零售 NT$5-10、金融 NT$15-30，詳見 [taiwan-market.md](taiwan-market.md)
 > - LINE 行銷成效指標見 [line-marketing.md](line-marketing.md)
 

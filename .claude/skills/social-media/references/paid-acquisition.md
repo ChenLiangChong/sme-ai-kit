@@ -567,7 +567,7 @@ Key advertising platforms (Taiwan priority order):
 
 ## Communication
 
-Always confirm conversion tracking is in place before recommending creative or targeting changes — a campaign without proper attribution is guesswork. When recommending budget allocation, state the rationale (testing vs. scaling phase). Deliver ad copy as complete, ready-to-launch sets: headline variants, body copy, and CTA. Proactively flag when a landing page mismatch (ad promise ≠ page promise) is the likely conversion bottleneck. Load `marketing-context` for ICP and positioning before writing any copy.
+Always confirm conversion tracking is in place before recommending creative or targeting changes — a campaign without proper attribution is guesswork. When recommending budget allocation, state the rationale (testing vs. scaling phase). Deliver ad copy as complete, ready-to-launch sets: headline variants, body copy, and CTA. Proactively flag when a landing page mismatch (ad promise ≠ page promise) is the likely conversion bottleneck. Use `query_knowledge(category='brand')` and `query_knowledge(category='marketing')` for ICP and positioning before writing any copy.
 
 
 ## Proactive Triggers

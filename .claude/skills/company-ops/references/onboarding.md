@@ -18,6 +18,7 @@
 - 姓名（必填）
 - 角色：staff / manager（必填）
 - 部門（建議填）
+- 權限：basic / manager / admin（必填，預設依角色：staff→basic, manager→manager）
 - 電話（建議填）
 - LINE user ID（稍後綁定）
 
@@ -130,11 +131,17 @@ create_task(
    ```
 3. **問老闆**：「{姓名} 還有 {N} 項未完成任務，要轉移給誰？」
 4. **轉移任務** → 逐一 `update_task(task_id, assignee=新負責人)`
-5. **LINE 解綁** → `register_employee(name=姓名, line_user_id='', role=原角色, department=原部門, permissions='none')`
-6. **停用帳號** → ⚠️ 目前無法直接設定 active=0。替代做法：
-   - 上一步已把 permissions 降為 'none'（無法執行任何操作）
-   - `store_fact(category='hr', title='離職記錄-{姓名}', content='離職日期：{日期}，原因：{原因}，已轉移任務、解綁LINE')`
-   - 離職員工仍會出現在 `list_employees` 中，但 permissions='none' 使其無法操作
+5. **停用帳號 + 解綁 LINE**：
+   ```
+   update_employee(
+     employee_id=員工ID,
+     line_user_id='',       // 清除 LINE 綁定
+     permissions='none',    // 移除所有權限
+     active=0,              // 標記為離職
+     notes='離職日期：{日期}，原因：{原因}'
+   )
+   ```
+6. **記錄** → `store_fact(category='hr', title='離職記錄-{姓名}', content='離職日期：{日期}，原因：{原因}，已轉移任務、解綁LINE、停用帳號')`
 7. **回報完成**
 
 ### 知識轉移
@@ -147,7 +154,7 @@ create_task(
 
 ## 七、注意事項
 
-- 離職不刪除紀錄，透過 permissions='none' 停用（目前無法直接設定 active=0）
+- 離職不刪除紀錄，用 `update_employee(active=0)` 停用，`list_employees(active_only=True)` 會自動過濾
 - LINE 綁定用自然語言比對，不用綁定碼
 - 所有操作記 interaction_log
 - 新人第一週多包容，回覆更詳細

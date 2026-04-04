@@ -13,16 +13,14 @@
 
 從對話中提取：類型（收入/支出）、金額、分類、描述、日期
 
-1. 查審核門檻：`get_setting('approval_threshold')` 或 `query_knowledge(category='finance')`
-   - 尚未設定門檻 → 建議老闆設定，暫用 NT$5,000 作為預設
-2. 金額超過門檻 → 先建審核：
-   `create_approval(type='purchase', summary='支出 NT${金額} [{分類}] {描述}')`
-   → 等主管核准（LINE 回覆「核准 #{id}」）
-   → 核准後才 `record_transaction(...)`
-3. 金額在門檻內 → 直接 `record_transaction(...)`
-4. 回報：「已記錄 {類型} NT${金額} [{分類}]」
+1. 查審核門檻：`record_transaction` 內建門檻攔截（讀 `company` 表的 `approval_threshold`），超過會自動拒絕記帳
+2. AI 應**主動先判斷**，超過門檻先 `create_approval`，不要等 record_transaction 擋
+3. 門檻設定：`update_company(approval_threshold=金額)`
+4. 超過門檻 → `create_approval(type='purchase', summary='...')` → 等核准 → `record_transaction`
+5. 門檻內 → 直接 `record_transaction`
+6. 回報：「已記錄 {類型} NT${金額} [{分類}]」
 
-⚠️ `record_transaction` 本身沒有攔截功能，審核判斷由 AI 負責。
+⚠️ record_transaction 有內建安全網（超過 company.approval_threshold 會自動拒絕），但 AI 應主動先建審核，提供更好的使用體驗。
 
 缺少資訊時：
 - 沒說金額 → 必問
@@ -171,22 +169,22 @@
 - 月底結帳前
 - 客戶要求出貨時（先確認該客戶有無逾期款）
 
-### 自動催收通知
-
-啟動流程中 `check_overdue()` 如果回傳逾期帳款，依帳齡自動處理：
-
-1. **逾期 > 7 天** → LINE 通知老闆：「{客戶} 有 NT${金額} 逾期 {天數} 天」
-2. **逾期 > 30 天** → 自動建立催收任務：`create_task(title='催收：{客戶} NT${金額}', category='admin')`
-3. **逾期 > 60 天** → 標記為高優先級，LINE 通知老闆 + 建議暫停該客戶出貨
-
 ### 帳齡分類與催收
 
 | 帳齡 | 分類 | 催收動作 |
 |------|------|---------|
-| 0-30 天 | 正常 | 不催，但記錄 |
-| 31-60 天 | 注意 | LINE 友善提醒 |
-| 61-90 天 | 警告 | 電話催收，考慮暫停出貨 |
-| > 90 天 | 逾期 | 正式催收函 |
+| 1-30 天 | 正常 | 記錄，不催客戶。LINE 通知老闆：「{客戶} 有 NT${金額} 逾期 {天數} 天」 |
+| 31-60 天 | 注意 | LINE 友善提醒客戶 + 自動建立催收任務：`create_task(title='催收：{客戶} NT${金額}', category='admin')` |
+| 61-90 天 | 警告 | 電話催收，建議暫停該客戶出貨，LINE 通知老闆 |
+| > 90 天 | 逾期 | 正式催收函，暫停出貨 |
+
+### 自動催收通知（啟動流程觸發）
+
+每日啟動流程 `check_overdue()` 回傳逾期帳款時，依上方帳齡表自動處理：
+- 1-30 天 → 只通知老闆（不打擾客戶）
+- 31-60 天 → 通知老闆 + LINE 友善提醒客戶 + 建催收任務
+- 61-90 天 → 通知老闆 + 建議暫停出貨
+- > 90 天 → 通知老闆 + 建議正式催收
 
 催收範本：
 - 31-60 天：「{客戶} 您好，提醒您 {日期} 款項 NT${金額} 尚未收到，方便安排嗎？」

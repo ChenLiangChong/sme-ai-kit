@@ -10,14 +10,14 @@
 |--------|------|------|
 | format_check.py | ✅ 0 error, 0 warning | |
 | quick_validate.py | ✅ valid | |
-| audit_unreferenced_files.py | ✅ 0 issues (20 referenced / 20 files) | |
+| audit_unreferenced_files.py | ✅ 0 issues (22 referenced / 22 files) | |
 | audit_skill_references.py | ✅ 0 issues | |
 | Frontmatter name/description | ✅ | description 用雙引號 |
 | 斷裂引用連結 | ✅ 已清除 | 37+10 個已修 |
-| `marketing-context.md` 條件引用 | ✅ 已替換 | 20 個已改為 `query_knowledge` |
+| `marketing-context.md` 條件引用 | ✅ 已替換 | 26 個已改為 `query_knowledge`（含本次追加修正 6 個） |
 | 幽靈腳本引用 (`scripts/*.py`) | ✅ 已清除 | ~30 個 |
 | 幽靈外部整合引用 (`../../tools/`) | ✅ 已清除 | ~12 個 |
-| Related Skills 舊 skill 名稱 | ✅ 已更新 | 全部 20 個 reference |
+| Related Skills 舊 skill 名稱 | ✅ 已更新 | 全部 22 個 reference |
 | PMM 重複段落 | ✅ 已消除 | pmm-market 的 International Expansion 指向 pmm-gtm |
 
 ---
@@ -56,7 +56,7 @@
 
 1. ~~**內容適用性**~~ → ✅ 已在地化：新增 taiwan-market.md 和 line-marketing.md，各模組加入台灣市場指引，SaaS 用語已改為產業中立。
 2. **品牌語氣 handoff 不完整** — SKILL.md 宣告了與 company-ops brand-voice 的協作，但各 reference 內部未實作 handoff 指示。
-3. ~~**平台偏差**~~ → ✅ 已修正：Platform Quick Reference 改為台灣優先順序（FB > IG > Threads > LINE VOOM），X/Twitter 區段已縮減為參考。
+3. ~~**平台偏差**~~ → ✅ 已修正：Platform Quick Reference 改為台灣優先順序（LINE OA > FB > IG > YouTube > TikTok > Threads），X/Twitter 區段已縮減為參考。
 4. ~~**金額單位**~~ → ✅ 已加入 TWD 基準：Platform Benchmarks 加入台灣數據，growth-loops 預算改為 TWD。
 5. **growth-loops.md 行數較多** — 包含 referral-program + free-tool-strategy + demand-acquisition，性質差異大，未來可考慮再拆。
 
@@ -75,9 +75,9 @@
 - line-marketing.md — LINE 行銷策略參考（OA 功能、群發策略、Flex Message、會員經營）
 
 ### 全域修改
-- 所有 11 個執行模組加入「台灣市場適用指引」區段（繁體中文 blockquote）
+- 所有 12 個執行模組加入「台灣市場適用指引」區段（繁體中文 blockquote）
 - SaaS 非技術性描述改為產業中立用語
-- 平台表格改為台灣優先順序（FB > IG > Threads > LINE VOOM > YouTube > TikTok）
+- 平台表格改為台灣優先順序（LINE OA > FB > IG > YouTube > TikTok > Threads）
 - X/Twitter Growth 區段縮減為精簡參考
 - demand-acquisition 預算改為 TWD，渠道改為口碑+LINE+Google 商家+社群
 - paid-acquisition 平台選擇改為 Meta Ads 為主

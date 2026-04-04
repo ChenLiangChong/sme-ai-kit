@@ -44,6 +44,20 @@
 - 用名字/電話/標籤 → `find_customer(query)`
 - 列出所有 VIP → `find_customer('vip')`
 
+### 定價等級與付款條件
+
+每個客戶有 `discount_rate`（折扣率）和 `payment_terms`（付款條件）。
+
+| 欄位 | 說明 | 範例 |
+|------|------|------|
+| discount_rate | 折扣率（0=原價, 0.15=85折） | 8折經銷商: 0.2 |
+| payment_terms | 付款條件 | prepaid / cod / deposit_30 / net30 / net60 |
+
+操作：
+- 新增時設定：`add_customer(..., discount_rate=0.15, payment_terms='net30')`
+- 修改：`update_customer(id, discount_rate=0.2, payment_terms='net60')`
+- 特殊單品報價：`store_fact(category='pricing', title='A經銷商 WIA-001 特價', content='NT$350')`
+
 ### 資料衛生
 
 每月自動檢查：

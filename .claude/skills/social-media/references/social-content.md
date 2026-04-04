@@ -5,7 +5,7 @@ Social media content creation, calendar planning, and community management.
 ---
 
 > **台灣市場適用指引**
-> - 台灣社群平台優先順序：FB > IG > Threads > LINE VOOM > YouTube > TikTok，LINE 官方帳號另為必備的客戶經營管道
+> - 台灣社群平台優先順序：LINE OA（必備）> FB > IG > YouTube > TikTok > Threads（新興），詳見 [taiwan-market.md](taiwan-market.md)
 > - 內容以繁體中文為主，注意台灣用語習慣（如「貼文」非「帖子」、「按讚」非「點贊」）
 > - 完整台灣市場數據見 [taiwan-market.md](taiwan-market.md)
 > - LINE 行銷策略見 [line-marketing.md](line-marketing.md)

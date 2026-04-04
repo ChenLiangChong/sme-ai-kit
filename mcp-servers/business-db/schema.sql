@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS customers (
     pipeline_stage TEXT DEFAULT 'none',
     total_purchases REAL DEFAULT 0,
     last_purchase_date TEXT,
+    discount_rate REAL DEFAULT 0,
+    payment_terms TEXT DEFAULT 'net30',
     created_at DATETIME DEFAULT (datetime('now', 'localtime'))
 );
 

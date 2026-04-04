@@ -1,12 +1,12 @@
 """
 SME-AI-Kit Business DB MCP Server
-SQLite 企業營運資料庫，34 個 MCP tools。
+SQLite 企業營運資料庫，42 個 MCP tools。
 涵蓋：知識管理、任務、員工、客戶、庫存、帳務、訂單、審核、快照、設定。
 """
 import sqlite3
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -28,11 +28,22 @@ def get_db() -> sqlite3.Connection:
 
 
 def init_db():
-    """首次啟動時建立所有表。"""
+    """首次啟動時建立所有表。既有 DB 自動補新欄位。"""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     db = get_db()
     if SCHEMA_PATH.exists():
         db.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    # 既有 DB 補新欄位（ALTER TABLE 失敗表示已存在，靜默忽略）
+    for stmt in [
+        "ALTER TABLE customers ADD COLUMN line_user_id TEXT",
+        "ALTER TABLE customers ADD COLUMN discount_rate REAL DEFAULT 0",
+        "ALTER TABLE customers ADD COLUMN payment_terms TEXT DEFAULT 'net30'",
+    ]:
+        try:
+            db.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
+    db.commit()
     db.close()
 
 
@@ -55,6 +66,22 @@ def _like_param(query: str) -> str:
     """將使用者輸入轉為 LIKE 查詢參數。SME 資料量小，LIKE 比 FTS5 更適合 CJK。"""
     cleaned = query.strip().replace("%", "").replace("_", "")
     return f"%{cleaned}%"
+
+
+def _build_guidance(
+    auto_done: list[str] | None = None,
+    next_steps: list[str] | None = None,
+    warnings: list[str] | None = None,
+) -> str:
+    """Build structured guidance block for tool returns."""
+    parts: list[str] = []
+    if auto_done:
+        parts.append("\n📋 已自動完成：\n" + "\n".join(f"- {s}" for s in auto_done))
+    if next_steps:
+        parts.append("\n👉 下一步：\n" + "\n".join(f"{i+1}. {s}" for i, s in enumerate(next_steps)))
+    if warnings:
+        parts.append("\n⚠️ 注意：\n" + "\n".join(f"- {s}" for s in warnings))
+    return "\n".join(parts) if parts else ""
 
 
 # === MCP Server ===
@@ -279,14 +306,23 @@ def get_context_summary(scope: str = "full") -> str:
                 due = f" 截止:{t['due_date']}" if t["due_date"] else ""
                 sections.append(f"- {pri} [#{t['id']}] {t['title']} → {t['assignee'] or '未指派'}{due}")
 
-        # 等待審核
+        # 等待審核（含 detail 提示）
         approvals = db.execute(
-            "SELECT id, type, summary, requester, created_at FROM approvals WHERE status = 'waiting' ORDER BY created_at",
+            "SELECT id, type, summary, detail, requester, created_at FROM approvals WHERE status = 'waiting' ORDER BY created_at",
         ).fetchall()
         if approvals:
             sections.append(f"\n## ⏳ 等待審核（{len(approvals)} 項）")
             for a in approvals:
-                sections.append(f"- [#{a['id']}] {a['type']}: {a['summary']} (申請人:{a['requester'] or '?'})")
+                detail_hint = ""
+                if a["detail"]:
+                    try:
+                        d = json.loads(a["detail"])
+                        resume = d.get("resume_action", "")
+                        if resume:
+                            detail_hint = f" → 核准後執行 {resume}"
+                    except (json.JSONDecodeError, AttributeError):
+                        detail_hint = f" | {a['detail'][:50]}"
+                sections.append(f"- [#{a['id']}] {a['type']}: {a['summary']} (申請人:{a['requester'] or '?'}){detail_hint}")
 
         # 未處理 LINE 訊息
         queued = db.execute(
@@ -325,15 +361,34 @@ def get_context_summary(scope: str = "full") -> str:
                 sections.append(f"\n## 🔄 上次 Session 交接（{handoff['created_at']}）")
                 sections.append(handoff["summary"])
 
-            # 進行中的訂單
+            # 進行中的訂單（含下一步提示）
             active_orders = db.execute(
-                "SELECT o.id, o.status, o.total_amount, c.name as customer_name FROM orders o LEFT JOIN customers c ON o.customer_id = c.id WHERE o.status IN ('pending','confirmed','shipped') ORDER BY o.created_at DESC LIMIT 5"
+                """SELECT o.id, o.status, o.qc_status, o.total_amount, c.name as customer_name
+                   FROM orders o LEFT JOIN customers c ON o.customer_id = c.id
+                   WHERE o.status IN ('pending','confirmed','shipped','delivered')
+                   ORDER BY o.created_at DESC LIMIT 10"""
             ).fetchall()
             if active_orders:
                 sections.append(f"\n## 📦 進行中訂單（{len(active_orders)} 筆）")
-                status_icon = {"pending": "⏳", "confirmed": "✅", "shipped": "🚚"}
+                status_icon = {"pending": "⏳", "confirmed": "✅", "shipped": "🚚", "delivered": "📦"}
                 for o in active_orders:
-                    sections.append(f"- {status_icon.get(o['status'], '')} [#{o['id']}] {o['customer_name'] or '?'} NT${o['total_amount']:,.0f}")
+                    hint = ""
+                    if o["status"] == "pending":
+                        hint = " → 待確認"
+                    elif o["status"] == "confirmed" and o["qc_status"] == "pending":
+                        hint = f" → 待品檢 qc_order(order_id={o['id']})"
+                    elif o["status"] == "confirmed" and o["qc_status"] == "passed":
+                        hint = f" → 可出貨 fulfill_order(order_id={o['id']})"
+                    elif o["status"] == "confirmed" and o["qc_status"] == "failed":
+                        hint = " → QC不合格，需處理"
+                    elif o["status"] == "shipped":
+                        hint = " → 待送達確認"
+                    elif o["status"] == "delivered":
+                        hint = " → 待收款"
+                    sections.append(
+                        f"- {status_icon.get(o['status'], '')} [#{o['id']}] "
+                        f"{o['customer_name'] or '?'} NT${o['total_amount']:,.0f}{hint}"
+                    )
 
             # 逾期帳款
             overdue_count = db.execute("SELECT COUNT(*) as c FROM transactions WHERE payment_status = 'overdue'").fetchone()["c"]
@@ -906,8 +961,11 @@ def add_customer(
     type: str = "customer",
     phone: str = "",
     email: str = "",
+    line_user_id: str = "",
     tags: str = "",
     notes: str = "",
+    discount_rate: float = 0.0,
+    payment_terms: str = "net30",
 ) -> str:
     """新增客戶、供應商或經銷商。
 
@@ -916,18 +974,22 @@ def add_customer(
         type: 類型 — customer（客戶）| supplier（供應商）| distributor（經銷商）| partner | prospect
         phone: 電話
         email: Email
+        line_user_id: LINE User ID（用於 LINE 身份辨識）
         tags: 標籤（逗號分隔，如 vip,wholesale）
         notes: 備註
+        discount_rate: 折扣率（0=原價, 0.15=85折, 0.2=8折）
+        payment_terms: 付款條件 — prepaid | cod | deposit_30 | net30 | net60
     """
 
     db = get_db()
     try:
         cursor = db.execute(
-            "INSERT INTO customers (name, type, phone, email, tags, notes) VALUES (?,?,?,?,?,?)",
-            (name, type, phone or None, email or None, tags or None, notes or None),
+            "INSERT INTO customers (name, type, phone, email, line_user_id, tags, notes, discount_rate, payment_terms) VALUES (?,?,?,?,?,?,?,?,?)",
+            (name, type, phone or None, email or None, line_user_id or None,
+             tags or None, notes or None, discount_rate, payment_terms),
         )
         db.commit()
-        return f"✅ 客戶 #{cursor.lastrowid} {name} 已建立"
+        return f"✅ 客戶 #{cursor.lastrowid} {name} 已建立（{payment_terms}）" + (f" LINE已綁定" if line_user_id else "")
     finally:
         db.close()
 
@@ -945,17 +1007,17 @@ def find_customer(query: str, type: str = "") -> str:
     try:
         if type:
             customers = db.execute(
-                """SELECT id, name, type, phone, email, tags, notes, pipeline_stage, total_purchases, last_purchase_date
-                   FROM customers WHERE type = ? AND (name LIKE ? OR notes LIKE ? OR tags LIKE ? OR phone LIKE ?)
+                """SELECT id, name, type, phone, email, line_user_id, tags, notes, pipeline_stage, total_purchases, last_purchase_date, discount_rate, payment_terms
+                   FROM customers WHERE type = ? AND (name LIKE ? OR notes LIKE ? OR tags LIKE ? OR phone LIKE ? OR line_user_id = ?)
                    LIMIT 10""",
-                (type, like, like, like, like),
+                (type, like, like, like, like, query.strip()),
             ).fetchall()
         else:
             customers = db.execute(
-                """SELECT id, name, type, phone, email, tags, notes, pipeline_stage, total_purchases, last_purchase_date
-                   FROM customers WHERE name LIKE ? OR notes LIKE ? OR tags LIKE ? OR phone LIKE ?
+                """SELECT id, name, type, phone, email, line_user_id, tags, notes, pipeline_stage, total_purchases, last_purchase_date, discount_rate, payment_terms
+                   FROM customers WHERE name LIKE ? OR notes LIKE ? OR tags LIKE ? OR phone LIKE ? OR line_user_id = ?
                    LIMIT 10""",
-                (like, like, like, like),
+                (like, like, like, like, query.strip()),
             ).fetchall()
         if not customers:
             return f"找不到與「{query}」相關的{'客戶' if not type else type}。"
@@ -968,9 +1030,12 @@ def find_customer(query: str, type: str = "") -> str:
             if c['pipeline_stage'] and c['pipeline_stage'] != 'none':
                 s_icon = stage_icon.get(c['pipeline_stage'], '')
                 stage = f" {s_icon}{c['pipeline_stage']}"
+            terms_str = f" 📄{c['payment_terms']}" if c['payment_terms'] and c['payment_terms'] != 'net30' else ""
+            discount_str = f" 🏷️{c['discount_rate']*100:.0f}%off" if c['discount_rate'] and c['discount_rate'] > 0 else ""
             lines.append(
                 f"- {icon} [#{c['id']}] **{c['name']}** ({c['type']}){stage} {c['phone'] or ''} "
-                f"{'💰' + str(c['total_purchases']) if c['total_purchases'] else ''} "
+                f"{'💰' + str(c['total_purchases']) if c['total_purchases'] else ''}"
+                f"{terms_str}{discount_str} "
                 f"{c['tags'] or ''}"
             )
         return "\n".join(lines)
@@ -984,10 +1049,13 @@ def update_customer(
     name: str = "",
     phone: str = "",
     email: str = "",
+    line_user_id: str = "__SKIP__",
     tags: str = "",
     notes: str = "",
     pipeline_stage: str = "",
     total_purchases: float = -1,
+    discount_rate: float = -1.0,
+    payment_terms: str = "",
 ) -> str:
     """更新客戶/供應商/經銷商資訊。
 
@@ -996,10 +1064,13 @@ def update_customer(
         name: 新姓名（空白=不更新）
         phone: 新電話
         email: 新 Email
+        line_user_id: LINE User ID（傳空字串清除綁定）
         tags: 新標籤
         notes: 新備註
         pipeline_stage: 業務階段 — none | prospect | contacted | negotiating | closed_won | closed_lost
         total_purchases: 累計消費金額（-1=不更新）
+        discount_rate: 折扣率（-1=不更新，0=原價，0.15=85折）
+        payment_terms: 付款條件 — prepaid | cod | deposit_30 | net30 | net60（空白=不更新）
     """
     db = get_db()
     try:
@@ -1018,6 +1089,9 @@ def update_customer(
         if email:
             updates.append("email = ?")
             params.append(email)
+        if line_user_id != "__SKIP__":
+            updates.append("line_user_id = ?")
+            params.append(line_user_id or None)
         if tags:
             updates.append("tags = ?")
             params.append(tags)
@@ -1030,6 +1104,12 @@ def update_customer(
         if total_purchases >= 0:
             updates.append("total_purchases = ?")
             params.append(total_purchases)
+        if discount_rate >= 0:
+            updates.append("discount_rate = ?")
+            params.append(discount_rate)
+        if payment_terms:
+            updates.append("payment_terms = ?")
+            params.append(payment_terms)
 
         if not updates:
             return "沒有指定要更新的欄位。"
@@ -1086,19 +1166,74 @@ def check_stock(sku_or_name: str) -> str:
 
 
 @mcp.tool()
-def update_stock(sku: str, quantity_change: int, reason: str = "") -> str:
-    """調整庫存數量（正數=進貨，負數=出貨/損耗）。
+def update_stock(
+    sku: str,
+    quantity_change: int,
+    reason: str = "",
+    name: str = "",
+    sell_price: float = -1,
+    unit_cost: float = -1,
+    min_stock: int = -1,
+    unit: str = "",
+    category: str = "",
+) -> str:
+    """調整庫存數量（正數=進貨，負數=出貨/損耗）。SKU 不存在時自動建立新品項。
 
     Args:
         sku: SKU 編號
         quantity_change: 數量變動（正=進貨，負=出貨）
         reason: 調整原因
+        name: 品項名稱（新建 SKU 時使用）
+        sell_price: 售價（-1=不設定）
+        unit_cost: 成本（-1=不設定）
+        min_stock: 安全庫存（-1=不設定）
+        unit: 單位（如「個」「箱」「組」）
+        category: 品項分類
     """
     db = get_db()
     try:
         item = db.execute("SELECT * FROM inventory WHERE sku = ?", (sku,)).fetchone()
         if not item:
-            return f"ERROR: 找不到 SKU={sku}"
+            if quantity_change <= 0:
+                return f"ERROR: 找不到 SKU={sku}（新增品項請用正數）"
+            # SKU 不存在 → 自動建立新品項（帶入所有有值的欄位）
+            cols = ["sku", "name", "current_stock"]
+            vals = [sku, name or sku, quantity_change]
+            if sell_price >= 0:
+                cols.append("sell_price"); vals.append(sell_price)
+            if unit_cost >= 0:
+                cols.append("unit_cost"); vals.append(unit_cost)
+            if min_stock >= 0:
+                cols.append("min_stock"); vals.append(min_stock)
+            if unit:
+                cols.append("unit"); vals.append(unit)
+            if category:
+                cols.append("category"); vals.append(category)
+            placeholders = ",".join("?" for _ in cols)
+            db.execute(f"INSERT INTO inventory ({','.join(cols)}) VALUES ({placeholders})", vals)
+            db.execute(
+                "INSERT INTO interaction_log (actor, action, target_type, target_id, detail) VALUES (?,?,?,?,?)",
+                ("system", "stock_created", "inventory", 0,
+                 f"新建品項 [{sku}] {name or sku}，初始庫存 {quantity_change}。{reason or ''}"),
+            )
+            db.commit()
+            # 新建品項的進貨記帳提醒
+            new_item_guidance = ""
+            item_unit = unit or "個"
+            item_name = name or sku
+            if unit_cost >= 0 and quantity_change > 0:
+                cost = quantity_change * unit_cost
+                new_item_guidance = _build_guidance(next_steps=[
+                    f"record_transaction(type='expense', amount={cost}, category='inventory_purchase', "
+                    f"description='進貨 {item_name} {quantity_change}{item_unit} @ NT${unit_cost:,.0f}')",
+                    "問使用者：已付款(payment_status='paid')還是賒帳(payment_status='pending')？",
+                ])
+            elif quantity_change > 0:
+                new_item_guidance = _build_guidance(next_steps=[
+                    f"record_transaction(type='expense', category='inventory_purchase', "
+                    f"description='進貨 {item_name} {quantity_change}{item_unit}') — 需確認進貨金額",
+                ])
+            return f"✅ 新建品項 [{sku}] {name or sku}，初始庫存 {quantity_change}{unit or '個'}" + new_item_guidance
 
         new_stock = item["current_stock"] + quantity_change
         if new_stock < 0:
@@ -1122,7 +1257,23 @@ def update_stock(sku: str, quantity_change: int, reason: str = "") -> str:
         alert = ""
         if new_stock <= item["min_stock"] and item["min_stock"] > 0:
             alert = f"\n⚠️ 庫存警報：{item['name']} 剩 {new_stock}{item['unit']}，低於安全庫存 {item['min_stock']}"
-        return f"✅ [{sku}] {item['name']}: {item['current_stock']} → {new_stock}{item['unit']}" + alert
+
+        guidance = ""
+        if quantity_change > 0:
+            if item["unit_cost"]:
+                cost = abs(quantity_change) * item["unit_cost"]
+                guidance = _build_guidance(next_steps=[
+                    f"record_transaction(type='expense', amount={cost}, category='inventory_purchase', "
+                    f"description='進貨 {item['name']} {quantity_change}{item['unit']} @ NT${item['unit_cost']:,.0f}')",
+                    "問使用者：已付款(payment_status='paid')還是賒帳(payment_status='pending')？",
+                ])
+            else:
+                guidance = _build_guidance(next_steps=[
+                    f"record_transaction(type='expense', category='inventory_purchase', "
+                    f"description='進貨 {item['name']} {quantity_change}{item['unit']}') — 需確認進貨金額",
+                ])
+
+        return f"✅ [{sku}] {item['name']}: {item['current_stock']} → {new_stock}{item['unit']}" + alert + guidance
     finally:
         db.close()
 
@@ -1206,7 +1357,29 @@ def resolve_approval(approval_id: int, decision: str, decided_by: str) -> str:
         )
         db.commit()
         icon = "✅" if decision == "approved" else "❌"
-        return f"{icon} 審核 #{approval_id} 已{('核准' if decision == 'approved' else '駁回')}（{decided_by}）"
+        decision_label = "核准" if decision == "approved" else "駁回"
+        msg = f"{icon} 審核 #{approval_id} 已{decision_label}（{decided_by}）"
+        msg += f"\n類型：{approval['type']}\n摘要：{approval['summary']}"
+
+        if approval["detail"]:
+            if decision == "approved":
+                try:
+                    detail_obj = json.loads(approval["detail"])
+                    resume_action = detail_obj.get("resume_action", "")
+                    resume_params = detail_obj.get("resume_params", {})
+                    then_desc = detail_obj.get("then", "")
+                    if resume_action:
+                        params_str = ", ".join(f"{k}={repr(v)}" for k, v in resume_params.items())
+                        steps = [f"{resume_action}({params_str})"]
+                        if then_desc:
+                            steps.append(then_desc)
+                        msg += _build_guidance(next_steps=steps)
+                except (json.JSONDecodeError, AttributeError):
+                    msg += f"\n詳情：{approval['detail'][:200]}"
+            else:
+                msg += f"\n原始請求：{approval['detail'][:200]}"
+
+        return msg
     finally:
         db.close()
 
@@ -1261,9 +1434,23 @@ def record_transaction(
         threshold = company["approval_threshold"] if company else 5000
 
         if amount >= threshold:
+            detail_json = json.dumps({
+                "resume_action": "record_transaction",
+                "resume_params": {
+                    "type": type, "amount": amount, "category": category,
+                    "description": description, "transaction_date": transaction_date,
+                    "related_customer_id": related_customer_id,
+                    "related_order_id": related_order_id,
+                    "payment_status": payment_status, "due_date": due_date,
+                },
+                "then": "記帳完成後通知相關人員",
+            }, ensure_ascii=False)
             return (
-                f"⚠️ 金額 NT${amount:,.0f} 超過審核門檻 NT${threshold:,.0f}。\n"
-                f"請先用 create_approval 建立審核請求，核准後再記帳。"
+                f"⚠️ 金額 NT${amount:,.0f} 超過審核門檻 NT${threshold:,.0f}。"
+                + _build_guidance(next_steps=[
+                    f"create_approval(type='{type}', summary='{type} NT${amount:,.0f} [{category}]', detail='{detail_json}')",
+                    "LINE 通知主管審核",
+                ])
             )
 
         if payment_status not in ("paid", "pending", "overdue"):
@@ -1289,7 +1476,31 @@ def record_transaction(
 
         icon = "💰" if type == "income" else "💸"
         status_label = {"paid": "已付", "pending": "待收付", "overdue": "逾期"}.get(payment_status, "")
-        return f"✅ {icon} 帳目 #{txn_id}：{type} NT${amount:,.0f} [{category}] {status_label} {transaction_date}"
+        base_msg = f"✅ {icon} 帳目 #{txn_id}：{type} NT${amount:,.0f} [{category}] {status_label} {transaction_date}"
+
+        guidance = ""
+        if related_order_id and type == "income" and payment_status == "paid":
+            order = db.execute(
+                "SELECT status, total_amount FROM orders WHERE id = ?", (related_order_id,)
+            ).fetchone()
+            if order and order["status"] not in ("paid", "cancelled"):
+                total_paid = db.execute(
+                    "SELECT COALESCE(SUM(amount), 0) as s FROM transactions "
+                    "WHERE related_order_id = ? AND type = 'income' AND payment_status = 'paid'",
+                    (related_order_id,),
+                ).fetchone()["s"]
+                if total_paid >= order["total_amount"]:
+                    guidance = _build_guidance(next_steps=[
+                        f"update_order(order_id={related_order_id}, status='paid') — 訂單已全額收款",
+                        "LINE 通知客戶：已收到款項，感謝！",
+                    ])
+                else:
+                    remaining = order["total_amount"] - total_paid
+                    guidance = _build_guidance(next_steps=[
+                        f"訂單 #{related_order_id} 尚欠 NT${remaining:,.0f}，等待後續付款",
+                    ])
+
+        return base_msg + guidance
     finally:
         db.close()
 
@@ -1628,10 +1839,25 @@ def record_payment(transaction_id: int, amount: float, notes: str = "") -> str:
         )
         db.commit()
 
+        guidance = ""
+        if new_status == "paid" and txn["related_order_id"]:
+            order = db.execute(
+                "SELECT status FROM orders WHERE id = ?", (txn["related_order_id"],)
+            ).fetchone()
+            if order and order["status"] not in ("paid", "cancelled"):
+                guidance = _build_guidance(next_steps=[
+                    f"update_order(order_id={txn['related_order_id']}, status='paid') — 訂單全額收款完成",
+                    "LINE 通知客戶：已收到款項，感謝！",
+                ])
+        elif new_status != "paid" and txn["related_order_id"]:
+            guidance = _build_guidance(next_steps=[
+                f"訂單 #{txn['related_order_id']} 尚欠 NT${remaining:,.0f}",
+            ])
+
         if new_status == "paid":
-            return f"✅ 帳目 #{transaction_id} 已全額付清（NT${txn['amount']:,.0f}）"
+            return f"✅ 帳目 #{transaction_id} 已全額付清（NT${txn['amount']:,.0f}）" + guidance
         else:
-            return f"✅ 帳目 #{transaction_id} 已收到 NT${amount:,.0f}，剩餘 NT${remaining:,.0f}"
+            return f"✅ 帳目 #{transaction_id} 已收到 NT${amount:,.0f}，剩餘 NT${remaining:,.0f}" + guidance
     finally:
         db.close()
 
@@ -1654,7 +1880,9 @@ def create_order(customer_id: int, items_json: str, notes: str = "", business_un
     db = get_db()
     try:
         # 驗證客戶存在
-        customer = db.execute("SELECT name FROM customers WHERE id = ?", (customer_id,)).fetchone()
+        customer = db.execute(
+            "SELECT name, payment_terms, discount_rate FROM customers WHERE id = ?", (customer_id,)
+        ).fetchone()
         if not customer:
             return f"ERROR: 找不到客戶 #{customer_id}"
 
@@ -1679,7 +1907,38 @@ def create_order(customer_id: int, items_json: str, notes: str = "", business_un
         db.commit()
 
         items_str = "\n".join(f"  - {i.get('name', i.get('sku', '?'))} × {i.get('qty', 0)} @ NT${i.get('price', 0):,.0f}" for i in items)
-        return f"✅ 訂單 #{order_id} 已建立\n客戶：{customer['name']}\n金額：NT${total:,.0f}\n品項：\n{items_str}"
+        base_msg = f"✅ 訂單 #{order_id} 已建立\n客戶：{customer['name']}\n金額：NT${total:,.0f}\n品項：\n{items_str}"
+
+        # 建構下一步指���
+        terms = customer["payment_terms"] or "net30"
+        discount = customer["discount_rate"] or 0
+
+        company = db.execute("SELECT approval_threshold FROM company WHERE id = 1").fetchone()
+        threshold = company["approval_threshold"] if company else 5000
+
+        next_steps = []
+        if total >= threshold:
+            next_steps.append(
+                f"⚠️ 金額 NT${total:,.0f} 超過審核門檻 NT${threshold:,.0f} → "
+                f"create_approval(type='purchase', summary='訂單 #{order_id} 金額 NT${total:,.0f}')"
+            )
+
+        terms_actions = {
+            "prepaid": f"通知客戶匯款 NT${total:,.0f}，收到後 record_transaction(type='income', amount={total}, category='sales_revenue', related_order_id={order_id}, payment_status='paid')",
+            "deposit_30": f"通知客戶付 30% 訂金 NT${total * 0.3:,.0f}，收到後 record_transaction(type='income', amount={total * 0.3:.0f}, related_order_id={order_id}, payment_status='paid')",
+            "net30": f"update_order(order_id={order_id}, status='confirmed') → 進入品檢流程",
+            "net60": f"update_order(order_id={order_id}, status='confirmed') → 進入品檢流程",
+            "cod": f"update_order(order_id={order_id}, status='confirmed') → 進入品檢流程",
+        }
+        default_action = f"update_order(order_id={order_id}, status='confirmed')"
+        next_steps.append(f"付款條件 {terms}：{terms_actions.get(terms, default_action)}")
+        next_steps.append(f"LINE 通知客戶：訂單 #{order_id} 已建立，金額 NT${total:,.0f}")
+        next_steps.append(f"LINE 通知倉管/業務：新訂單 #{order_id}，請準備備貨")
+
+        warn = [f"客戶折扣率 {discount*100:.0f}%，確認品項價格已套用折扣"] if discount > 0 else None
+        guidance = _build_guidance(next_steps=next_steps, warnings=warn)
+
+        return base_msg + guidance
     finally:
         db.close()
 
@@ -1868,11 +2127,17 @@ def qc_order(order_id: int, result: str, notes: str = "", checked_by: str = "") 
         icon = {"passed": "✅", "failed": "❌", "partial": "⚠️"}[result]
         msg = f"{icon} 訂單 #{order_id} QC {result}"
         if result == "passed":
-            msg += "\n可以用 fulfill_order 出貨了。"
+            msg += _build_guidance(next_steps=[f"fulfill_order(order_id={order_id})"])
         elif result == "failed":
-            msg += "\n請處理品質問題後重新 QC。"
+            msg += _build_guidance(next_steps=[
+                "通知主管處理品質問題",
+                f"LINE 通知相關人員：訂單 #{order_id} QC 不合格" + (f"，原因：{notes}" if notes else ""),
+            ])
         elif result == "partial":
-            msg += "\n部分合格，請確認是否要出貨合格品項。"
+            msg += _build_guidance(next_steps=[
+                "列出合格/不合格品項，詢問主管是否部分出貨",
+                f"主管核准部分出貨 → fulfill_order(order_id={order_id})",
+            ])
         return msg
     finally:
         db.close()
@@ -1894,6 +2159,27 @@ def fulfill_order(order_id: int) -> str:
             return f"ERROR: 訂單 #{order_id} 狀態是 {order['status']}，無法出貨"
         if order["qc_status"] != "passed":
             return f"ERROR: 訂單 #{order_id} 尚未通過品質檢查（目前 QC 狀態: {order['qc_status']}）。請先用 qc_order 工具完成 QC。"
+
+        # 檢查付款條件
+        customer = db.execute("SELECT * FROM customers WHERE id = ?", (order["customer_id"],)).fetchone()
+        terms = customer["payment_terms"] if customer and customer["payment_terms"] else "net30"
+
+        if terms == "prepaid":
+            paid = db.execute(
+                "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE related_order_id = ? AND type = 'income' AND payment_status = 'paid'",
+                (order_id,),
+            ).fetchone()["total"]
+            if paid < order["total_amount"]:
+                return f"ERROR: 訂單 #{order_id} 客戶付款條件是 prepaid，需先收到全額 NT${order['total_amount']:,.0f}（目前已收 NT${paid:,.0f}）"
+
+        elif terms == "deposit_30":
+            paid = db.execute(
+                "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE related_order_id = ? AND type = 'income' AND payment_status = 'paid'",
+                (order_id,),
+            ).fetchone()["total"]
+            required = order["total_amount"] * 0.3
+            if paid < required:
+                return f"ERROR: 訂單 #{order_id} 客戶付款條件是 deposit_30，需先收到 30% 訂金 NT${required:,.0f}（目前已收 NT${paid:,.0f}）"
 
         items = json.loads(order["items"]) if order["items"] else []
         errors = []
@@ -1923,14 +2209,33 @@ def fulfill_order(order_id: int) -> str:
         # 更新訂單狀態
         db.execute("UPDATE orders SET status = 'shipped', updated_at = ? WHERE id = ?", (_now(), order_id))
 
-        # 建立應收帳款
-        customer = db.execute("SELECT name FROM customers WHERE id = ?", (order["customer_id"],)).fetchone()
-        db.execute(
-            """INSERT INTO transactions (type, amount, category, description, transaction_date,
-               related_customer_id, related_order_id, payment_status, paid_amount, recorded_by)
-               VALUES ('income', ?, 'sales_revenue', ?, ?, ?, ?, 'pending', 0, 'system')""",
-            (order["total_amount"], f"訂單 #{order_id} {customer['name'] if customer else ''}", _now()[:10], order["customer_id"], order_id),
-        )
+        # 建立應收帳款（根據付款條件設 due_date）
+        today = datetime.now()
+        due_date = None
+        if terms == "net30":
+            due_date = (today + timedelta(days=30)).strftime("%Y-%m-%d")
+        elif terms == "net60":
+            due_date = (today + timedelta(days=60)).strftime("%Y-%m-%d")
+        elif terms == "cod":
+            due_date = order["estimated_delivery"] or (today + timedelta(days=7)).strftime("%Y-%m-%d")
+        # prepaid/deposit_30 已收全額/部分，應收 = 剩餘金額
+        receivable = order["total_amount"]
+        already_paid = 0.0
+        if terms in ("prepaid", "deposit_30"):
+            already_paid = db.execute(
+                "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE related_order_id = ? AND type = 'income' AND payment_status = 'paid'",
+                (order_id,),
+            ).fetchone()["total"]
+            receivable = order["total_amount"] - already_paid
+
+        if receivable > 0:
+            db.execute(
+                """INSERT INTO transactions (type, amount, category, description, transaction_date,
+                   related_customer_id, related_order_id, payment_status, paid_amount, due_date, recorded_by)
+                   VALUES ('income', ?, 'sales_revenue', ?, ?, ?, ?, 'pending', 0, ?, 'system')""",
+                (receivable, f"訂單 #{order_id} {customer['name'] if customer else ''}",
+                 _now()[:10], order["customer_id"], order_id, due_date),
+            )
 
         db.execute(
             "INSERT INTO interaction_log (actor, action, target_type, target_id, detail) VALUES (?,?,?,?,?)",
@@ -1939,11 +2244,48 @@ def fulfill_order(order_id: int) -> str:
         )
         db.commit()
 
+        # 查扣庫存後的低庫存警報
+        low_stock_items = []
+        for sku, qty, name in deductions:
+            inv_after = db.execute(
+                "SELECT current_stock, min_stock, unit FROM inventory WHERE sku = ?", (sku,)
+            ).fetchone()
+            if inv_after and inv_after["min_stock"] > 0 and inv_after["current_stock"] <= inv_after["min_stock"]:
+                low_stock_items.append(
+                    f"{name}({sku}) 剩 {inv_after['current_stock']}{inv_after['unit']}，安全庫存 {inv_after['min_stock']}"
+                )
+
         deduct_str = "\n".join(f"  - {name}({sku}) -{qty}" for sku, qty, name in deductions)
+        customer_name = customer["name"] if customer else ""
+
+        auto_done = [
+            f"庫存已扣減（{len(deductions)} 項品項）",
+            "訂單狀態 → shipped",
+        ]
+        if receivable > 0:
+            auto_done.append(f"應收帳款 NT${receivable:,.0f} 已建立（{terms}）")
+
+        next_steps = [
+            f"update_order(order_id={order_id}, driver='司機名或物流單號', estimated_delivery='YYYY-MM-DD')",
+            f"LINE 通知客戶 {customer_name}：訂單 #{order_id} 已出貨",
+        ]
+        if low_stock_items:
+            next_steps.append("庫存警報需處理：\n   " + "\n   ".join(low_stock_items))
+
+        guidance = _build_guidance(
+            auto_done=auto_done,
+            next_steps=next_steps,
+            warnings=[
+                "不要再手動 update_stock（已自動扣庫存）",
+                "不要再手動 record_transaction（已自動建應收帳款）",
+            ],
+        )
+
         return (
             f"✅ 訂單 #{order_id} 已出貨\n"
             f"庫存扣減：\n{deduct_str}\n"
-            f"應收帳款：NT${order['total_amount']:,.0f}（pending）"
+            f"應收帳款：NT${receivable:,.0f}（{terms}）"
+            + guidance
         )
     finally:
         db.close()
@@ -2007,6 +2349,63 @@ def get_setting(key: str) -> str:
         if rule:
             return rule["content"]
         return f"（未設定 {key}）"
+    finally:
+        db.close()
+
+
+# ============================================================
+# 公司設定（1 工具）
+# ============================================================
+
+@mcp.tool()
+def update_company(
+    name: str = "",
+    industry: str = "",
+    boss_name: str = "",
+    approval_threshold: float = -1,
+) -> str:
+    """更新公司基本資訊（company 表 id=1）。首次呼叫會自動建立。
+
+    Args:
+        name: 公司名稱
+        industry: 產業別
+        boss_name: 老闆名
+        approval_threshold: 審核門檻金額（-1=不更新）
+    """
+    db = get_db()
+    try:
+        existing = db.execute("SELECT * FROM company WHERE id = 1").fetchone()
+        if not existing:
+            db.execute(
+                "INSERT INTO company (id, name, industry, boss_name, approval_threshold) VALUES (1,?,?,?,?)",
+                (name or "未設定", industry or None, boss_name or None,
+                 approval_threshold if approval_threshold >= 0 else 5000),
+            )
+            db.commit()
+            return f"✅ 公司資訊已建立：{name or '未設定'}"
+
+        updates = []
+        params = []
+        if name:
+            updates.append("name = ?")
+            params.append(name)
+        if industry:
+            updates.append("industry = ?")
+            params.append(industry)
+        if boss_name:
+            updates.append("boss_name = ?")
+            params.append(boss_name)
+        if approval_threshold >= 0:
+            updates.append("approval_threshold = ?")
+            params.append(approval_threshold)
+
+        if not updates:
+            return "沒有指定要更新的欄位。"
+
+        db.execute(f"UPDATE company SET {', '.join(updates)} WHERE id = 1", params)
+        db.commit()
+        changed = ", ".join(u.split(" = ")[0] for u in updates)
+        return f"✅ 公司資訊已更新（{changed}）"
     finally:
         db.close()
 

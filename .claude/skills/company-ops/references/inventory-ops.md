@@ -13,6 +13,26 @@
 - 所有警報 → `low_stock_alerts()`
 - 模糊搜尋 → `check_stock(關鍵字)`
 
+### 新品項建檔
+
+新品項可透過 `update_stock` 一次建立 SKU + 設定品項資訊 + 初始庫存：
+
+```
+update_stock(
+  sku='WIA-001',
+  quantity_change=50,
+  reason='初始建檔',
+  name='香氛蠟燭',
+  sell_price=500,
+  unit_cost=200,
+  min_stock=20,
+  unit='個',
+  category='香氛'
+)
+```
+
+SKU 已存在時只更新數量，忽略其他參數。
+
 ---
 
 ## 二、ABC 分析（庫存分級管理）
@@ -97,6 +117,7 @@
    - 是 → `create_approval` + LINE 通知主管
    - 否 → 直接執行
 4. `update_stock(sku, +數量, 原因)`
+   > ⚠️ `update_stock` 的回傳值會包含 `👉 下一步` 提示建議的 `record_transaction` 參數（含計算好的金額）。**一定要記帳**，否則進貨金額不會出現在帳務中。
 5. 同時記帳（跨模組串接 → accounting-ops）：
    - 問使用者：「已付款還是賒帳？」
    - 已付款 → `record_transaction(type='expense', amount=進貨金額, category='inventory_purchase', description='進貨 {品名} {數量} 個 @ NT${單價}', payment_status='paid')`

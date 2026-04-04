@@ -14,9 +14,10 @@ LINE 官方帳號行銷策略與執行指引。本文件為策略層面；操作
 
 **系統可用的 LINE MCP 工具：**
 - `reply(chat_id, text)` — 回覆文字訊息
-- `reply_flex(chat_id, flex_json)` — 回覆 Flex Message（卡片、按鈕等）
+- `reply_flex(chat_id, alt_text, flex_json)` — 回覆 Flex Message（卡片、按鈕等）
+- `multicast(user_ids, text)` — 群發訊息給多位用戶（上限 500 人/次）
 - `mark_read(chat_id)` — 標記已讀
-- `add_allowed_user(user_id, name)` — 新增允許的使用者
+- `add_allowed_user(user_id)` — 新增允許的使用者
 - `list_allowed_users()` — 列出所有允許的使用者
 
 

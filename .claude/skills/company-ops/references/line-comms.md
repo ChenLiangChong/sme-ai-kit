@@ -8,56 +8,98 @@
 
 ## 一、收到 LINE 訊息的處理流程
 
-### 第一步：辨識發送者
+> 與 CLAUDE.md「⚠️ LINE 訊息處理」完全一致。CLAUDE.md 是權威來源。
+
+### 第一步：辨識身份
 
 從 `<channel>` tag 的 `user_id` 取得 LINE User ID：
 
-1. `lookup_employee(user_id)` → 是員工？查到角色和權限
-2. 不是員工 → `find_customer(user_id)` → 是客戶？
-3. 都不是 → 陌生人處理（見下方）
+1. 呼叫 `lookup_employee(user_id)` — 是員工嗎？
+2. 不是員工 → 呼叫 `find_customer(user_id)` — 是客戶嗎？
+3. 都不是 → 嘗試用 LINE 暱稱比對未綁定的員工：
+   - `lookup_employee(暱稱)` — 用 `<channel>` tag 的 `user` 欄位
+   - 如果找到一位 `line_user_id` 為空的員工 → 回覆對方確認：「你是 {部門} 的 {姓名} 嗎？」
+   - 對方確認 → `update_employee(employee_id, line_user_id=user_id)` 完成綁定
+   - 找不到或多人同名 → 走陌生人流程（第二節）
+4. 陌生人處理 → **不要回覆對方**。改為通知老闆（第二節）
+5. 老闆回覆「這是 XXX」→ 綁定到對應的員工或客戶記錄
 
-### 第二步：判斷意圖與權限
+老闆的 LINE user_id：查 `employees` 表 `role='boss'`。
 
-| 意圖 | 需要的權限 | 對應模組 |
-|------|-----------|---------|
-| 查詢（庫存/任務/規則） | basic | 對應模組 |
-| 回報進度 | basic | task-ops |
-| 建立任務 | basic | task-ops |
-| 記帳/報銷 | basic | accounting-ops |
-| 修改庫存 | manager | inventory-ops |
-| 修改規則 | admin | knowledge-capture |
-| 群發訊息 | admin | line-comms |
+### 第二步：判斷權限
 
-權限不足 → 回覆：「這個操作需要主管權限，請聯繫 {boss_title}。」
+| 意圖 | 需要的權限 |
+|------|-----------|
+| 查詢（庫存/任務/規則） | basic |
+| 回報進度、建立任務 | basic |
+| 記帳/報銷 | basic |
+| 修改庫存 | manager |
+| 修改規則 | admin |
+| 群發訊息 | admin |
+
+權限不足 → 回覆：「這個操作需要主管權限。」
 
 ### 第三步：處理並回覆
 
-根據意圖調用對應模組，然後 `reply` 回覆。
+根據意圖用對應的 business-db tools 處理，然後用 `reply` 回覆。
 
 ### 第四步：標記訊息狀態
 
-**每則訊息必須有結局，不能停在 queued：**
-
-- 有回覆 → `reply` 自動標記 replied
-- 不需要回覆（貼圖、「OK」、「收到」、「👍」）→ `mark_read`
+**每則訊息必須有結局：**
+- 有回覆 → `reply` 會自動標記
+- 不需回覆（貼圖、「OK」、「收到」、「👍」）→ `mark_read`
 - 不確定 → 回覆「收到」
 
 ---
 
-## 二、陌生人處理
+## 二、陌生人處理（分層路由）
 
 不在員工名冊也不在客戶名冊的人傳訊息：
 
-1. **不要回覆對方**
-2. 通知老闆：
-   ```
-   reply(chat_id=老闆LINE_ID,
-     text="有人傳了訊息：\n暱稱：{user}\n內容：{content}\n\nUser ID: {user_id}")
-   ```
-3. `mark_read`
-4. 老闆決定是否回覆
+### Step 1：不要回覆對方
 
-老闆的 LINE user_id：查 `employees` 表 `role='boss'`。
+### Step 2：查路由規則 → 判斷意圖 → 通知對應負責人
+
+先查 DB 有無自訂路由規則：
+`query_knowledge(question='LINE 陌生人路由', category='sop')`
+
+**如果有自訂規則** → 按規則路由（導入時由 knowledge-capture 設定）。
+
+**如果沒有自訂規則** → 用預設邏輯：
+
+| 意圖判斷 | 通知誰 | 怎麼找 |
+|---------|--------|--------|
+| 詢價/業務合作 | 業務負責人 | `list_employees()` 找 department 含「業務/銷售」的 manager，沒有就通知老闆 |
+| 客訴/售後問題 | 客服負責人 | `list_employees()` 找 department 含「客服」的人，沒有就通知老闆 |
+| 求職/應徵 | 人事或老闆 | `list_employees()` 找 department 含「人事/HR」的人，沒有就通知老闆 |
+| 推銷/廣告/垃圾 | 不通知任何人 | 直接 `mark_read`，不浪費老闆時間 |
+| 無法判斷 | 老闆 | fallback，永遠通知老闆 |
+
+通知格式：
+```
+reply(chat_id=負責人的LINE_user_id, text="有陌生人傳了訊息：\n暱稱：{user}\n內容：{content}\n判斷意圖：{意圖}\nUser ID: {user_id}")
+```
+
+### Step 3：標記已處理
+
+`mark_read(chat_id=user_id)`
+
+### Step 4：負責人回覆處理
+
+- 負責人回覆「加入客戶」→ `add_customer(name=暱稱, notes='LINE 主動詢問')` + `add_allowed_user(user_id)`
+- 負責人回覆「這是 XXX」→ 綁定到對應的員工或客戶記錄
+- 負責人回覆「忽略」→ 不做任何事
+
+### 找老闆
+
+老闆的 LINE user_id：`list_employees()` 找 `role='boss'` 的員工取 `line_user_id`。
+
+### 導入時需設定
+
+在 knowledge-capture 導入 Step 6 時問老闆：
+- 「不同類型的陌生訊息要通知誰？有沒有業務/客服負責人？」
+- 如果只有老闆一人 → 全部通知老闆（退化為舊邏輯）
+- 如果有分工 → 按上表路由
 
 ---
 
