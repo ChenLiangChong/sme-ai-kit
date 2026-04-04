@@ -254,6 +254,39 @@ Phase 1 用文字回覆（不用 Postback 按鈕）：
 
 ---
 
+## Do's and Don'ts
+
+### Do
+- 每則 LINE 訊息處理完都要有結局：`reply` 或 `mark_read`
+- 回覆前先辨識身份：`lookup_employee` → `find_customer` → 陌生人流程
+- 回覆時傳入正確的 `channel_id`（從哪個 OA 收到就用哪個 OA 回）
+- 所有對外發送都 `log_interaction`
+- LINE 訊息不超過 200 字，重點放前面
+
+### Don't
+- 不要回覆陌生人（通知老闆或對應負責人）
+- 不要對同一人 1 小時內推超過 5 則
+- 不要在晚上 10 點到早上 8 點主動推送（除非緊急）
+- 不要未經 admin 核准就廣播
+- 不要在未辨識身份的情況下執行操作
+
+## 快速參考
+
+### 辨識身份 + 回覆
+1. `lookup_employee(name_or_line_id=user_id)` — 是員工？
+2. 不是 → `find_customer(query=user_id)` — 是客戶？
+3. 都不是 → 陌生人路由（見下方）
+4. 是員工/客戶 → 處理請求 → `reply(channel_id=channel_id, chat_id=chat_id, text='回覆內容')`
+
+### 陌生人路由
+1. `query_knowledge(question='LINE 陌生人路由', category='sop')` — 查路由規則
+2. 判斷意圖（詢價/客訴/求職/推銷）
+3. 推銷 → `mark_read(channel_id=channel_id, chat_id=chat_id)` 直接結束
+4. 其他 → `reply(channel_id=channel_id, chat_id=負責人LINE_user_id, text='有陌生人傳了訊息：...')` 通知對應負責人
+5. `mark_read(channel_id=channel_id, chat_id=原始chat_id)`
+
+---
+
 ## 十、注意事項
 
 - LINE 是員工最常用的介面，回覆要快、要準、要簡短

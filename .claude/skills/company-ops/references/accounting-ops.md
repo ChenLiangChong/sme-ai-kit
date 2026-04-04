@@ -333,6 +333,49 @@ record_transaction(type='expense', category='insurance', description='健保-雇
 
 ---
 
+## Do's and Don'ts
+
+### Do
+- 金額超過 `approval_threshold` 時，主動先 `create_approval`，不要等 `record_transaction` 擋
+- 收據看不清楚的欄位直接問，不要猜
+- 金額一律用 NT$ + 千位逗號（如 NT$12,345）
+- 分類完一律告知讓使用者確認
+- 稅務建議附加：「詳細請諮詢記帳士」
+- 每次帳務操作都 `log_interaction`
+
+### Don't
+- 不要在沒確認金額的情況下記帳
+- 不要讓 basic 權限的人刪帳（僅 admin/manager）
+- 不要猜測收據上看不清楚的數字
+- 不要做複式簿記或電子發票（Phase 1 不支援）
+- 不要給確定性的稅務建議
+
+## 快速參考
+
+### 記一筆支出
+1. `record_transaction(type='expense', amount=金額, category='supplies', description='買影印紙')`
+→ 超過門檻會自動提示建審核
+
+### 月結作業
+1. `monthly_summary(year_month='2026-03')`
+2. `list_transactions(type='expense', start_date='2026-03-01', end_date='2026-03-31')`
+3. 確認無重複帳目 → 產出月報格式
+
+### 催收檢查
+1. `check_overdue()`
+2. 依帳齡分類（1-30天/31-60天/61-90天/>90天）決定催收動作
+3. 31-60天 → `create_task(title='催收：{客戶} NT${金額}', category='admin')`
+4. LINE 友善提醒客戶
+
+## 中斷恢復
+
+如果 context 被壓縮：
+1. `get_context_summary(scope='full')` — 查看「逾期帳款」區塊
+2. `check_overdue()` — 取得所有未付清帳款的完整列表
+3. 從帳齡判斷下一步催收動作
+
+---
+
 ## 十二、注意事項
 
 - 帳務極敏感，每次操作都 log_interaction

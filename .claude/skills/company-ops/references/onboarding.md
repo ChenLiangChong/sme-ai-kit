@@ -152,6 +152,36 @@ create_task(
 
 ---
 
+## Do's and Don'ts
+
+### Do
+- 確認操作者有 admin 或 manager 權限才執行
+- 離職用 `update_employee(active=0)` 停用，不要刪除紀錄
+- 所有操作記 `log_interaction`
+- 新人第一週回覆更詳細耐心
+- 資深員工離職前提醒老闆做知識轉移訪談
+
+### Don't
+- 不要代替老闆決定新人的角色和權限（問清楚）
+- 不要刪除離職員工紀錄（用 active=0）
+- 不要讓 basic 權限的人操作人事異動
+- 不要跳過 LINE 綁定確認步驟
+
+## 快速參考
+
+### 新人報到完整流程
+1. `register_employee(name='王小明', role='staff', department='倉庫', permissions='basic', phone='0912-345-678')`
+2. 請新人傳訊息到 LINE OA → `lookup_employee(name_or_line_id='王小明')` → `update_employee(employee_id=ID, line_user_id='Uxxxx')`
+3. `reply(channel_id='default', chat_id='Uxxxx', text='歡迎加入！')`
+4. `create_task(title='新人訓練 - 王小明', assignee='王小明', due_date='一週後', category='admin')`
+
+### 離職處理
+1. `list_tasks(assignee='離職員工', status='pending')` — 查未完成任務
+2. 問老闆任務轉移給誰 → 逐一 `update_task(task_id=ID, assignee='新負責人')`
+3. `update_employee(employee_id=ID, line_user_id='', permissions='none', active=0, notes='離職日期...')`
+
+---
+
 ## 七、注意事項
 
 - 離職不刪除紀錄，用 `update_employee(active=0)` 停用，`list_employees(active_only=True)` 會自動過濾

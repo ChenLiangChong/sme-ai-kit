@@ -240,6 +240,47 @@ NPS = 推薦者% - 批評者%
 
 ---
 
+## Do's and Don'ts
+
+### Do
+- 客戶資料異動都 `log_interaction`
+- 行銷訊息先過 brand-voice 再發
+- 群發前 `create_approval(type='announcement', summary=訊息摘要)` 送審
+- 遵守頻率限制：同一客戶每月推送不超過 2 次
+- 客訴立即回覆（5 分鐘內），先同理再處理
+
+### Don't
+- 不要硬推銷（節日問候不夾帶促銷）
+- 不要洩漏其他客戶的資訊
+- 不要承諾做不到的賠償（超出權限 → `create_approval`）
+- 不要辯解或推責（客訴處理）
+- 不要刪除客訴紀錄（永久保留）
+
+## 快速參考
+
+### 新增客戶
+1. `add_customer(name='好好生活', phone='02-1234-5678', type='customer', tags='vip')`
+2. `log_interaction(actor='AI助理', action='customer_created', detail='新增客戶 好好生活')`
+
+### 查客戶 + RFM 分群
+1. `find_customer(query='好好生活')` — 取得 customer_id、last_purchase_date、total_purchases
+2. 根據 R（距今天數）+ F（`list_orders` 計算）+ M（total_purchases）判斷分群
+
+### 客訴處理
+1. `reply(channel_id='default', chat_id=客戶chat_id, text='收到您的反映，我們非常重視，正在處理中。')`
+2. `log_interaction(actor='AI助理', action='complaint', detail=客訴內容)`
+3. `query_knowledge(question=問題描述, category='customer_service')` — 查處理規則
+4. 依規則處理或 `create_approval(type='refund', summary=退款摘要)` — 超出權限建審核
+
+## 中斷恢復
+
+如果 context 被壓縮：
+1. `get_context_summary(scope='full')` — 查看客戶數、進行中訂單
+2. `find_customer(query=正在處理的客戶名)` — 恢復客戶資訊和 pipeline_stage
+3. `list_orders(customer_id=客戶ID)` — 查看該客戶的訂單狀態
+
+---
+
 ## 十、注意事項
 
 - 群發行銷一律需 admin 核准

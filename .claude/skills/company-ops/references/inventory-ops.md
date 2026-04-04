@@ -291,6 +291,45 @@ SKU 已存在時只更新數量，忽略其他參數。
 
 ---
 
+## Do's and Don'ts
+
+### Do
+- 每次庫存變動即時更新，不要延後
+- 進貨後一定跟著 `record_transaction`（`update_stock` 回傳值有提示）
+- 大量調整（盤點差異 > 5%）需主管核准
+- 新品首批只進 2 週預估量
+- 安全庫存用公式計算，每季檢討
+
+### Don't
+- 不要在 `fulfill_order` 之後再手動 `update_stock`（自動扣庫存，重複會錯）
+- 不要允許負庫存（系統直接拒絕）
+- 不要讓 basic 權限的人新增品項（manager 以上）
+- 不要憑感覺補貨（用資料和補貨點公式）
+- 不要跳過進貨記帳步驟
+
+## 快速參考
+
+### 進貨
+1. `check_stock(sku_or_name='WIA-001')` — 確認目前庫存
+2. `update_stock(sku='WIA-001', quantity_change=50, reason='供應商到貨')`
+3. 依回傳的「👉 下一步」→ `record_transaction(type='expense', amount=進貨金額, category='inventory_purchase')`
+
+### 盤點調整
+1. `check_stock(sku_or_name='A200')` — 取帳面數量
+2. 比對實際數量，計算差異
+3. 差異 ≤ 2% → `update_stock(sku='A200', quantity_change=差異數, reason='盤點調整')`
+4. 差異 > 5% → 通知主管，先複盤再調整
+
+## 中斷恢復
+
+如果 context 被壓縮：
+1. `get_context_summary(scope='full')` — 查看「庫存警報」區塊
+2. `low_stock_alerts()` — 完整列出所有低於安全庫存的品項
+3. 對每個警報品項 `check_stock(sku)` 取得詳情
+4. 根據 ABC 分級和補貨點判斷：立即通知/本週補貨/本月補貨
+
+---
+
 ## 十二、注意事項
 
 - 負庫存直接拒絕

@@ -244,6 +244,42 @@ DB 沒有 `blocked` 狀態。當任務被阻擋時：
 
 ---
 
+## Do's and Don'ts
+
+### Do
+- 缺少資訊主動問（指派對象、截止日），不要猜
+- 每次狀態變更自動 `log_interaction`
+- `in_progress` 超 7 天主動追蹤：「進度如何？需要幫忙嗎？」
+- `pending` 超 14 天提醒：「這個任務是不是可以取消？」
+- 指派前檢查員工工作量（4-6 項提醒老闆，7+ 項建議重新分配）
+
+### Don't
+- 不要猜 deadline（沒說就問「有截止日期嗎？」）
+- 不要用子任務（Phase 1 保持扁平）
+- 不要逐一回覆批量建立的結果（統一報告）
+- 不要把模糊的「之後再說」「大家回去想想」建成任務
+- 不要在 LINE 通知中超過 3 行
+
+## 快速參考
+
+### 建立任務
+1. `lookup_employee(name_or_line_id='小王')` — 確認人存在
+2. `create_task(title='詢問報價', assignee='小王', priority='normal', due_date='2026-04-10', category='admin', created_by='老闆')`
+3. `reply(channel_id='default', chat_id=小王的LINE_user_id, text='你有一項新任務：詢問報價，截止 4/10')`
+
+### 完成任務
+1. `update_task(task_id=3, status='done')`
+2. `log_interaction(actor='小王', action='task_completed', target_type='task', target_id=3, detail='完成 詢問報價')`
+
+## 中斷恢復
+
+如果 context 被壓縮：
+1. `get_context_summary(scope='full')` — 查看「待處理任務」區塊，含優先級和截止日
+2. `list_tasks(status='in_progress')` — 找出所有進行中的任務
+3. 根據優先級和截止日排序，從最緊急的開始處理
+
+---
+
 ## 十、注意事項
 
 - Phase 1 不用子任務，保持扁平

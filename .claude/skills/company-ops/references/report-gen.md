@@ -203,6 +203,40 @@ CLAUDE.md 啟動流程中決定是否推送：
 
 ---
 
+## Do's and Don'ts
+
+### Do
+- 數據全來自 DB，找不到的區塊標注「無資料」而非跳過
+- 每個指標附帶至少一個比較（上月 MoM、目標值）
+- 不只報數字，要給洞察和可能原因
+- 異常變動 > ±15% 標記 ⚠️，> ±30% 標記 🔴 並附解釋
+
+### Don't
+- 不要編造數字或推測沒有資料支撐的趨勢
+- 不要跳過數據為零或找不到資料的區塊
+- 不要在資料不足 2 個月的情況下做趨勢分析
+- 不要做純讀取以外的操作（report-gen 不寫入）
+
+## 快速參考
+
+### 日報
+1. `get_context_summary(scope='full')` — 系統全貌
+2. `list_transactions(start_date='今天', end_date='今天')` — 今日收支
+3. 整理成日報格式 → LINE 推送或回覆老闆
+
+### 週報
+1. `list_tasks(status='done')` + `list_tasks(status='pending')` — 任務統計
+2. `list_transactions(start_date='本週一', end_date='今天')` — 週收支
+3. `low_stock_alerts()` — 庫存警報
+4. 整理含「🔑 重點事項」和「📋 下週重點」
+
+### 月報 + 匯出
+1. `monthly_summary(year_month='2026-03')` — 月度收支彙總
+2. 各維度統計（任務、客戶、庫存）
+3. 需要匯出 → 載入 xlsx skill → 產出到 `data/media/exports/`
+
+---
+
 ## 六、注意事項
 
 - 純讀取，不做寫入

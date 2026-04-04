@@ -176,6 +176,36 @@ store_fact(
 
 ---
 
+## Do's and Don'ts
+
+### Do
+- 對外文案一律 `create_approval` 送審
+- 使用台灣中文：「資料」「軟體」「透過」「取得」
+- 每次產文案前先 `query_knowledge(question='品牌語氣', category='brand')` 讀取設定
+- LINE 訊息控制在 200 字內，重點放前面
+- DB 沒有品牌規則時，用中性專業語氣並建議老闆設定
+
+### Don't
+- 不要擅自改變老闆設定的品牌風格
+- 不要使用中國式用語（「親」「寶貝」「小哥哥」「數據」「軟件」）
+- 不要過度使用 emoji（1-2 個就好）和驚嘆號
+- 不要跳過禁用詞檢查（從 DB category='brand' 讀取）
+- 不要在沒套用品牌語氣場景矩陣的情況下直接發送
+
+## 快速參考
+
+### 產出客戶文案
+1. `query_knowledge(question='品牌語氣', category='brand')` — 讀取語氣設定和禁用詞
+2. 根據場景選框架（AIDA/PAS/BAB）+ 語氣矩陣
+3. 產出文案 → 逐項檢查品質清單
+4. `create_approval(type='announcement', summary='行銷文案：{摘要}')` — 送審
+
+### 存入品牌語氣設定
+1. 分析老闆提供的範例文案（詞彙/句構/稱呼/情感/慣例）
+2. `store_fact(category='brand', title='品牌語氣分析', content='分析結果...', source_type='observed', set_by='系統分析')`
+
+---
+
 ## 八、注意事項
 
 - 對外文案一律送審

@@ -295,6 +295,38 @@ order-ops 只負責收款操作（`record_payment`），不重複定義催收時
 
 ---
 
+## Do's and Don'ts
+
+### Do
+- 出貨前必須通過 QC（`qc_order`），不可跳過
+- 大額訂單先 `create_approval` 送審再繼續
+- 退貨入庫需手動 `update_stock(sku, +數量, '退貨入庫')` 回補庫存
+- 每個 tool 回傳值都有「👉 下一步」提示，跟著做即可
+
+### Don't
+- 不要在 `fulfill_order` 後再手動 `update_stock`（自動扣庫存，會重複）
+- 不要在 `fulfill_order` 後再手動 `record_transaction`（自動建應收帳款）
+- 不要跳過 QC 直接出貨
+- 不要對 prepaid 客戶未收全額就出貨（系統會擋）
+
+## 快速參考
+
+### 建單→出貨完整流程
+1. `find_customer(query='客戶名')` — 取得 customer_id、discount_rate、payment_terms
+2. `check_stock(sku_or_name='A200')` — 確認庫存足夠
+3. `create_order(customer_id=ID, items_json='[{"sku":"A200","name":"品名","qty":10,"price":350}]')`
+4. `update_order(order_id=ID, status='confirmed')` — 確認訂單
+5. `qc_order(order_id=ID, result='passed', checked_by='檢查人')` — 品檢
+6. `fulfill_order(order_id=ID)` — 出貨（自動扣庫存 + 建應收帳款）
+7. 依回傳的「👉 下一步」→ `update_order(order_id=ID, driver='物流', estimated_delivery='日期')`
+
+### 收款銷帳
+1. `list_transactions(type='income', related_order_id=ID)` — 找應收帳款
+2. `record_payment(transaction_id=帳目ID, amount=收款金額)` — 記錄收款
+3. 依回傳的「👉 下一步」→ `update_order(order_id=ID, status='paid')`
+
+---
+
 ## 十一、注意事項
 
 - **fulfill_order 會自動扣庫存**，不要另外手動 `update_stock`

@@ -345,6 +345,35 @@ create_task(title='導入 Step 2：員工名冊+LINE綁定', category='admin', a
 
 ---
 
+## Do's and Don'ts
+
+### Do
+- 存入前一定要先回覆確認，等老闆說「對」才存
+- `source_type='explicit'` 必須附上 `source_quote`（老闆原話）
+- 每條規則確保有觸發條件、具體動作、數字門檻
+- 老闆改主意時用 `update_rule`，不要直接覆蓋
+- 所有規則變更都 `log_interaction`
+
+### Don't
+- 不要自作主張存入規則（一定要確認）
+- 不要把 `inferred` 偽裝成 `explicit`
+- 不要一次問老闆太多問題（每次 3-5 個領域）
+- 不要存入模糊規則（「適當」「視情況」→ 追問具體數字）
+- 不要用 `delete_fact` 取代更新 — 用 `update_rule` 保留歷史
+
+## 快速參考
+
+### 被動捕捉規則
+1. 辨識老闆話中的規則特徵（「從現在開始」「一律」「不可以」「超過 X 就要」）
+2. 回覆確認：「我理解的是：{規則}。這樣對嗎？」
+3. `store_fact(category='pricing', title='經銷商折扣', content='規則內容', source_type='explicit', source_quote='老闆原話', set_by='老闆名')`
+
+### 更新既有規則
+1. `query_knowledge(question='退貨政策', category='return_policy')` — 找到舊規則
+2. `update_rule(rule_id=舊ID, new_content='新規則內容', reason='老闆更新')`
+
+---
+
 ## 八、注意事項
 
 - 存入前一定要確認，不要自作主張
