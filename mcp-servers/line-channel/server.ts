@@ -68,6 +68,10 @@ function loadChannels(): { channels: Map<string, ChannelConfig>; defaultId: stri
       const defaultId = cfg.default_channel && channels.has(cfg.default_channel)
         ? cfg.default_channel
         : channels.keys().next().value ?? 'default'
+      if (channels.size === 0) {
+        process.stderr.write('line-channel: data/line-channels.json 存在但未定義任何 channel\n')
+        process.exit(1)
+      }
       process.stderr.write(`line-channel: 多 OA 模式，載入 ${channels.size} 個 channel（預設: ${defaultId}）\n`)
       return { channels, defaultId }
     } catch (e) {
@@ -393,8 +397,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           const d = getDb()
           const col = isGroup ? 'group_id' : 'user_id'
           d.run(
-            `UPDATE line_messages SET status = 'replied', reply_content = ? WHERE ${col} = ? AND direction = 'inbound' AND status IN ('queued', 'processed')`,
-            [text.slice(0, 200), chatId]
+            `UPDATE line_messages SET status = 'replied', reply_content = ? WHERE ${col} = ? AND channel_id = ? AND direction = 'inbound' AND status IN ('queued', 'processed')`,
+            [text.slice(0, 200), chatId, chId]
           )
         } catch {}
         return { content: [{ type: 'text' as const, text: `✅ 已送出（${getChannel(chId).name}）` }] }
@@ -413,8 +417,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           const d = getDb()
           const col = isGroupFlex ? 'group_id' : 'user_id'
           d.run(
-            `UPDATE line_messages SET status = 'replied' WHERE ${col} = ? AND direction = 'inbound' AND status IN ('queued', 'processed')`,
-            [chatId]
+            `UPDATE line_messages SET status = 'replied' WHERE ${col} = ? AND channel_id = ? AND direction = 'inbound' AND status IN ('queued', 'processed')`,
+            [chatId, chId]
           )
         } catch {}
         return { content: [{ type: 'text' as const, text: `✅ Flex Message 已送出（${getChannel(chId).name}）` }] }
@@ -462,8 +466,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         try {
           const d = getDb()
           const result = d.run(
-            `UPDATE line_messages SET status = 'processed' WHERE user_id = ? AND direction = 'inbound' AND status = 'queued'`,
-            [chatId]
+            `UPDATE line_messages SET status = 'processed' WHERE user_id = ? AND channel_id = ? AND direction = 'inbound' AND status = 'queued'`,
+            [chatId, chId]
           )
           return { content: [{ type: 'text' as const, text: `✅ 已標記 ${result.changes} 則訊息為已處理` }] }
         } catch (e) {
