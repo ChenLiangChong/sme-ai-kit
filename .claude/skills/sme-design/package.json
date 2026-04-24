@@ -1,0 +1,11 @@
+{
+  "name": "sme-design",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "sme-design skill scripts (HTML → PPTX via screenshot)",
+  "private": true,
+  "dependencies": {
+    "playwright": "^1.49.0",
+    "pptxgenjs": "^3.12.0"
+  }
+}

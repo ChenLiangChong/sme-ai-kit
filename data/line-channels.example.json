@@ -1,0 +1,23 @@
+{
+  "channels": {
+    "brand_d": {
+      "name": "WFA 愛上我的空間",
+      "access_token": "YOUR_WFA_CHANNEL_ACCESS_TOKEN",
+      "channel_secret": "YOUR_WFA_CHANNEL_SECRET",
+      "business_unit": "brand_d"
+    },
+    "content": {
+      "name": "Content 內容創作",
+      "access_token": "YOUR_CONTENT_CHANNEL_ACCESS_TOKEN",
+      "channel_secret": "YOUR_CONTENT_CHANNEL_SECRET",
+      "business_unit": "content"
+    },
+    "distribution": {
+      "name": "Distribution 經銷物流",
+      "access_token": "YOUR_DISTRIBUTION_CHANNEL_ACCESS_TOKEN",
+      "channel_secret": "YOUR_DISTRIBUTION_CHANNEL_SECRET",
+      "business_unit": "distribution"
+    }
+  },
+  "default_channel": "brand_d"
+}

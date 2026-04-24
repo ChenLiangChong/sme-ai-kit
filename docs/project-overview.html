@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>SME-AI-Kit — 專案總覽與使用情境</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+:root {
+  --bg: #f7f7f5;
+  --fg: #1f2328;
+  --muted: #57606a;
+  --accent: #d97757;
+  --accent-soft: #faeee5;
+  --line: #e6e6e1;
+  --card: #ffffff;
+  --code-bg: #f5f3ef;
+  --green: #3d8b5a;
+  --red: #b8463a;
+  --blue: #2f6fd6;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", "Helvetica Neue", sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.container { max-width: 960px; margin: 0 auto; padding: 48px 28px 96px; }
+header.hero {
+  padding: 40px 36px;
+  background: linear-gradient(135deg, var(--accent) 0%, #c65a3c 100%);
+  color: #fff;
+  border-radius: 12px;
+  margin-bottom: 32px;
+}
+header.hero h1 { margin: 0 0 8px; font-size: 2.1em; letter-spacing: 0.5px; }
+header.hero .tagline { font-size: 1.1em; opacity: 0.95; margin: 0; }
+header.hero .meta { margin-top: 14px; font-size: 0.85em; opacity: 0.8; letter-spacing: 0.3px; }
+
+nav.toc {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px 26px;
+  margin-bottom: 36px;
+  font-size: 0.92em;
+}
+nav.toc h3 { margin: 0 0 10px; font-size: 0.95em; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+nav.toc ol { margin: 0; padding-left: 22px; columns: 2; column-gap: 28px; }
+nav.toc li { padding: 3px 0; break-inside: avoid; }
+nav.toc a { color: var(--fg); text-decoration: none; border-bottom: 1px dotted transparent; }
+nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+section {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 28px 32px;
+  margin-bottom: 24px;
+}
+section h2 {
+  margin: 0 0 20px;
+  font-size: 1.45em;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--accent-soft);
+  color: var(--fg);
+}
+section h3 {
+  margin: 24px 0 10px;
+  font-size: 1.12em;
+  color: var(--fg);
+}
+section h4 {
+  margin: 18px 0 6px;
+  font-size: 1em;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+section p { margin: 10px 0; }
+section ul, section ol { padding-left: 22px; margin: 10px 0; }
+section li { margin: 4px 0; }
+
+code {
+  background: var(--code-bg);
+  padding: 1.5px 6px;
+  border-radius: 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  color: #7c4a2e;
+}
+pre {
+  background: var(--code-bg);
+  padding: 16px 20px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  line-height: 1.55;
+  border: 1px solid var(--line);
+}
+pre code { background: none; padding: 0; color: inherit; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 14px 0;
+  font-size: 0.92em;
+}
+th, td {
+  border: 1px solid var(--line);
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  background: var(--code-bg);
+  font-weight: 600;
+  color: var(--fg);
+}
+tbody tr:nth-child(even) { background: #fbfaf7; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 12px;
+  font-size: 0.75em;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  margin-right: 6px;
+}
+.badge.green { background: #e3f2e8; color: var(--green); }
+.badge.blue { background: #e5eefb; color: var(--blue); }
+.badge.red { background: #fbe9e7; color: var(--red); }
+
+.scene {
+  border-left: 4px solid var(--accent);
+  padding: 14px 22px;
+  background: #fffaf5;
+  margin: 18px 0;
+  border-radius: 0 8px 8px 0;
+}
+.scene h3 { margin-top: 0; color: var(--accent); }
+.scene .role { font-size: 0.85em; color: var(--muted); margin-bottom: 8px; }
+
+.flow {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  margin: 14px 0;
+  font-size: 0.95em;
+}
+.flow .step-num {
+  background: var(--accent);
+  color: #fff;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.78em;
+  font-weight: 700;
+  margin-top: 3px;
+}
+.flow .step-body { padding-top: 2px; }
+.flow .step-body .who { font-size: 0.82em; color: var(--muted); }
+.flow .step-body code { font-size: 0.85em; }
+
+.kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 16px; margin: 10px 0; }
+.kv dt { color: var(--muted); font-weight: 600; font-size: 0.9em; }
+.kv dd { margin: 0; }
+
+.note {
+  background: #f0f6fc;
+  border-left: 3px solid var(--blue);
+  padding: 10px 16px;
+  margin: 14px 0;
+  border-radius: 0 6px 6px 0;
+  font-size: 0.92em;
+}
+.warn {
+  background: #fef5f2;
+  border-left: 3px solid var(--red);
+  padding: 10px 16px;
+  margin: 14px 0;
+  border-radius: 0 6px 6px 0;
+  font-size: 0.92em;
+}
+
+.ascii {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  white-space: pre;
+  font-size: 0.78em;
+  line-height: 1.35;
+  background: var(--code-bg);
+  padding: 18px 22px;
+  border-radius: 8px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 14px;
+  margin: 14px 0;
+}
+.stat {
+  background: var(--code-bg);
+  padding: 14px 18px;
+  border-radius: 8px;
+  text-align: center;
+}
+.stat .num { font-size: 1.8em; font-weight: 700; color: var(--accent); display: block; }
+.stat .label { font-size: 0.85em; color: var(--muted); }
+
+footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85em;
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+@media print {
+  body { background: #fff; }
+  section, nav.toc { page-break-inside: avoid; border-color: #ddd; }
+  header.hero { background: var(--accent) !important; -webkit-print-color-adjust: exact; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<header class="hero">
+  <h1>SME-AI-Kit</h1>
+  <p class="tagline">台灣中小企業的 AI 營運中樞 — Claude 當你的數位管家</p>
+  <p class="meta">版本 v1.x　|　最後更新：2026-04-18　|　Claude Opus 4.7 驅動</p>
+</header>
+
+<nav class="toc">
+  <h3>目次</h3>
+  <ol>
+    <li><a href="#intro">產品定位</a></li>
+    <li><a href="#arch">系統架構</a></li>
+    <li><a href="#features">核心特色</a></li>
+    <li><a href="#mcp">MCP 工具清單</a></li>
+    <li><a href="#skills">Skills 技能包</a></li>
+    <li><a href="#db">資料庫結構</a></li>
+    <li><a href="#multi-bu">多事業體運作</a></li>
+    <li><a href="#scenarios">使用情境（8 則）</a></li>
+    <li><a href="#install">安裝流程</a></li>
+    <li><a href="#daily">日常營運節奏</a></li>
+    <li><a href="#faq">常見問答</a></li>
+    <li><a href="#cost">成本結構</a></li>
+  </ol>
+</nav>
+
+<section id="intro">
+  <h2>1. 產品定位</h2>
+  <p><strong>SME-AI-Kit</strong> 是給台灣中小企業的一套「AI 營運中樞」。<br>
+  它不是 ERP 替代品，而是「從沒系統到有系統」的跳板—— 老闆用自然語言跟 Claude 對話，就能把客戶、訂單、庫存、帳務、任務、LINE 客服全部接起來。</p>
+
+  <div class="stat-grid">
+    <div class="stat"><span class="num">51</span><span class="label">business-db tools</span></div>
+    <div class="stat"><span class="num">19</span><span class="label">social tools</span></div>
+    <div class="stat"><span class="num">7</span><span class="label">LINE tools</span></div>
+    <div class="stat"><span class="num">34</span><span class="label">Skill 模組</span></div>
+  </div>
+
+  <h3>誰在用它</h3>
+  <ul>
+    <li><strong>老闆</strong> — 用 Claude Desktop 的 Cowork 模式，隨時問「今天有什麼事」、「上個月毛利多少」</li>
+    <li><strong>員工</strong> — 透過 LINE 直接跟 AI 互動：建任務、記支出、查庫存</li>
+    <li><strong>客戶</strong> — 透過 LINE Official Account 下單、問價、查物流；陌生人由 AI 分流給對應窗口</li>
+    <li><strong>顧問</strong> — 幫客戶導入時用 Claude Code CLI，透過訪談流程把公司 SOP 灌進 DB</li>
+  </ul>
+
+  <h3>核心設計哲學</h3>
+  <div class="kv">
+    <dt>反捏造</dt><dd>老闆親口說的規則必存原話（<code>source_quote</code>）；AI 推斷的標記為 <code>inferred</code>，不偽裝成老闆意志</dd>
+    <dt>HITL 審核</dt><dd>對外訊息、超過門檻金額、批次客戶變動 — 一律先走核准佇列，跨 session 可在 LINE 上按「核准」</dd>
+    <dt>失憶友善</dt><dd>Context 壓縮前自動寫交接摘要；每次啟動 <code>get_context_summary</code> 回復狀態</dd>
+    <dt>可升級</dt><dd>SQLite 未來可換 PostgreSQL 或打通 ERP API — 不鎖死</dd>
+  </div>
+</section>
+
+<section id="arch">
+  <h2>2. 系統架構</h2>
+  <div class="ascii">┌─────────────────────────────────────────────────────────────┐
+│                    Claude Max ($100 USD / 月)                │
+├───────────────────────────┬─────────────────────────────────┤
+│    Claude Code CLI        │      Claude Desktop             │
+│    （背景 daemon）        │    （老闆 / 員工主動查詢）      │
+│    ├─ 監聽 LINE webhook   │      ├─ Cowork                  │
+│    ├─ 自動處理訊息        │      └─ Dispatch                │
+│    └─ 每日快照 / 警報     │                                 │
+├───────────────────────────┴─────────────────────────────────┤
+│               line-channel MCP（多 OA 單 port）             │
+│        路徑路由：/webhook/{channel_id}                      │
+│        訊息 meta 帶 business_unit → Claude 自動歸屬         │
+├─────────────────────────────────────────────────────────────┤
+│          共用 SQLite DB（data/business.db）                 │
+│     business-db MCP（51 tools） + social MCP（19 tools）    │
+├─────────────────────────────────────────────────────────────┤
+│  Skills: company-ops（12 模組）＋ social-media（22 模組）   │
+└─────────────────────────────────────────────────────────────┘</div>
+
+  <h3>兩個 Session 共享同一顆 DB</h3>
+  <table>
+    <tr><th>Session</th><th>角色</th><th>主要觸發</th><th>主要輸出</th></tr>
+    <tr><td><strong>CLI（daemon）</strong></td><td>24 小時背景值班</td><td>LINE webhook、排程</td><td>reply / mark_read / 任務 / 記帳</td></tr>
+    <tr><td><strong>Cowork</strong></td><td>老闆主動詢問</td><td>老闆或顧問輸入</td><td>報表 / 分析 / 規則建檔</td></tr>
+  </table>
+  <p>兩邊都看得見同一份 <code>business.db</code>、<code>approvals</code> 佇列、<code>session_handoffs</code>。任何一邊建立的審核都能被另一邊處理。</p>
+</section>
+
+<section id="features">
+  <h2>3. 核心特色</h2>
+  <table>
+    <tr><th style="width: 140px">特色</th><th>運作方式</th></tr>
+    <tr><td><strong>AI 營運中樞</strong></td><td>Claude 作為 always-on 的數位員工，替老闆過濾 LINE 訊息、代答客戶、提醒逾期款、產報表</td></tr>
+    <tr><td><strong>雙 Session</strong></td><td>CLI（自動化）+ Cowork（互動）共用 SQLite，上下文靠 <code>session_handoffs</code> 表銜接</td></tr>
+    <tr><td><strong>多事業體</strong></td><td>一套部署跑多個品牌／部門，訂單／帳務／庫存／規則按 <code>business_unit</code> 區隔</td></tr>
+    <tr><td><strong>多 LINE OA</strong></td><td>單一 <code>line-channel</code> process 透過 <code>/webhook/{channel_id}</code> 路由，多品牌多 OA 不用開多個進程</td></tr>
+    <tr><td><strong>反捏造</strong></td><td><code>business_rules</code> 表區分 <code>explicit</code> / <code>observed</code> / <code>inferred</code>，explicit 強制帶原話</td></tr>
+    <tr><td><strong>HITL 審核</strong></td><td><code>approvals</code> 佇列跨 session，LINE 回覆「核准 #12」即可觸發後續動作</td></tr>
+    <tr><td><strong>身份分層路由</strong></td><td>LINE 訊息先辨識 員工 → 客戶 → 陌生人；陌生人依意圖分派給對應負責人，不直接回覆</td></tr>
+  </table>
+</section>
+
+<section id="mcp">
+  <h2>4. MCP 工具清單</h2>
+
+  <h3><span class="badge">business-db</span> 企業資料庫（51 tools）</h3>
+  <table>
+    <tr><th>類別</th><th>主要 tools</th></tr>
+    <tr><td>知識 / 規則</td><td><code>store_fact</code>、<code>query_knowledge</code>、<code>update_rule</code>、<code>link_rules</code>、<code>get_rule_relations</code>、<code>knowledge_changelog</code>、<code>lint_knowledge</code></td></tr>
+    <tr><td>員工</td><td><code>register_employee</code>、<code>list_employees</code>、<code>lookup_employee</code>、<code>update_employee</code></td></tr>
+    <tr><td>事業體</td><td><code>register_business_entity</code>、<code>list_business_entities</code>、<code>set_customer_entity_terms</code></td></tr>
+    <tr><td>客戶</td><td><code>add_customer</code>、<code>find_customer</code>、<code>update_customer</code></td></tr>
+    <tr><td>任務</td><td><code>create_task</code>、<code>list_tasks</code>、<code>search_tasks</code>、<code>update_task</code></td></tr>
+    <tr><td>訂單</td><td><code>create_order</code>、<code>get_order</code>、<code>list_orders</code>、<code>update_order</code>、<code>qc_order</code>、<code>fulfill_order</code>、<code>cancel_order</code></td></tr>
+    <tr><td>庫存</td><td><code>check_stock</code>、<code>update_stock</code>、<code>low_stock_alerts</code></td></tr>
+    <tr><td>帳務</td><td><code>record_transaction</code>、<code>list_transactions</code>、<code>record_payment</code>、<code>check_overdue</code>、<code>monthly_summary</code>、<code>delete_transaction</code>、<code>update_transaction</code></td></tr>
+    <tr><td>審核 HITL</td><td><code>create_approval</code>、<code>resolve_approval</code></td></tr>
+    <tr><td>附件</td><td><code>add_attachment</code>、<code>list_attachments</code></td></tr>
+    <tr><td>LINE 整合</td><td><code>search_line_messages</code>、<code>register_line_group</code>、<code>list_line_groups</code>、<code>log_interaction</code></td></tr>
+    <tr><td>Session / 快照</td><td><code>get_context_summary</code>、<code>save_session_handoff</code>、<code>save_daily_snapshot</code></td></tr>
+    <tr><td>系統</td><td><code>get_setting</code>、<code>update_company</code></td></tr>
+  </table>
+
+  <h3><span class="badge blue">line</span> LINE Channel（5 tools，支援多 OA）</h3>
+  <table>
+    <tr><td><code>reply</code></td><td>回覆文字訊息，必傳 <code>chat_id</code> + <code>channel_id</code></td></tr>
+    <tr><td><code>reply_flex</code></td><td>發送 Flex Message（卡片／按鈕）</td></tr>
+    <tr><td><code>multicast</code></td><td>群發（含 HITL 審核提示）</td></tr>
+    <tr><td><code>mark_read</code></td><td>標記已讀但不回覆（處理員工訊息 / 陌生人已分派後）</td></tr>
+    <tr><td><code>list_channels</code></td><td>列出所有已設定的 LINE OA 及其事業體</td></tr>
+  </table>
+
+  <h3><span class="badge green">social</span> 社群媒體（19 tools，讀取為主）</h3>
+  <p>涵蓋 Facebook Page / Instagram Business / Threads 的 帳號資料、貼文、留言、DM、洞察數據。發文功能預留但預設關閉。</p>
+</section>
+
+<section id="skills">
+  <h2>5. Skills 技能包（34 模組）</h2>
+
+  <h3>company-ops（12 模組）— 管理主力</h3>
+  <table>
+    <tr><th>模組</th><th>觸發情境</th></tr>
+    <tr><td>setup</td><td>首次啟動 / LINE 未設定 / MCP 連線問題</td></tr>
+    <tr><td>ops-dashboard</td><td>「今天有什麼事」「目前狀況」「營運報告」</td></tr>
+    <tr><td>task-ops</td><td>建立 / 指派 / 追蹤 / 完成任務</td></tr>
+    <tr><td>knowledge-capture</td><td>系統導入、老闆分享規則、SOP、決策建檔</td></tr>
+    <tr><td>crm-ops</td><td>客戶 / 供應商 / 經銷商管理、行銷觸及</td></tr>
+    <tr><td>order-ops</td><td>下單 → QC → 出貨 → 收款 → 退貨</td></tr>
+    <tr><td>inventory-ops</td><td>庫存查詢、進出貨、盤點、警報</td></tr>
+    <tr><td>accounting-ops</td><td>記帳、報銷、收支查詢、應收帳款</td></tr>
+    <tr><td>line-comms</td><td>LINE 訊息處理的完整流程（身份辨識、陌生人路由）</td></tr>
+    <tr><td>brand-voice</td><td>對外文案 / 信件語氣控制</td></tr>
+    <tr><td>report-gen</td><td>日報 / 週報 / 月報</td></tr>
+    <tr><td>onboarding</td><td>新員工設定、LINE 綁定、離職流程</td></tr>
+  </table>
+
+  <h3>social-media（22 模組）— 行銷輔助</h3>
+  <p><strong>執行模組（12）</strong>：social-content、social-analytics、copywriting、content-production、copy-editing、email-outreach、marketing-ops、analytics、competitive-content、paid-acquisition、growth-loops、retention</p>
+  <p><strong>台灣市場參考（2）</strong>：taiwan-market（平台生態、廣告基準、節慶、KOL 行情、法規）、line-marketing（LINE OA 策略、群發、Flex Message）</p>
+  <p><strong>PMM 策略模組（8）</strong>：pmm-market、pmm-positioning、pmm-messaging、pmm-pricing、pmm-competitive、pmm-gtm、pmm-launch、pmm-patterns</p>
+</section>
+
+<section id="db">
+  <h2>6. 資料庫結構</h2>
+  <p>單一 <code>data/business.db</code>（SQLite），由 <code>mcp-servers/business-db/schema.sql</code> 定義。</p>
+  <table>
+    <tr><th>Table</th><th>作用</th></tr>
+    <tr><td><code>company</code></td><td>公司基本資料（單列）、審核門檻預設值</td></tr>
+    <tr><td><code>business_entities</code></td><td>事業體登錄表；可設事業體專屬審核門檻</td></tr>
+    <tr><td><code>employees</code></td><td>員工；<code>business_units</code> 欄位限制操作範圍</td></tr>
+    <tr><td><code>customers</code></td><td>客戶 / 供應商 / 經銷商</td></tr>
+    <tr><td><code>customer_entity_terms</code></td><td>客戶 × 事業體 的折扣 / 付款條件覆寫</td></tr>
+    <tr><td><code>business_rules</code></td><td>規則 / SOP / 決策，<code>source_type</code> 區分 explicit / observed / inferred</td></tr>
+    <tr><td><code>rule_relations</code></td><td>規則之間的關係（related / depends_on / conflicts_with）</td></tr>
+    <tr><td><code>tasks</code> / <code>orders</code> / <code>transactions</code> / <code>inventory</code></td><td>核心營運資料，都帶 <code>business_unit</code></td></tr>
+    <tr><td><code>approvals</code></td><td>HITL 核准佇列，跨 session 可處理</td></tr>
+    <tr><td><code>attachments</code></td><td>附件索引（實體檔在 <code>media/</code>）</td></tr>
+    <tr><td><code>daily_snapshots</code></td><td>每日營運快照（可按事業體）</td></tr>
+    <tr><td><code>line_messages</code> / <code>line_groups</code></td><td>LINE 訊息紀錄 / 群組登錄，帶 <code>channel_id</code></td></tr>
+    <tr><td><code>session_handoffs</code></td><td>Context 壓縮前的交接摘要</td></tr>
+    <tr><td><code>interaction_log</code></td><td>操作軌跡（稽核用）</td></tr>
+  </table>
+</section>
+
+<section id="multi-bu">
+  <h2>7. 多事業體（business_unit）運作</h2>
+  <p>一間公司同時經營多個品牌 / 部門（例如：內容產品、經銷物流、實體空間），系統用 <code>business_unit</code> 欄位把資料貫穿整個鏈路。</p>
+
+  <table>
+    <tr><th style="width: 180px">層級</th><th>行為</th></tr>
+    <tr><td>LINE OA</td><td>每個 OA 在 <code>line-channels.json</code> 綁定一個 <code>business_unit</code>；訊息 meta 自動帶入，Claude 不用問</td></tr>
+    <tr><td>訂單 / 帳務 / 任務 / 庫存</td><td>建立時都要帶 <code>business_unit</code>；查詢時可按事業體篩選</td></tr>
+    <tr><td>客戶條件</td><td><code>set_customer_entity_terms</code> 設定「此客戶在事業體 X」的折扣率與付款條件，覆寫客戶預設</td></tr>
+    <tr><td>審核門檻</td><td><code>business_entities.approval_threshold</code> 優先於公司預設</td></tr>
+    <tr><td>規則</td><td>全域規則（公司層級）+ 事業體專屬規則，<code>query_knowledge</code> 自動合併</td></tr>
+    <tr><td>員工</td><td><code>employees.business_units</code>（逗號分隔）限制能操作哪些事業體</td></tr>
+  </table>
+
+  <div class="note">
+    <strong>舉例：</strong>同一個客戶「大創文具」對「WFA 事業體」有 8 折、30 天票期；對「經銷物流事業體」是 9.5 折、現金交易。
+    用 <code>set_customer_entity_terms(customer_id=123, business_unit='brand_d', discount_rate=0.8, payment_terms='net30')</code> 即可設定。
+  </div>
+</section>
+
+<section id="scenarios">
+  <h2>8. 使用情境（8 則真實流程）</h2>
+
+  <div class="scene">
+    <h3>情境 1　老闆早上打開 Claude Desktop</h3>
+    <p class="role">角色：老闆｜入口：Cowork｜頻率：每天早上</p>
+    <div class="flow">
+      <div class="step-num">1</div><div class="step-body">老闆：「早安，今天有什麼事？」</div>
+      <div class="step-num">2</div><div class="step-body"><span class="who">AI：</span>自動載入 <code>ops-dashboard</code> 模組，並行跑 <code>get_context_summary</code> + <code>low_stock_alerts</code> + <code>check_overdue</code></div>
+      <div class="step-num">3</div><div class="step-body"><span class="who">AI 回報：</span>「進行中訂單 3 張、今天要收的逾期款 NT$45k、水貝土庫存剩 8 袋低於警戒、昨天有 2 則待審核」</div>
+      <div class="step-num">4</div><div class="step-body">老闆：「審核那兩則是什麼？」→ AI 展開 approvals 詳情</div>
+      <div class="step-num">5</div><div class="step-body">老闆：「第一筆核准」→ AI 呼叫 <code>resolve_approval(id=12, 'approved')</code>，然後執行原本被擋下的動作</div>
+    </div>
+  </div>
+
+  <div class="scene">
+    <h3>情境 2　客戶透過 LINE 下單</h3>
+    <p class="role">角色：既有客戶｜入口：LINE OA（brand_d 事業體）｜處理者：CLI daemon</p>
+    <div class="flow">
+      <div class="step-num">1</div><div class="step-body">客戶傳「再來 20 袋水貝土，老地方送」</div>
+      <div class="step-num">2</div><div class="step-body"><span class="who">AI：</span>訊息 meta 帶 <code>channel_id=brand_d</code> + <code>business_unit=brand_d</code>；<code>find_customer</code> 比對 LINE user_id → 認出是 #43 大創文具</div>
+      <div class="step-num">3</div><div class="step-body"><span class="who">AI：</span><code>check_stock('水貝土', business_unit='brand_d')</code> → 庫存 28 袋，OK</div>
+      <div class="step-num">4</div><div class="step-body"><span class="who">AI：</span>讀取 <code>customer_entity_terms</code> → 折扣 8 折、net30；讀 #43 上次送貨地址</div>
+      <div class="step-num">5</div><div class="step-body"><span class="who">AI：</span><code>create_order(customer_id=43, items=[...], business_unit='brand_d')</code> → 回覆 Flex Message 確認明細 + 「打錯請回『取消』」</div>
+      <div class="step-num">6</div><div class="step-body"><span class="who">AI：</span><code>create_task(title='出貨：大創文具 20 袋水貝土', assignee='倉庫組', business_unit='brand_d')</code></div>
+    </div>
+  </div>
+
+  <div class="scene">
+    <h3>情境 3　員工 LINE 記一筆支出</h3>
+    <p class="role">角色：員工 小美｜入口：LINE（已綁定 employee）｜處理者：CLI daemon</p>
+    <div class="flow">
+      <div class="step-num">1</div><div class="step-body">小美傳「剛油錢 NT$1,850 統編發票」+ 一張發票照片</div>
+      <div class="step-num">2</div><div class="step-body"><span class="who">AI：</span>認出是員工；照片下載到 <code>media/line/images/</code></div>
+      <div class="step-num">3</div><div class="step-body"><span class="who">AI：</span>用 Read tool 看發票 → 確認金額與日期；呼叫 <code>record_transaction(type='expense', amount=1850, category='油費', attachments=[...], business_unit='brand_d', source_note='員工 LINE 回報')</code></div>
+      <div class="step-num">4</div><div class="step-body"><span class="who">AI：</span>因小於審核門檻 5000，直接寫入；回覆「收到，已記入 WFA 事業體油費」</div>
+    </div>
+  </div>
+
+  <div class="scene">
+    <h3>情境 4　陌生人 LINE 訊息的分層路由</h3>
+    <p class="role">角色：不認識的人｜入口：任一 OA</p>
+    <p>AI <strong>不會直接回覆陌生人</strong>。流程由 <code>line-comms</code> 模組的陌生人路由定義：</p>
+    <div class="flow">
+      <div class="step-num">1</div><div class="step-body">判斷意圖：詢價／應徵／投訴／業務推銷／其他</div>
+      <div class="step-num">2</div><div class="step-body">按意圖查 <code>business_rules</code> 找對應負責人（例如：詢價 → 業務 阿哲；應徵 → HR 主任；投訴 → 老闆）</div>
+      <div class="step-num">3</div><div class="step-body">用 <code>multicast</code> 或內部 LINE 群組通知該負責人，附原訊息截圖</div>
+      <div class="step-num">4</div><div class="step-body">呼叫 <code>mark_read</code> 標記已處理；訊息存 <code>line_messages</code> 並打上待分派標籤</div>
+    </div>
+    <div class="warn"><strong>不能直接回覆陌生人的原因：</strong>AI 還不認識對方、不知道是不是競業、不知道老闆的商業敏感度。先讓人把關。</div>
+  </div>
+
+  <div class="scene">
+    <h3>情境 5　HITL 審核（跨 session 核准）</h3>
+    <p class="role">角色：採購員工 + 老闆｜入口：LINE → 老闆 Cowork 或 LINE 回覆</p>
+    <div class="flow">
+      <div class="step-num">1</div><div class="step-body">採購員 LINE 傳「訂 200 公斤水貝土 NT$82,000」—— 超過審核門檻</div>
+      <div class="step-num">2</div><div class="step-body"><span class="who">AI：</span><code>create_approval(title='採購 200kg 水貝土 NT$82k', detail={"resume_action": "record_transaction", "resume_params": {...}}, business_unit='brand_d')</code></div>
+      <div class="step-num">3</div><div class="step-body"><span class="who">AI：</span>LINE 通知老闆「待審核 #12」 + Flex Message 的「核准／駁回」按鈕</div>
+      <div class="step-num">4</div><div class="step-body">老闆回「核准 #12」（或在 Cowork 按 <code>resolve_approval</code>）</div>
+      <div class="step-num">5</div><div class="step-body"><span class="who">AI：</span>下一次啟動或下一則 LINE 訊息時查到已核准，自動 resume 原本的 <code>record_transaction</code></div>
+      <div class="step-num">6</div><div class="step-body"><span class="who">AI：</span>通知原本提案的採購員「已核准並完成記帳」</div>
+    </div>
+  </div>
+
+  <div class="scene">
+    <h3>情境 6　新員工報到</h3>
+    <p class="role">角色：HR + 新人｜入口：Cowork</p>
+    <div class="flow">
+      <div class="step-num">1</div><div class="step-body">HR：「新人小陳今天報到，職位倉管，WFA + 經銷物流兩個事業體」</div>
+      <div class="step-num">2</div><div class="step-body"><span class="who">AI：</span>載入 <code>onboarding</code> 模組 → <code>register_employee(name='陳XX', role='倉管', business_units='brand_d,distribution', permissions='basic')</code></div>
+      <div class="step-num">3</div><div class="step-body"><span class="who">AI：</span>產生 LINE 綁定 QR code → 新人掃 → AI 自動寫回 <code>line_user_id</code></div>
+      <div class="step-num">4</div><div class="step-body"><span class="who">AI：</span>建立訓練任務序列：「熟讀 SOP」、「盤點練習」、「首次出貨陪同」（都帶 <code>business_unit</code>）</div>
+    </div>
+  </div>
+
+  <div class="scene">
+    <h3>情境 7　月底結帳與月報</h3>
+    <p class="role">角色：老闆｜入口：Cowork｜頻率：每月最後一天</p>
+    <div class="flow">
+      <div class="step-num">1</div><div class="step-body">老闆：「出 3 月份的月報」</div>
+      <div class="step-num">2</div><div class="step-body"><span class="who">AI：</span>載入 <code>report-gen</code> → <code>monthly_summary(year=2026, month=3, business_unit='brand_d')</code> 與 <code>business_unit='distribution'</code> 分別跑</div>
+      <div class="step-num">3</div><div class="step-body"><span class="who">AI：</span>帶出：營收、成本、毛利、逾期應收、庫存異動、TOP 客戶、TOP 品項（按事業體分拆）</div>
+      <div class="step-num">4</div><div class="step-body"><span class="who">AI：</span>用 xlsx skill 產 <code>media/exports/2026-03_月報.xlsx</code>，用 docx 產執行摘要</div>
+      <div class="step-num">5</div><div class="step-body"><span class="who">AI：</span>附件 + 摘要貼在 Cowork，老闆可加備註或寄信</div>
+    </div>
+  </div>
+
+  <div class="scene">
+    <h3>情境 8　系統首次導入（顧問流程）</h3>
+    <p class="role">角色：顧問 + 老闆｜入口：Claude Code CLI｜耗時：約 2-4 小時</p>
+    <div class="flow">
+      <div class="step-num">1</div><div class="step-body">顧問跑 <code>bash install.sh</code> 裝好所有依賴</div>
+      <div class="step-num">2</div><div class="step-body">啟動 Claude，貼 LINE token + ngrok 設定</div>
+      <div class="step-num">3</div><div class="step-body">Claude 偵測空 DB → 自動載入 <code>knowledge-capture</code> 的 9 步標準訪談：公司資料 → 事業體登錄 → 員工 → 客戶 → SKU → 品牌語氣 → 規則 → LINE 綁定 → 驗證</div>
+      <div class="step-num">4</div><div class="step-body">每一條規則都用老闆原話存（<code>store_fact</code> with <code>source_quote</code>）</div>
+      <div class="step-num">5</div><div class="step-body">結束時 <code>lint_knowledge</code> 檢查有無衝突或漏洞</div>
+      <div class="step-num">6</div><div class="step-body">交付：可 daemon 化的系統 + 老闆可在 Cowork 持續補規則</div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <h2>9. 安裝流程</h2>
+
+  <h4>事前準備（顧問）</h4>
+  <ol>
+    <li>ngrok 帳號 + 固定域名</li>
+    <li>LINE Messaging API Channel（access token + channel secret）</li>
+    <li>LINE Official Account Manager 確認帳號開通</li>
+  </ol>
+
+  <h4>安裝（單行）</h4>
+<pre><code>git clone https://github.com/ChenLiangChong/sme-ai-kit.git
+cd sme-ai-kit
+bash install.sh</code></pre>
+  <p>腳本會自動安裝 Python、Bun、ngrok、Claude Code、所有依賴、建立空白 DB。<strong>不需要輸入任何密鑰</strong>—— 全部由 Claude 互動完成。</p>
+
+  <h4>多 OA 模式</h4>
+  <p>複製 <code>data/line-channels.example.json</code> 為 <code>data/line-channels.json</code>，為每個 LINE OA 指定 <code>access_token</code>、<code>channel_secret</code>、<code>business_unit</code>。Webhook 路徑自動變成 <code>/webhook/{channel_id}</code>。</p>
+</section>
+
+<section id="daily">
+  <h2>10. 日常營運節奏</h2>
+  <table>
+    <tr><th>時段</th><th>動作</th></tr>
+    <tr><td>早上</td><td>Claude 自動跑營運摘要 + 庫存警報 + 逾期帳款；老闆進 Cowork 看</td></tr>
+    <tr><td>白天</td><td>LINE 訊息即時處理、任務追蹤、員工記帳；有待審核時 ping 老闆</td></tr>
+    <tr><td>傍晚</td><td>自動 <code>save_daily_snapshot()</code>；顧問可查 <code>daily_snapshots</code> 看異常</td></tr>
+    <tr><td>月底</td><td>老闆說「出月報」→ 收支彙總 + 庫存盤點 + 按事業體分拆報表</td></tr>
+    <tr><td>季度</td><td>顧問回訪，用 <code>knowledge_changelog</code> 檢視規則演進、補推斷規則的原話</td></tr>
+  </table>
+</section>
+
+<section id="faq">
+  <h2>11. 常見問答</h2>
+  <div class="kv">
+    <dt>這是 ERP 嗎？</dt><dd>不是。是「沒系統→有系統」的跳板。等業務規模撐起專業 ERP 時可以匯出遷移。</dd>
+    <dt>資料在哪？</dt><dd>單一 <code>data/business.db</code>（SQLite）+ <code>data/media/</code> 資料夾。全部在老闆自己的機器，不上雲。</dd>
+    <dt>Claude 會亂編規則嗎？</dt><dd>不會。<code>source_type='explicit'</code> 強制帶原話；推斷的規則標 <code>inferred</code> 會顯示出來。</dd>
+    <dt>LINE 壞了怎麼辦？</dt><dd>Claude 啟動時會自動測 <code>list_channels</code>；失敗載入 <code>setup</code> 模組引導重設。</dd>
+    <dt>Context 爆掉怎麼辦？</dt><dd>壓縮前會寫 <code>session_handoffs</code>；下次啟動自動恢復。訂單等進行中工作都有 <code>next_step_hint</code>。</dd>
+    <dt>可以接 ERP 嗎？</dt><dd>可以。SQLite 可換 PostgreSQL，或為 <code>business-db</code> 換 adapter 打通外部 ERP API。</dd>
+  </div>
+</section>
+
+<section id="cost">
+  <h2>12. 成本結構</h2>
+  <table>
+    <tr><th>項目</th><th>月費</th><th>備註</th></tr>
+    <tr><td>Claude Max</td><td>約 NT$3,200</td><td>Opus 4.7 + 1M context；一個月可用到爆</td></tr>
+    <tr><td>LINE Official Account</td><td>免費～NT$800+</td><td>依訊息量，起始免費夠用</td></tr>
+    <tr><td>ngrok</td><td>免費～US$10</td><td>免費版固定域名即夠；不穩定再升級</td></tr>
+    <tr><td>硬體</td><td>—</td><td>一台能開機跑 daemon 的電腦或 VPS</td></tr>
+  </table>
+  <div class="note">
+    <strong>一次性：</strong>顧問導入費（2–4 小時訪談 + 客製化設定）依顧問個別報價。
+  </div>
+</section>
+
+<footer>
+  <p>SME-AI-Kit　|　Private License — 僅供授權客戶使用<br>
+  本文件由 Claude 自動產生，依 <code>CLAUDE.md</code>、<code>README.md</code>、<code>data/README.md</code>、<code>schema.sql</code> 彙整</p>
+</footer>
+
+</div>
+</body>
+</html>

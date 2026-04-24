@@ -1,0 +1,46 @@
+# 資料庫
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# 使用者資料
+data/media/
+data/*.log
+
+# 密鑰
+.mcp.json
+.env
+data/line-channels.json
+
+# 打包產物
+dist/
+
+# 客戶資產（含圖片等敏感資料）
+docs/*-assets/
+
+# 執行環境
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+bun.lockb
+
+# OS
+.DS_Store
+Thumbs.db
+docs/client-*
+
+# FUSE 暫存檔（雲端掛載留下的）
+data/.fuse_hidden*
+
+# 個人業務資料（不上傳通用版）
+data/import_*.sql
+docs/session-scan/
+docs/skill-consolidation-plan.md
+docs/analysis/
+docs/design.md
+.claude/memory/
+.claude/skills/*/node_modules/
+
+# Codex plugin 本地快取
+.codex

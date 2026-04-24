@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>{{brand_name}} vs {{competitor_name}} — 競品戰卡</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700;900&family=Noto+Sans+TC:wght@300;400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --brand: {{brand_color}};
+    --ink: #1a1a1a;
+    --ink-soft: #4a4a4a;
+    --ink-mute: #8a8a8a;
+    --line: #d8d4cc;
+    --paper: #f5f1e8;
+    --paper-warm: #ece6d6;
+    --paper-cool: #ffffff;
+    --danger: #8b2e2e;
+    --accent: #b38b3f;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    color: var(--ink);
+    background: var(--paper-cool);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+
+  body {
+    display: grid;
+    grid-template-rows: 150px 1fr 210px;
+    grid-template-columns: 1fr;
+  }
+
+  .serif {
+    font-family: "Noto Serif TC", "Source Han Serif TC", Georgia, serif;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+
+  .mono {
+    font-family: "IBM Plex Mono", "Menlo", monospace;
+    letter-spacing: 0.02em;
+  }
+
+  /* ======= HEADER ======= */
+  header {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    padding: 44px 80px 28px 80px;
+    border-bottom: 1px solid var(--line);
+    background: var(--paper-cool);
+    position: relative;
+  }
+
+  header::before {
+    content: "";
+    position: absolute;
+    left: 80px;
+    top: 40px;
+    width: 42px;
+    height: 4px;
+    background: var(--brand);
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px;
+    letter-spacing: 0.28em;
+    color: var(--brand);
+    text-transform: uppercase;
+    margin-top: 16px;
+    margin-bottom: 10px;
+    font-weight: 500;
+  }
+
+  h1.title {
+    font-family: "Noto Serif TC", serif;
+    font-weight: 900;
+    font-size: 54px;
+    line-height: 1.05;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+  }
+
+  h1.title .vs {
+    font-family: "Noto Serif TC", serif;
+    font-style: italic;
+    font-weight: 500;
+    color: var(--ink-mute);
+    margin: 0 14px;
+    font-size: 40px;
+  }
+
+  h1.title .competitor {
+    color: var(--brand);
+  }
+
+  .meta {
+    text-align: right;
+    font-size: 13px;
+    color: var(--ink-soft);
+    line-height: 1.8;
+  }
+
+  .meta .label {
+    display: inline-block;
+    width: 62px;
+    color: var(--ink-mute);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+
+  .meta .value {
+    font-weight: 500;
+    color: var(--ink);
+    font-size: 14px;
+  }
+
+  /* ======= MAIN GRID ======= */
+  main {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: 1fr 1fr;
+    border-top: 1px solid transparent;
+  }
+
+  .card {
+    padding: 28px 34px 26px 34px;
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card:nth-child(4n) { border-right: none; }
+
+  /* 交錯背景：上排 paper-cool / paper-warm 輪替 */
+  .card.tint-warm { background: var(--paper-warm); }
+  .card.tint-paper { background: var(--paper); }
+  .card.tint-dark {
+    background: var(--ink);
+    color: #f0ebdd;
+  }
+  .card.tint-dark .card-num,
+  .card.tint-dark .card-kicker { color: #a89a7a; }
+  .card.tint-dark .card-title { color: #ffffff; }
+  .card.tint-dark .kv .k { color: #a89a7a; }
+  .card.tint-dark .kv .v { color: #f0ebdd; }
+  .card.tint-dark li::before { background: var(--accent); }
+  .card.tint-dark li { color: #e8e0cc; border-color: rgba(255,255,255,0.1); }
+
+  .card-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+
+  .card-num {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--ink-mute);
+    font-weight: 500;
+    letter-spacing: 0.12em;
+  }
+
+  .card-kicker {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    color: var(--ink-mute);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+
+  .card-title {
+    font-family: "Noto Serif TC", serif;
+    font-weight: 700;
+    font-size: 24px;
+    line-height: 1.25;
+    color: var(--ink);
+    margin-bottom: 16px;
+    letter-spacing: 0.005em;
+    text-wrap: pretty;
+  }
+
+  /* key-value list */
+  .kv {
+    display: grid;
+    grid-template-columns: 72px 1fr;
+    row-gap: 9px;
+    column-gap: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .kv .k {
+    color: var(--ink-mute);
+    font-size: 11px;
+    font-family: "IBM Plex Mono", monospace;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding-top: 3px;
+  }
+
+  .kv .v {
+    color: var(--ink);
+    font-weight: 500;
+    text-wrap: pretty;
+  }
+
+  /* body text */
+  .card p.body {
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--ink-soft);
+    text-wrap: pretty;
+  }
+
+  .claim-reality {
+    display: grid;
+    grid-template-rows: auto auto;
+    gap: 14px;
+  }
+
+  .claim-reality .block {
+    border-left: 2px solid var(--line);
+    padding-left: 14px;
+  }
+
+  .claim-reality .block.reality {
+    border-left-color: var(--brand);
+  }
+
+  .claim-reality .block .tag {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-bottom: 4px;
+  }
+
+  .claim-reality .block.reality .tag { color: var(--brand); }
+
+  .claim-reality .block .text {
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--ink);
+    text-wrap: pretty;
+  }
+
+  /* pill */
+  .pill {
+    display: inline-block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    padding: 3px 10px;
+    border: 1px solid var(--ink);
+    color: var(--ink);
+    text-transform: uppercase;
+    margin-top: 10px;
+    font-weight: 500;
+  }
+
+  .pill.hot { background: var(--brand); color: #fff; border-color: var(--brand); }
+
+  /* lists */
+  ul.points {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+  }
+
+  ul.points li {
+    position: relative;
+    padding: 10px 0 10px 22px;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--ink);
+    border-bottom: 1px dotted var(--line);
+    text-wrap: pretty;
+  }
+
+  ul.points li:last-child { border-bottom: none; }
+
+  ul.points li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 18px;
+    width: 10px;
+    height: 2px;
+    background: var(--brand);
+  }
+
+  ul.points.danger li::before { background: var(--danger); }
+  ul.points.win li::before { background: var(--brand); }
+
+  ul.points li .lead {
+    font-weight: 700;
+    color: var(--ink);
+    margin-right: 4px;
+  }
+
+  /* land mines — numbered */
+  ol.landmines {
+    list-style: none;
+    counter-reset: lm;
+  }
+
+  ol.landmines li {
+    counter-increment: lm;
+    position: relative;
+    padding: 10px 0 10px 34px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    border-bottom: 1px dotted rgba(255,255,255,0.12);
+    text-wrap: pretty;
+  }
+
+  ol.landmines li:last-child { border-bottom: none; }
+
+  ol.landmines li::before {
+    content: counter(lm, decimal-leading-zero);
+    position: absolute;
+    left: 0;
+    top: 10px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 500;
+    letter-spacing: 0.1em;
+  }
+
+  /* ======= FOOTER ======= */
+  footer {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 48px;
+    padding: 28px 80px 28px 80px;
+    background: var(--paper);
+    border-top: 1px solid var(--line);
+    position: relative;
+  }
+
+  .talk-section h3 {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.28em;
+    color: var(--brand);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    font-weight: 500;
+  }
+
+  .talk-section .talk-title {
+    font-family: "Noto Serif TC", serif;
+    font-weight: 700;
+    font-size: 22px;
+    color: var(--ink);
+    margin-bottom: 18px;
+    letter-spacing: 0.005em;
+  }
+
+  .talk-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 28px;
+  }
+
+  .talk {
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+
+  .talk .objection {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    line-height: 1.5;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+    text-wrap: pretty;
+  }
+
+  .talk .objection::before {
+    content: "客戶說";
+    display: inline-block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--ink-mute);
+    text-transform: uppercase;
+    margin-right: 8px;
+    font-weight: 500;
+  }
+
+  .talk .response {
+    font-size: 13.5px;
+    color: var(--ink);
+    line-height: 1.55;
+    font-weight: 500;
+    text-wrap: pretty;
+  }
+
+  .talk .response::before {
+    content: "我方回";
+    display: inline-block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--brand);
+    text-transform: uppercase;
+    margin-right: 8px;
+    font-weight: 500;
+  }
+
+  .stamp {
+    border-left: 1px solid var(--line);
+    padding-left: 32px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  .stamp .big-num {
+    font-family: "Noto Serif TC", serif;
+    font-size: 72px;
+    font-weight: 900;
+    line-height: 1;
+    color: var(--brand);
+    letter-spacing: -0.02em;
+  }
+
+  .stamp .big-label {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    color: var(--ink-mute);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    margin-top: 6px;
+  }
+
+  .stamp .footnote {
+    font-size: 11px;
+    color: var(--ink-mute);
+    line-height: 1.55;
+    font-family: "IBM Plex Mono", monospace;
+    letter-spacing: 0.02em;
+  }
+
+  .stamp .footnote .src { color: var(--ink-soft); }
+
+  /* confidential ribbon */
+  .ribbon {
+    position: absolute;
+    top: 20px;
+    right: 80px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    color: var(--danger);
+    padding: 4px 10px;
+    border: 1px solid var(--danger);
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+
+  /* overlap indicator */
+  .overlap-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .overlap-bar .ticks {
+    display: flex;
+    gap: 3px;
+  }
+
+  .overlap-bar .tick {
+    width: 14px;
+    height: 8px;
+    background: transparent;
+    border: 1px solid var(--line);
+  }
+
+  .overlap-bar .tick.on {
+    background: var(--brand);
+    border-color: var(--brand);
+  }
+
+  /* {{overlap_level}} 驅動 tick 視覺：
+     HIGH/高/3 → 3 個實心；MEDIUM/中/2 → 2 實 1 空；LOW/低/1 → 1 實 2 空。
+     CSS attribute selectors 處理英文值；JS 在 fillDemo 時把中文轉成對應 class。 */
+  .overlap-bar[data-overlap="HIGH" i] .tick:nth-child(-n+3),
+  .overlap-bar[data-overlap="3" i] .tick:nth-child(-n+3),
+  .overlap-bar[data-overlap*="高" i] .tick:nth-child(-n+3) {
+    background: var(--brand);
+    border-color: var(--brand);
+  }
+
+  .overlap-bar[data-overlap="MEDIUM" i] .tick:nth-child(-n+2),
+  .overlap-bar[data-overlap="MED" i] .tick:nth-child(-n+2),
+  .overlap-bar[data-overlap="2" i] .tick:nth-child(-n+2),
+  .overlap-bar[data-overlap*="中" i] .tick:nth-child(-n+2) {
+    background: var(--brand);
+    border-color: var(--brand);
+  }
+
+  .overlap-bar[data-overlap="LOW" i] .tick:nth-child(-n+1),
+  .overlap-bar[data-overlap="1" i] .tick:nth-child(-n+1),
+  .overlap-bar[data-overlap*="低" i] .tick:nth-child(-n+1) {
+    background: var(--brand);
+    border-color: var(--brand);
+  }
+
+  .overlap-bar .level {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    color: var(--ink);
+    letter-spacing: 0.1em;
+    font-weight: 500;
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= HEADER ================= -->
+<header>
+  <div>
+    <div class="eyebrow">Competitive Battlecard · 競品戰卡</div>
+    <h1 class="title">
+      {{brand_name}}<span class="vs">vs.</span><span class="competitor">{{competitor_name}}</span>
+    </h1>
+  </div>
+  <div class="meta">
+    <div><span class="label">Date</span> <span class="value mono">{{analysis_date}}</span></div>
+    <div><span class="label">Analyst</span> <span class="value">{{analyst_name}}</span></div>
+    <div><span class="label">Version</span> <span class="value mono">v1.0</span></div>
+  </div>
+  <div class="ribbon">Internal · Confidential</div>
+</header>
+
+<!-- ================= MAIN GRID ================= -->
+<main>
+
+  <!-- 01 競品概況 -->
+  <section class="card tint-paper">
+    <div class="card-head">
+      <span class="card-num">01</span>
+      <span class="card-kicker">Competitor Overview</span>
+    </div>
+    <h2 class="card-title">競品概況</h2>
+    <div class="kv">
+      <div class="k">Founded</div><div class="v">{{competitor_founded}}</div>
+      <div class="k">Size</div><div class="v">{{competitor_size}}</div>
+      <div class="k">HQ</div><div class="v">{{competitor_hq}}</div>
+      <div class="k">Website</div><div class="v mono" style="font-size:12px;">{{competitor_website}}</div>
+    </div>
+  </section>
+
+  <!-- 02 定位 -->
+  <section class="card">
+    <div class="card-head">
+      <span class="card-num">02</span>
+      <span class="card-kicker">Positioning</span>
+    </div>
+    <h2 class="card-title">定位</h2>
+    <div class="claim-reality">
+      <div class="block">
+        <div class="tag">Claim · 對方宣稱</div>
+        <div class="text">{{competitor_claim}}</div>
+      </div>
+      <div class="block reality">
+        <div class="tag">Reality · 實際評估</div>
+        <div class="text">{{competitor_reality}}</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 03 目標客戶 -->
+  <section class="card tint-warm">
+    <div class="card-head">
+      <span class="card-num">03</span>
+      <span class="card-kicker">Target Customer</span>
+    </div>
+    <h2 class="card-title">目標客戶</h2>
+    <p class="body">{{competitor_icp}}</p>
+    <div class="overlap-bar" data-overlap="{{overlap_level}}">
+      <span class="level">重疊度</span>
+      <span class="ticks">
+        <span class="tick"></span>
+        <span class="tick"></span>
+        <span class="tick"></span>
+      </span>
+      <span class="level" style="color:var(--brand);">{{overlap_level}}</span>
+    </div>
+  </section>
+
+  <!-- 04 定價 -->
+  <section class="card">
+    <div class="card-head">
+      <span class="card-num">04</span>
+      <span class="card-kicker">Pricing</span>
+    </div>
+    <h2 class="card-title">定價</h2>
+    <p class="body">{{competitor_pricing}}</p>
+  </section>
+
+  <!-- 05 對方優勢 -->
+  <section class="card tint-warm">
+    <div class="card-head">
+      <span class="card-num">05</span>
+      <span class="card-kicker">Their Strengths</span>
+    </div>
+    <h2 class="card-title">對方優勢</h2>
+    <ul class="points">
+      {{their_strengths}}
+    </ul>
+  </section>
+
+  <!-- 06 對方劣勢 -->
+  <section class="card tint-paper">
+    <div class="card-head">
+      <span class="card-num">06</span>
+      <span class="card-kicker">Their Weaknesses</span>
+    </div>
+    <h2 class="card-title">對方劣勢</h2>
+    <ul class="points danger">
+      {{their_weaknesses}}
+    </ul>
+  </section>
+
+  <!-- 07 我方優勢 -->
+  <section class="card">
+    <div class="card-head">
+      <span class="card-num">07</span>
+      <span class="card-kicker">Our Advantages</span>
+    </div>
+    <h2 class="card-title">我方優勢</h2>
+    <ul class="points win">
+      {{our_advantages}}
+    </ul>
+  </section>
+
+  <!-- 08 殺手提問 -->
+  <section class="card tint-dark">
+    <div class="card-head">
+      <span class="card-num">08</span>
+      <span class="card-kicker">Land Mines</span>
+    </div>
+    <h2 class="card-title">殺手提問</h2>
+    <ol class="landmines">
+      {{land_mines}}
+    </ol>
+  </section>
+
+</main>
+
+<!-- ================= FOOTER — Talk Track ================= -->
+<footer>
+  <div class="talk-section">
+    <h3>Talk Track</h3>
+    <div class="talk-title">應對話術</div>
+    <div class="talk-grid">
+      {{talk_tracks}}
+    </div>
+  </div>
+
+  <div class="stamp">
+    <div>
+      <div class="big-num">{{next_step_count}}</div>
+      <div class="big-label">{{big_num_label}}</div>
+    </div>
+    <div class="footnote">
+      Last updated · <span class="src">{{analysis_date}}</span><br>
+      Source · 公開資料 / 業務回報<br>
+      僅供內部使用，勿外流。
+    </div>
+  </div>
+</footer>
+
+<!-- ================= DEMO DEFAULT DATA =================
+  這段 <script> 在載入後把所有 &lbrace;&lbrace;xxx&rbrace;&rbrace; 占位符替換成通用 `[XX]` 示範字串，
+  Claude 要用時：把 HTML 內所有 &lbrace;&lbrace;xxx&rbrace;&rbrace; 直接字串替換即可；
+  或刪除這段 script、自己替換後再存檔給 Playwright 截圖。
+=============================================================== -->
+<script>
+(function fillDemo () {
+  // 如果某個占位符已被替換（找不到 &lbrace;&lbrace;xxx&rbrace;&rbrace;），script 會自動略過
+  const demo = {
+    // 以下全為通用占位符。Claude 實際產出報告時會替換為真實資料。
+    // 此 demo 僅供「打開 template 看版面長相」，不代表任何真實公司/個人。
+    brand_name: "[我方公司]",
+    competitor_name: "[競品公司]",
+    analysis_date: "[YYYY-MM-DD]",
+    analyst_name: "[負責人]",
+    competitor_founded: "[成立年]",
+    competitor_size: "[規模：員工數／年營收]",
+    competitor_hq: "[總部所在地]",
+    competitor_website: "[競品網址]",
+    competitor_claim: "「[對方對外的宣稱／訴求]」",
+    competitor_reality: "[您親自評估後的實際觀察]",
+    competitor_icp: "[對方鎖定的理想客群輪廓]",
+    overlap_level: "中",
+    competitor_pricing: "[計費模式 + 價格點 + 付款條件]",
+    brand_color: "#1a365d",
+    next_step_count: "03",
+    big_num_label: "Action Items",
+
+    their_strengths: `
+      <li><span class="lead">[優勢主題 1]。</span>[具體證據／數據／案例]。</li>
+      <li><span class="lead">[優勢主題 2]。</span>[具體證據／數據／案例]。</li>
+      <li><span class="lead">[優勢主題 3]。</span>[具體證據／數據／案例]。</li>
+    `,
+    their_weaknesses: `
+      <li><span class="lead">[劣勢主題 1]。</span>[具體證據／案例]。</li>
+      <li><span class="lead">[劣勢主題 2]。</span>[具體證據／案例]。</li>
+      <li><span class="lead">[劣勢主題 3]。</span>[具體證據／案例]。</li>
+    `,
+    our_advantages: `
+      <li><span class="lead">[我方優勢 1]。</span>[證據／數據]。</li>
+      <li><span class="lead">[我方優勢 2]。</span>[證據／數據]。</li>
+      <li><span class="lead">[我方優勢 3]。</span>[證據／數據]。</li>
+    `,
+    land_mines: `
+      <li>「[面對潛在客戶時埋下的第 1 個殺手提問]」</li>
+      <li>「[面對潛在客戶時埋下的第 2 個殺手提問]」</li>
+      <li>「[面對潛在客戶時埋下的第 3 個殺手提問]」</li>
+    `,
+    talk_tracks: `
+      <div class="talk">
+        <div class="objection">「[客戶會說的常見異議 1]」</div>
+        <div class="response">[您的回應 + 證據點]</div>
+      </div>
+      <div class="talk">
+        <div class="objection">「[客戶會說的常見異議 2]」</div>
+        <div class="response">[您的回應 + 證據點]</div>
+      </div>
+      <div class="talk">
+        <div class="objection">「[客戶會說的常見異議 3]」</div>
+        <div class="response">[您的回應 + 證據點]</div>
+      </div>
+    `
+  };
+
+  let html = document.body.innerHTML;
+  for (const key in demo) {
+    html = html.split("{{" + key + "}}").join(demo[key]);
+  }
+  document.body.innerHTML = html;
+
+  // brand color 要即時套用 CSS 變數
+  document.documentElement.style.setProperty('--brand', demo.brand_color);
+
+  // overlap_level → 將自由文字正規化成 HIGH/MEDIUM/LOW，讓 CSS attribute selector 穩定 match
+  document.querySelectorAll('.overlap-bar').forEach(function (bar) {
+    var raw = (bar.getAttribute('data-overlap') || '').trim();
+    var normalized = raw;
+    if (/^(HIGH|高|3)/i.test(raw) || /中高/.test(raw)) normalized = 'HIGH';
+    else if (/^(MEDIUM|MED|中|2)/i.test(raw)) normalized = 'MEDIUM';
+    else if (/^(LOW|低|1)/i.test(raw)) normalized = 'LOW';
+    bar.setAttribute('data-overlap', normalized);
+  });
+})();
+</script>
+
+</body>
+</html>
