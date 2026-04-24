@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第一堂直播課 · 流程速覽</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;600;700;900&family=Noto+Sans+TC:wght@300;400;500;700&family=Playfair+Display:ital,wght@0,700;0,900;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --primary: #1f3a2e;
+  --primary-soft: #2a4a3c;
+  --accent: #8B2635;
+  --secondary: #6B4423;
+  --bg: #F5F1EA;
+  --bg-alt: #fdfbf7;
+  --surface: #ffffff;
+  --text: #1a1a1a;
+  --text-secondary: #4a4a4a;
+  --text-muted: #8a8a8a;
+  --border: #e3dccf;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Noto Sans TC', -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.75;
+  font-feature-settings: "palt" 1;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+}
+
+.serif, h1, h2, h3, h4 {
+  font-family: 'Noto Serif TC', serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+  text-wrap: balance;
+}
+
+.num {
+  font-family: 'Playfair Display', serif;
+  font-weight: 900;
+}
+
+.container {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 48px;
+}
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 20px;
+  font-family: 'Playfair Display', 'Noto Sans TC';
+}
+
+/* ═════════════════════════ HERO ═════════════════════════ */
+.hero {
+  background: var(--primary);
+  color: var(--bg);
+  padding: 96px 0 88px;
+  position: relative;
+}
+
+.hero::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 4px;
+  background: var(--accent);
+}
+
+.hero .eyebrow {
+  color: var(--bg);
+  opacity: 0.65;
+  margin-bottom: 32px;
+}
+
+.hero h1 {
+  font-size: 80px;
+  color: var(--bg);
+  margin-bottom: 28px;
+  line-height: 1.15;
+}
+
+.hero h1 em {
+  font-family: 'Playfair Display', 'Noto Serif TC';
+  font-weight: 400;
+  font-style: italic;
+  font-size: 0.6em;
+  color: var(--bg);
+  opacity: 0.85;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.hero .subtitle {
+  font-size: 22px;
+  color: var(--bg);
+  opacity: 0.88;
+  max-width: 820px;
+  line-height: 1.75;
+  font-weight: 300;
+}
+
+.hero .meta {
+  margin-top: 72px;
+  padding-top: 32px;
+  border-top: 1px solid rgba(245, 241, 234, 0.2);
+  display: flex;
+  gap: 64px;
+  color: var(--bg);
+  opacity: 0.7;
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-family: 'Playfair Display', 'Noto Sans TC';
+}
+
+.hero .meta span strong {
+  color: var(--bg);
+  opacity: 1;
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+/* ═════════════════════════ SECTION BASE ═════════════════════════ */
+section {
+  padding: 112px 0;
+  position: relative;
+}
+
+.section-header {
+  margin-bottom: 80px;
+  max-width: 780px;
+}
+
+.section-header h2 {
+  font-size: 52px;
+  margin-bottom: 24px;
+}
+
+.section-header .lead {
+  font-size: 20px;
+  color: var(--text-secondary);
+  line-height: 1.75;
+  font-weight: 400;
+}
+
+/* ═════════════════════════ OUTPUT CARDS ═════════════════════════ */
+.outputs {
+  background: var(--bg-alt);
+}
+
+.output-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px;
+}
+
+.output-card {
+  background: var(--surface);
+  padding: 48px 36px 40px;
+  border-top: 3px solid var(--primary);
+  position: relative;
+}
+
+.output-card .num {
+  font-size: 72px;
+  color: var(--accent);
+  line-height: 1;
+  margin-bottom: 28px;
+  opacity: 0.9;
+}
+
+.output-card h3 {
+  font-size: 26px;
+  margin-bottom: 14px;
+}
+
+.output-card p {
+  color: var(--text-secondary);
+  font-size: 15.5px;
+  line-height: 1.75;
+}
+
+.output-footer {
+  margin-top: 56px;
+  padding: 32px 40px;
+  background: var(--primary);
+  color: var(--bg);
+  font-size: 19px;
+  line-height: 1.7;
+  font-family: 'Noto Serif TC';
+  font-weight: 600;
+}
+
+.output-footer em {
+  color: var(--bg);
+  font-style: normal;
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: 2px;
+}
+
+/* ═════════════════════════ TIMELINE ═════════════════════════ */
+.timeline {
+  background: var(--bg);
+}
+
+.timeline-list {
+  border-top: 1px solid var(--border);
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 2fr;
+  gap: 40px;
+  padding: 36px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: start;
+}
+
+.timeline-row:hover {
+  background: rgba(31, 58, 46, 0.02);
+}
+
+.timeline-time {
+  font-family: 'Playfair Display';
+  font-size: 28px;
+  font-weight: 900;
+  color: var(--primary);
+  line-height: 1;
+  padding-top: 4px;
+}
+
+.timeline-time small {
+  display: block;
+  font-family: 'Noto Sans TC';
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+  margin-top: 6px;
+  font-weight: 400;
+  text-transform: uppercase;
+}
+
+.timeline-title {
+  font-family: 'Noto Serif TC';
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.timeline-desc {
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.timeline-desc strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ═════════════════════════ TEACHER ROLE ═════════════════════════ */
+.teacher-role {
+  background: var(--bg-alt);
+}
+
+.role-callout {
+  background: var(--primary);
+  color: var(--bg);
+  padding: 48px 56px;
+  margin-bottom: 64px;
+  font-family: 'Noto Serif TC';
+  font-size: 22px;
+  line-height: 1.7;
+  font-weight: 400;
+}
+
+.role-callout strong {
+  color: var(--bg);
+  font-weight: 700;
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: 2px;
+}
+
+.role-jobs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px;
+}
+
+.role-job {
+  background: var(--surface);
+  padding: 40px 32px;
+  border-top: 3px solid var(--accent);
+}
+
+.role-job .stage {
+  font-family: 'Playfair Display';
+  font-size: 14px;
+  color: var(--text-muted);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+.role-job h4 {
+  font-size: 22px;
+  margin-bottom: 14px;
+}
+
+.role-job p {
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.role-key-message {
+  margin-top: 56px;
+  padding: 32px 40px;
+  border-left: 4px solid var(--accent);
+  background: var(--surface);
+}
+
+.role-key-message .tag {
+  font-family: 'Playfair Display';
+  font-size: 12px;
+  letter-spacing: 0.25em;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.role-key-message p {
+  font-family: 'Noto Serif TC';
+  font-size: 22px;
+  line-height: 1.7;
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ═════════════════════════ PREP CHECKLIST ═════════════════════════ */
+.prep {
+  background: var(--bg);
+}
+
+.prep-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px;
+}
+
+.prep-card {
+  background: var(--surface);
+  padding: 40px 36px;
+  border-top: 3px solid var(--primary);
+}
+
+.prep-when {
+  font-family: 'Playfair Display';
+  font-size: 14px;
+  color: var(--accent);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.prep-card h3 {
+  font-size: 22px;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.prep-card ul {
+  list-style: none;
+}
+
+.prep-card li {
+  padding: 10px 0 10px 28px;
+  position: relative;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  font-size: 15px;
+}
+
+.prep-card li::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 18px;
+  width: 14px;
+  height: 2px;
+  background: var(--accent);
+}
+
+.prep-card li strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.prep-highlight {
+  margin-top: 56px;
+  background: var(--primary);
+  color: var(--bg);
+  padding: 36px 48px;
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 40px;
+  align-items: center;
+}
+
+.prep-highlight .tag {
+  font-family: 'Playfair Display';
+  font-size: 14px;
+  letter-spacing: 0.25em;
+  color: var(--bg);
+  opacity: 0.7;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.prep-highlight p {
+  font-size: 20px;
+  line-height: 1.7;
+  color: var(--bg);
+  font-weight: 400;
+}
+
+.prep-highlight p strong {
+  color: var(--bg);
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: 2px;
+  font-weight: 700;
+}
+
+/* ═════════════════════════ DECISIONS ═════════════════════════ */
+.decisions {
+  background: var(--bg-alt);
+}
+
+.decisions-list {
+  border-top: 1px solid var(--border);
+}
+
+.decision-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 1.5fr;
+  gap: 32px;
+  padding: 32px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: start;
+}
+
+.decision-num {
+  font-family: 'Playfair Display';
+  font-size: 44px;
+  font-weight: 900;
+  color: var(--accent);
+  line-height: 1;
+  padding-top: 4px;
+}
+
+.decision-q {
+  font-family: 'Noto Serif TC';
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.decision-a {
+  color: var(--text-secondary);
+  font-size: 15.5px;
+  line-height: 1.75;
+}
+
+.decision-a .decided,
+.decision-a .pending {
+  display: inline-block;
+  font-family: 'Playfair Display', 'Noto Sans TC';
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  margin-right: 12px;
+  vertical-align: 2px;
+}
+
+.decision-a .decided {
+  background: var(--primary);
+  color: var(--bg);
+}
+
+.decision-a .pending {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 3px 9px;
+}
+
+.decision-a strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* ═════════════════════════ NEXT LESSONS ═════════════════════════ */
+.next {
+  background: var(--bg);
+}
+
+.lessons-ladder {
+  border-top: 2px solid var(--primary);
+}
+
+.lesson-row {
+  display: grid;
+  grid-template-columns: 180px 1.5fr 1.5fr;
+  gap: 40px;
+  padding: 40px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+
+.lesson-row.current {
+  background: rgba(139, 38, 53, 0.03);
+  padding-left: 24px;
+  padding-right: 24px;
+  margin-left: -24px;
+  margin-right: -24px;
+}
+
+.lesson-label {
+  font-family: 'Playfair Display';
+  font-size: 14px;
+  color: var(--text-muted);
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.lesson-label strong {
+  display: block;
+  font-family: 'Noto Serif TC';
+  font-size: 28px;
+  color: var(--primary);
+  margin-top: 8px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.lesson-row.current .lesson-label strong {
+  color: var(--accent);
+}
+
+.lesson-takeaway {
+  font-family: 'Noto Serif TC';
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.lesson-problem {
+  color: var(--text-secondary);
+  font-size: 15.5px;
+  line-height: 1.7;
+}
+
+.lesson-problem .from {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.lesson-problem .arrow {
+  display: block;
+  margin: 6px 0;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.closing-quote {
+  margin-top: 72px;
+  padding: 56px 64px;
+  background: var(--primary);
+  color: var(--bg);
+  position: relative;
+}
+
+.closing-quote::before {
+  content: '"';
+  font-family: 'Playfair Display';
+  font-size: 120px;
+  position: absolute;
+  top: 16px; left: 40px;
+  color: var(--accent);
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.closing-quote p {
+  font-family: 'Noto Serif TC';
+  font-size: 24px;
+  line-height: 1.7;
+  padding-left: 80px;
+  font-weight: 400;
+  color: var(--bg);
+}
+
+.closing-quote .source {
+  display: block;
+  margin-top: 20px;
+  padding-left: 80px;
+  font-family: 'Playfair Display';
+  font-size: 13px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--bg);
+  opacity: 0.6;
+  font-weight: 400;
+}
+
+/* ═════════════════════════ SUCCESS CRITERIA ═════════════════════════ */
+.success {
+  background: var(--primary);
+  color: var(--bg);
+  padding: 112px 0;
+  border-top: 6px solid var(--accent);
+}
+
+.success .section-header h2 {
+  color: var(--bg);
+}
+
+.success .eyebrow {
+  color: var(--bg);
+  opacity: 0.7;
+}
+
+.success .section-header .lead {
+  color: var(--bg);
+  opacity: 0.85;
+}
+
+.success-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px;
+  margin-top: 24px;
+}
+
+.success-item {
+  border-top: 2px solid var(--accent);
+  padding-top: 32px;
+}
+
+.success-item .big {
+  font-family: 'Playfair Display';
+  font-size: 80px;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--bg);
+  margin-bottom: 20px;
+}
+
+.success-item h4 {
+  font-family: 'Noto Serif TC';
+  font-size: 22px;
+  color: var(--bg);
+  margin-bottom: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.success-item p {
+  color: var(--bg);
+  opacity: 0.8;
+  font-size: 15.5px;
+  line-height: 1.75;
+}
+
+.success-bottom {
+  margin-top: 72px;
+  padding-top: 40px;
+  border-top: 1px solid rgba(245, 241, 234, 0.25);
+  font-family: 'Noto Serif TC';
+  font-size: 20px;
+  line-height: 1.7;
+  color: var(--bg);
+  opacity: 0.9;
+  max-width: 820px;
+}
+
+/* ═════════════════════════ FOOTER ═════════════════════════ */
+footer {
+  background: var(--primary);
+  color: var(--bg);
+  padding: 56px 0 48px;
+  text-align: center;
+  border-top: 1px solid rgba(245, 241, 234, 0.12);
+}
+
+footer p {
+  font-size: 13px;
+  opacity: 0.6;
+  letter-spacing: 0.15em;
+  font-family: 'Playfair Display', 'Noto Sans TC';
+  text-transform: uppercase;
+}
+
+footer p + p {
+  margin-top: 12px;
+  font-family: 'Noto Sans TC';
+  text-transform: none;
+  letter-spacing: 0.03em;
+  font-size: 14px;
+}
+
+/* ═════════════════════════ RESPONSIVE ═════════════════════════ */
+@media (max-width: 960px) {
+  .container { padding: 0 24px; }
+  .hero { padding: 72px 0 56px; }
+  .hero h1 { font-size: 52px; }
+  .hero .subtitle { font-size: 18px; }
+  .hero .meta { gap: 32px; flex-wrap: wrap; font-size: 11px; }
+  .section-header h2 { font-size: 36px; }
+  .section-header .lead { font-size: 17px; }
+  .output-grid,
+  .role-jobs,
+  .prep-grid,
+  .success-list { grid-template-columns: 1fr; gap: 20px; }
+  .timeline-row { grid-template-columns: 100px 1fr; gap: 20px; }
+  .timeline-row .timeline-desc { grid-column: 1 / -1; }
+  .decision-row { grid-template-columns: 60px 1fr; gap: 20px; }
+  .decision-row .decision-a { grid-column: 1 / -1; padding-left: 80px; }
+  .lesson-row { grid-template-columns: 1fr; gap: 12px; padding: 28px 0; }
+  .prep-highlight { grid-template-columns: 1fr; gap: 16px; padding: 28px 32px; }
+  section { padding: 72px 0; }
+  .closing-quote { padding: 48px 32px; }
+  .closing-quote p, .closing-quote .source { padding-left: 0; }
+  .closing-quote::before { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═════════════════════════ HERO ═════════════════════════ -->
+<section class="hero">
+  <div class="container">
+    <div class="eyebrow">給合作者的流程速覽</div>
+    <h1>
+      <em>第一堂直播課</em>
+      三十分鐘，讓每位學員帶走一份自己公司的顧問級分析
+    </h1>
+    <p class="subtitle">
+      這套工具是為中小企業老闆設計的——學員不用寫程式、不用懂技術。把一段指令貼給 Claude，半小時後手上就有一份平常找顧問才做得到的分析報告。本頁介紹整個課程流程。
+    </p>
+    <div class="meta">
+      <span><strong>時長</strong>30 分鐘</span>
+      <span><strong>學員技術門檻</strong>零</span>
+      <span><strong>老師背景要求</strong>不需要懂行銷或技術</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════ 學員帶走什麼 ═════════════════════════ -->
+<section class="outputs">
+  <div class="container">
+    <div class="section-header">
+      <div class="eyebrow">成果</div>
+      <h2>課堂結束，每位學員手上有</h2>
+      <p class="lead">三份東西，依學員自己公司客製。Claude 會把這些一次交到學員手上——不是模板套出來的，是依他的產業、對手、痛點從零設計的。</p>
+    </div>
+
+    <div class="output-grid">
+      <div class="output-card">
+        <div class="num">01</div>
+        <h3>完整簡報</h3>
+        <p>大約 12 頁的 PPT，依學員自己公司客製。可列印、可在 LINE 群裡傳、可開合夥人會議直接放。</p>
+      </div>
+      <div class="output-card">
+        <div class="num">02</div>
+        <h3>文字版完整分析</h3>
+        <p>市場概況、競爭對手剖析、品牌定位建議、行銷訊息架構。所有數據標示來源，不清楚的地方明確標「要補」。</p>
+      </div>
+      <div class="output-card">
+        <div class="num">03</div>
+        <h3>九十天行動建議</h3>
+        <p>未來三個月該做什麼、先做什麼、怎麼監控。像顧問開完會給的結論，學員可以照著跑。</p>
+      </div>
+    </div>
+
+    <div class="output-footer">
+      共通特色：<em>完全依學員自己公司的資料客製</em>——不是老師給的模板填空，是 Claude 把學員回答的每一個細節融進報告裡長出來的。
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════ 時間軸 ═════════════════════════ -->
+<section class="timeline">
+  <div class="container">
+    <div class="section-header">
+      <div class="eyebrow">流程</div>
+      <h2>課堂 30 分鐘，五個階段</h2>
+      <p class="lead">Claude 自己跑主要工作、老師在旁邊引導學員觀察它在做什麼、該怎麼和它互動。</p>
+    </div>
+
+    <div class="timeline-list">
+      <div class="timeline-row">
+        <div class="timeline-time">0–3<small>分鐘</small></div>
+        <div class="timeline-title">開場</div>
+        <div class="timeline-desc">老師說明今天會做什麼、秀一份<strong>範例成品</strong>（告訴學員：「等一下你也會有自己的版本」）。把氣氛鋪好、讓學員放輕鬆。</div>
+      </div>
+
+      <div class="timeline-row">
+        <div class="timeline-time">3–8<small>分鐘</small></div>
+        <div class="timeline-title">準備工具</div>
+        <div class="timeline-desc">Claude 自動下載課程需要的工具（約 3–5 分鐘）。這段時間老師<strong>引導學員觀察</strong>：「你看 Claude 正在做 X，為什麼它可以做到？」讓學員開始習慣「看 AI 做事」而不是「等 AI 做事」。</div>
+      </div>
+
+      <div class="timeline-row">
+        <div class="timeline-time">8–11<small>分鐘</small></div>
+        <div class="timeline-title">收集資料</div>
+        <div class="timeline-desc">Claude 主動問學員公司的事——品牌、產業、對手、最煩惱的事。學員只要<strong>據實回答</strong>。老師提醒學員：「你講得越具體、Claude 做得越準。」</div>
+      </div>
+
+      <div class="timeline-row">
+        <div class="timeline-time">11–20<small>分鐘</small></div>
+        <div class="timeline-title">跑分析</div>
+        <div class="timeline-desc">Claude 從市場、競品、定位、訊息四個方向做完整分析（約 9–12 分鐘）。老師這段<strong>引導學員觀察</strong>：「Claude 在問什麼？在查什麼？你看它怎麼找你的對手資料。」學員從觀察裡學「怎麼跟 AI 討論」。</div>
+      </div>
+
+      <div class="timeline-row">
+        <div class="timeline-time">20–25<small>分鐘</small></div>
+        <div class="timeline-title">做成簡報</div>
+        <div class="timeline-desc">Claude 把文字分析視覺化成 PPT。老師這段可以分享<strong>自己的觀察</strong>：「這份分析如果我來做，我會注意什麼？」讓學員學會「審視成品」的眼光。</div>
+      </div>
+
+      <div class="timeline-row">
+        <div class="timeline-time">25–30<small>分鐘</small></div>
+        <div class="timeline-title">分享與預告</div>
+        <div class="timeline-desc">學員自願分享自己的 PPT。老師<strong>引導</strong>：「如果你想讓它更好、你下一步可以問 Claude 什麼？」最後預告下一堂。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════ 老師的角色 ═════════════════════════ -->
+<section class="teacher-role">
+  <div class="container">
+    <div class="section-header">
+      <div class="eyebrow">老師的角色</div>
+      <h2>老師不需要行銷背景，也不需要技術背景</h2>
+      <p class="lead">這堂課不是「老師教學員行銷」，是「老師引導學員學會<strong>怎麼跟 AI 討論</strong>」。老師的價值在引導、不在專業。</p>
+    </div>
+
+    <div class="role-callout">
+      老師不可能知道每一個學員產業的細節——一家咖啡店、一間診所、一家五金行的分析會完全不一樣。<strong>這套工具本來就是讓每位學員擁有自己的客製化能力。</strong>老師的任務是幫學員學會「如何跟 Claude 對話」，不是幫學員做分析。
+    </div>
+
+    <div class="role-jobs">
+      <div class="role-job">
+        <div class="stage">前 3 分鐘</div>
+        <h4>開場定位</h4>
+        <p>告訴學員今天會發生什麼、讓他們放輕鬆。強調今天是「你學會怎麼當 AI 的 manager」，不是「被灌行銷知識」。</p>
+      </div>
+      <div class="role-job">
+        <div class="stage">中間 22 分鐘</div>
+        <h4>引導觀察</h4>
+        <p>Claude 在做事的時候，幫學員看懂它在做什麼、鼓勵學員「主動補資料、主動提問」。培養學員把 Claude 當同事用、而不是當搜尋引擎用。</p>
+      </div>
+      <div class="role-job">
+        <div class="stage">最後 5 分鐘</div>
+        <h4>引導分享</h4>
+        <p>學員分享成品時，不是點評他的策略對不對，而是引導：「你看到什麼想改的？要怎麼跟 Claude 說才能改出你要的？」</p>
+      </div>
+    </div>
+
+    <div class="role-key-message">
+      <div class="tag">Key Message</div>
+      <p>這是一堂教學員<strong>「如何當 AI 的 manager」</strong>的課，不是「行銷顧問教你做分析」。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════ 下集預告 ═════════════════════════ -->
+<section class="next">
+  <div class="container">
+    <div class="section-header">
+      <div class="eyebrow">續費鉤子</div>
+      <h2>為什麼學員會想來下一堂</h2>
+      <p class="lead">三堂課的價值階梯——每一堂都讓學員公司的問題少一層。</p>
+    </div>
+
+    <div class="lessons-ladder">
+      <div class="lesson-row current">
+        <div class="lesson-label">
+          本堂
+          <strong>第一堂</strong>
+        </div>
+        <div class="lesson-takeaway">學員帶走<br>顧問級分析簡報</div>
+        <div class="lesson-problem">
+          <span class="from">「我花錢請顧問才做得到」</span>
+          <span class="arrow">↓</span>
+          「我半小時自己做得到」
+        </div>
+      </div>
+
+      <div class="lesson-row">
+        <div class="lesson-label">
+          下堂
+          <strong>第二堂</strong>
+        </div>
+        <div class="lesson-takeaway">Claude 變成<br>他專屬的個人助理</div>
+        <div class="lesson-problem">
+          <span class="from">「我每次都要重新跟 AI 解釋公司狀況」</span>
+          <span class="arrow">↓</span>
+          「它記得我的事、會追我的進度、會提醒我」
+        </div>
+      </div>
+
+      <div class="lesson-row">
+        <div class="lesson-label">
+          再下堂
+          <strong>第三堂</strong>
+        </div>
+        <div class="lesson-takeaway">Claude 接手<br>LINE 客服</div>
+        <div class="lesson-problem">
+          <span class="from">「下班後 LINE 還一直響」</span>
+          <span class="arrow">↓</span>
+          「AI 代我值班、我早上醒來再看」
+        </div>
+      </div>
+    </div>
+
+    <div class="closing-quote">
+      <p>今天您拿到的是顧問報告。下一堂要讓 Claude 變成記得您公司、追您進度的個人助理。再下一堂，讓它接手 LINE、替您自動上班。</p>
+      <span class="source">老師第一堂結束 · 下集預告口白</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════ 成功標準 ═════════════════════════ -->
+<section class="success">
+  <div class="container">
+    <div class="section-header">
+      <div class="eyebrow">成功標準</div>
+      <h2>怎麼算這堂課成功？</h2>
+      <p class="lead">不是看「學員聽懂多少概念」，是看「學員手上有沒有成品」、「有沒有 wow 感」、「想不想再來」。</p>
+    </div>
+
+    <div class="success-list">
+      <div class="success-item">
+        <div class="big">70%</div>
+        <h4>以上學員手上有自己的 PPT</h4>
+        <p>30 分鐘結束時，至少七成學員把自己公司的 PPT 做出來。做不出來的部分能指出是哪個環節卡住、下次怎麼改進。</p>
+      </div>
+
+      <div class="success-item">
+        <div class="big">Wow</div>
+        <h4>感真的被觸發</h4>
+        <p>學員走出課堂時覺得「AI 真的能幫我做大事」、不只是「我聽懂一些概念」。把成品塞進手裡，比任何解說都有效。</p>
+      </div>
+
+      <div class="success-item">
+        <div class="big">&gt;50%</div>
+        <h4>學員主動說「我要來下一堂」</h4>
+        <p>課堂上或課後 48 小時內，超過一半學員主動表達想參加第二堂。這是年費社群續費的最強前兆。</p>
+      </div>
+    </div>
+
+    <p class="success-bottom">
+      這是 Skool 年費社群<strong>第一次對學員展現價值</strong>的機會——把成品塞進他手上，比讓他理解任何概念都有效。成功的第一堂，就是第二堂的門票。
+    </p>
+  </div>
+</section>
+
+<!-- ═════════════════════════ FOOTER ═════════════════════════ -->
+<footer>
+  <div class="container">
+    <p>第一堂直播課流程速覽 · v1.0</p>
+    <p>依實際執行調整。技術細節（老師 talk track 素材、安裝流程、待實測事項）見助教版本 lesson-01-flow.md。</p>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -76,7 +76,7 @@
 - 同時產出的其他檔案（分析 markdown、HTML 版等）
 - 可以怎麼改（「不滿意哪段跟我說」）
 - 怎麼存（複製到 Google Drive / OneDrive / 桌面）
-- 簡短一句下集預告：下一堂會裝 SME-AI-Kit MCP，讓 Claude 接 LINE、自動化營運
+- 簡短一句下集預告：下一堂會把 Claude 變成使用者的個人助理（記得他公司的事、追進度），第三堂再教 LINE 客服自動化
 
 ---
 
