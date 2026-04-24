@@ -1,0 +1,2217 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>[範例咖啡品牌] 競品與定位研究 · 2026 春</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700&family=Noto+Serif+TC:wght@400;500;700;900&family=Noto+Sans+TC:wght@300;400;500;700;900&family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* =========================================================
+   [範例咖啡品牌] 競品與定位 Deck
+   風格：顧問諮詢所版（主）+ 雜誌特別報導氣質（混搭於封面、Exec、定位）
+   對照：sme-design/references/design-philosophy.md 第 2、3 節
+   ========================================================= */
+
+:root {
+  /* —— Brand colors —— 🔴 無品牌資產，使用通用推薦 —— */
+  --brand-primary:       #1a365d;
+  --brand-primary-dark:  #0f2340;
+  --brand-primary-light: #3d5f8a;
+  --brand-primary-soft:  #c5d2e3;
+
+  --paper:               #f5f1e8;
+  --paper-dark:          #e8e2d4;
+  --paper-soft:          #faf7f0;
+
+  --ink:                 #1a1a1a;
+  --ink-soft:            #4a4a4a;
+  --ink-mute:            #8a8a8a;
+
+  --accent:              #8b2e2e;    /* 酒紅——🔴 警訊、關鍵對比 */
+  --accent-soft:         #d9b5b5;
+
+  --line:                #d8d4cc;
+  --line-soft:           #eae5db;
+  --line-strong:         #1a1a1a;
+
+  /* —— Typography —— */
+  --font-display: 'Playfair Display', 'Noto Serif TC', serif;
+  --font-serif:   'Noto Serif TC', 'Playfair Display', serif;
+  --font-body:    'Instrument Sans', 'Noto Sans TC', sans-serif;
+  --font-mono:    'IBM Plex Mono', monospace;
+
+  /* —— Grid / spacing —— */
+  --slide-w: 1920px;
+  --slide-h: 1080px;
+  --margin-x: 80px;
+  --margin-y: 72px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: #2a2e35;     /* deck 之間的背板 */
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.65;
+  text-wrap: pretty;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 每張投影片 */
+[data-slide] {
+  width: var(--slide-w);
+  height: var(--slide-h);
+  background: #ffffff;
+  color: var(--ink);
+  position: relative;
+  overflow: hidden;
+  display: block;
+  margin: 24px auto;
+  page-break-after: always;
+  font-feature-settings: "palt" 1;
+}
+
+[data-slide].paper { background: var(--paper); }
+[data-slide].dark  { background: var(--brand-primary); color: #ffffff; }
+
+/* Utility */
+.ribbon-top {
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 2px; background: var(--brand-primary);
+}
+
+/* Header eyebrow + Exhibit */
+.slide-header {
+  position: absolute;
+  top: 32px; left: var(--margin-x); right: var(--margin-x);
+  display: flex; justify-content: space-between; align-items: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+}
+.slide-header .tag {
+  color: var(--brand-primary);
+  font-weight: 600;
+}
+.slide-header .exhibit {
+  color: var(--ink-mute);
+}
+
+/* Footer 固定 */
+.slide-footer {
+  position: absolute;
+  bottom: 28px; left: var(--margin-x); right: var(--margin-x);
+  display: grid;
+  grid-template-columns: 1fr 2fr 1fr;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+}
+.slide-footer .mid { text-align: center; }
+.slide-footer .right { text-align: right; }
+.slide-footer::before {
+  content: '';
+  position: absolute;
+  top: -16px; left: 0; right: 0;
+  height: 1px;
+  background: var(--line);
+}
+
+/* Main canvas */
+.canvas {
+  position: absolute;
+  top: 88px;
+  bottom: 72px;
+  left: var(--margin-x);
+  right: var(--margin-x);
+}
+
+/* Type styles */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.25em;
+  color: var(--accent);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.eyebrow.ink { color: var(--ink-mute); }
+.eyebrow.primary { color: var(--brand-primary); }
+
+h1.hero {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 96px;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: var(--brand-primary);
+  text-wrap: balance;
+}
+h1.page {
+  font-family: var(--font-serif);
+  font-weight: 900;
+  font-size: 56px;
+  line-height: 1.15;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+h2.section {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 32px;
+  line-height: 1.25;
+  color: var(--brand-primary);
+  margin-bottom: 12px;
+}
+h3.block {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 1.35;
+  color: var(--ink);
+  letter-spacing: 0.01em;
+}
+p.body {
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--ink-soft);
+}
+p.lede {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  line-height: 1.55;
+  color: var(--ink);
+  font-weight: 400;
+}
+.mono { font-family: var(--font-mono); }
+.num-big {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 64px;
+  line-height: 1;
+  color: var(--brand-primary);
+  letter-spacing: -0.02em;
+}
+.num-med {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 42px;
+  line-height: 1;
+  color: var(--brand-primary);
+}
+.label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  font-weight: 500;
+}
+.divider {
+  border: none; height: 1px; background: var(--line); margin: 16px 0;
+}
+.divider-strong {
+  border: none; height: 2px; background: var(--line-strong); margin: 16px 0;
+}
+.divider-dbl {
+  height: 6px;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  margin: 16px 0;
+}
+
+/* 🔴 placeholder marker */
+.ph {
+  color: var(--accent);
+  font-weight: 600;
+  border-bottom: 2px dotted var(--accent);
+  padding: 0 2px;
+}
+.ph::before {
+  content: "●";
+  color: var(--accent);
+  margin-right: 4px;
+  font-size: 10px;
+  vertical-align: middle;
+}
+
+/* Table base */
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+table.data th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 2px solid var(--line-strong);
+}
+table.data td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+table.data tbody tr:nth-child(even) td { background: var(--paper-soft); }
+table.data td.num { font-family: var(--font-mono); text-align: right; color: var(--ink); }
+table.data td.strong { color: var(--ink); font-weight: 500; }
+
+/* ==========  P1 Cover  ========== */
+.cover-bg {
+  position: absolute; inset: 0;
+  background: var(--paper);
+}
+.cover-inner {
+  position: absolute;
+  inset: 0;
+  padding: 96px var(--margin-x);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+.cover-top {
+  display: flex; justify-content: space-between; align-items: flex-start;
+}
+.cover-top .brand-mark {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.3em;
+  color: var(--brand-primary);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.cover-eyebrow-line {
+  width: 80px; height: 2px; background: var(--accent); margin: 14px 0;
+}
+.cover-main {
+  align-self: center;
+  max-width: 1400px;
+}
+.cover-main .sub-en {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 36px;
+  line-height: 1.35;
+  color: var(--brand-primary-light);
+  margin-bottom: 18px;
+}
+.cover-main h1 {
+  font-family: var(--font-serif);
+  font-weight: 900;
+  font-size: 128px;
+  line-height: 1.02;
+  color: var(--brand-primary);
+  letter-spacing: -0.03em;
+  margin-bottom: 20px;
+}
+.cover-main .zh-sub {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 40px;
+  line-height: 1.3;
+  color: var(--ink);
+  letter-spacing: 0.03em;
+}
+.cover-bottom {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 48px;
+  border-top: 1px solid var(--line-strong);
+  padding-top: 24px;
+}
+.cover-bottom .field { font-family: var(--font-body); font-size: 14px; color: var(--ink-soft); }
+.cover-bottom .field .k {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  display: block;
+  margin-bottom: 8px;
+}
+.cover-bottom .field .v { color: var(--ink); font-weight: 500; }
+
+/* ==========  P2 Exec Summary  ========== */
+.exec-grid {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 36px;
+  height: 100%;
+}
+.exec-lede {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  line-height: 1.5;
+  color: var(--ink);
+  max-width: 1400px;
+}
+.exec-lede strong { color: var(--brand-primary); font-weight: 700; }
+
+.exec-findings {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 32px;
+}
+.finding-card {
+  border-top: 3px solid var(--brand-primary);
+  padding: 20px 0;
+}
+.finding-card .idx {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.25em;
+  color: var(--accent);
+  text-transform: uppercase;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 8px;
+}
+.finding-card h3 {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1.3;
+  color: var(--ink);
+  margin-bottom: 12px;
+}
+.finding-card p {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--ink-soft);
+  margin-bottom: 8px;
+}
+.finding-card ul {
+  padding-left: 0;
+  list-style: none;
+}
+.finding-card li {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+  padding-left: 20px;
+  position: relative;
+}
+.finding-card li::before {
+  content: "▪";
+  color: var(--brand-primary);
+  position: absolute;
+  left: 0; top: 0;
+}
+
+.exec-callout {
+  background: var(--brand-primary);
+  color: #ffffff;
+  padding: 24px 32px;
+  border-left: 6px solid var(--accent);
+  font-family: var(--font-serif);
+  font-size: 24px;
+  line-height: 1.5;
+  font-weight: 500;
+}
+.exec-callout::before {
+  content: "建議";
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  font-weight: 500;
+  color: var(--accent-soft);
+  display: block;
+  margin-bottom: 6px;
+}
+
+/* ==========  P3 Market Map  ========== */
+.mkt-stat-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 48px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--line);
+}
+.mkt-stat {
+  padding: 16px 0;
+}
+.mkt-stat .num-big {
+  color: var(--brand-primary);
+  font-size: 72px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.mkt-stat .ttl {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-bottom: 12px;
+}
+.mkt-stat .desc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+.mkt-stat .src {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  margin-top: 6px;
+}
+
+.mkt-timeline {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: end;
+  gap: 0;
+  position: relative;
+}
+.mkt-timeline::before {
+  content: "";
+  position: absolute;
+  bottom: 52px; left: 0; right: 0;
+  height: 1px; background: var(--brand-primary);
+}
+.mkt-tl-node {
+  text-align: center;
+  position: relative;
+  padding-bottom: 72px;
+}
+.mkt-tl-node::after {
+  content: "";
+  position: absolute;
+  bottom: 48px; left: 50%;
+  transform: translateX(-50%);
+  width: 10px; height: 10px;
+  background: var(--brand-primary);
+  border-radius: 50%;
+}
+.mkt-tl-node .num {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  color: var(--brand-primary);
+  font-weight: 500;
+  line-height: 1;
+}
+.mkt-tl-node .yr {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  color: var(--ink-mute);
+  margin-top: 6px;
+}
+.mkt-tl-node .note {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+.mkt-layers {
+  padding-top: 20px;
+}
+.mkt-layers h3.block { margin-bottom: 14px; }
+table.layers { font-size: 13px; }
+table.layers td.lvl {
+  font-family: var(--font-mono);
+  color: var(--brand-primary);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  width: 100px;
+}
+table.layers td.reps { font-weight: 500; color: var(--ink); width: 260px; }
+table.layers td.pos { color: var(--ink-soft); }
+table.layers td.price {
+  font-family: var(--font-mono);
+  text-align: right;
+  color: var(--brand-primary);
+  white-space: nowrap;
+  width: 160px;
+}
+table.layers tr.me td { background: var(--paper); color: var(--ink); font-weight: 500; }
+table.layers tr.me td.lvl { color: var(--accent); }
+
+/* ==========  P4 Positioning Map  ========== */
+.posmap-wrap {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 48px;
+  height: 100%;
+}
+.posmap-canvas {
+  position: relative;
+  background: var(--paper-soft);
+  border: 1px solid var(--line);
+}
+.posmap-axis-y, .posmap-axis-x {
+  position: absolute;
+  background: var(--ink);
+}
+.posmap-axis-y { top: 40px; bottom: 40px; left: 50%; width: 1px; }
+.posmap-axis-x { left: 40px; right: 40px; top: 50%; height: 1px; }
+
+.posmap-label {
+  position: absolute;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+}
+.posmap-label.y-top    { top: 12px;    left: 52%; }
+.posmap-label.y-bottom { bottom: 12px; left: 52%; }
+.posmap-label.x-right  { right: 12px;  top: 52%; }
+.posmap-label.x-left   { left: 12px;   top: 52%; }
+.posmap-axis-title-y, .posmap-axis-title-x {
+  position: absolute;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+.posmap-axis-title-y { top: 12px; left: 52%; }  /* override */
+.posmap-axis-title-x { right: 12px; top: 52%; }
+
+.posmap-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+.posmap-node .dot {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--brand-primary);
+  margin: 0 auto 8px;
+}
+.posmap-node.solid .dot { background: var(--brand-primary); }
+.posmap-node.hollow .dot { background: #fff; border: 2px solid var(--ink-soft); }
+.posmap-node.dashed .dot { background: #fff; border: 2px dashed var(--brand-primary); }
+.posmap-node.me .dot { background: var(--accent); width: 22px; height: 22px; }
+.posmap-node .nm {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.posmap-node.me .nm {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 15px;
+}
+.posmap-node .sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--ink-mute);
+  margin-top: 2px;
+}
+
+.posmap-legend {
+  padding: 20px 0;
+}
+.posmap-legend h3 { margin-bottom: 14px; }
+.posmap-legend .item {
+  display: grid; grid-template-columns: 28px 1fr;
+  gap: 12px; align-items: center;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+.posmap-legend .item .dot {
+  width: 14px; height: 14px; border-radius: 50%;
+  margin: 0 auto;
+}
+.posmap-legend .item.solid .dot { background: var(--brand-primary); }
+.posmap-legend .item.hollow .dot { background: #fff; border: 2px solid var(--ink-soft); }
+.posmap-legend .item.dashed .dot { background: #fff; border: 2px dashed var(--brand-primary); }
+.posmap-legend .item.me .dot { background: var(--accent); }
+
+.posmap-note {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+.posmap-note strong { color: var(--brand-primary); font-weight: 600; }
+
+/* ==========  P5/6/7 Battlecard  ========== */
+.bc-meta {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  border-top: 2px solid var(--brand-primary);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 24px;
+}
+.bc-meta .cell {
+  padding: 14px 16px;
+  border-right: 1px solid var(--line);
+}
+.bc-meta .cell:last-child { border-right: 0; }
+.bc-meta .k {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.bc-meta .v { font-size: 14px; color: var(--ink); line-height: 1.5; font-weight: 500; }
+.bc-meta .v .n {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--brand-primary);
+}
+
+.bc-grid-sw {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 28px;
+}
+.bc-col h3.block {
+  font-size: 18px;
+  color: var(--brand-primary);
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.bc-col h3.block.adv { color: var(--accent); }
+.bc-col .pt {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  margin-bottom: 10px;
+  padding-left: 24px;
+  position: relative;
+}
+.bc-col .pt .idx {
+  position: absolute; left: 0; top: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--brand-primary);
+  font-weight: 600;
+}
+.bc-col .pt.adv .idx { color: var(--accent); }
+.bc-col .pt strong { color: var(--ink); font-weight: 600; }
+
+.bc-lower {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 2px solid var(--line-strong);
+}
+.bc-lower h3.block {
+  font-size: 16px;
+  color: var(--brand-primary);
+  margin-bottom: 10px;
+}
+.bc-lower ol {
+  padding-left: 0;
+  counter-reset: mine;
+  list-style: none;
+}
+.bc-lower ol li {
+  counter-increment: mine;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  margin-bottom: 8px;
+  padding-left: 28px;
+  position: relative;
+}
+.bc-lower ol li::before {
+  content: counter(mine, decimal-leading-zero);
+  position: absolute;
+  left: 0; top: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.bc-talk-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+}
+.bc-talk-table td {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  vertical-align: top;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+.bc-talk-table td:first-child {
+  background: var(--paper-soft);
+  color: var(--ink);
+  font-weight: 500;
+  width: 35%;
+  font-family: var(--font-serif);
+}
+.bc-intro {
+  background: var(--paper);
+  border-left: 4px solid var(--brand-primary);
+  padding: 14px 20px;
+  margin-bottom: 20px;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+.bc-intro strong { color: var(--brand-primary); }
+
+/* ==========  P8 Positioning  ========== */
+.pos-wrap {
+  display: grid;
+  grid-template-columns: 460px 1fr;
+  gap: 60px;
+  height: 100%;
+}
+.pos-left {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-top: 20px;
+}
+.pos-quote {
+  font-family: var(--font-display);
+  font-size: 44px;
+  line-height: 1.25;
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.pos-quote::before {
+  content: '"';
+  display: block;
+  font-size: 110px;
+  line-height: 0.8;
+  color: var(--accent);
+  margin-bottom: 8px;
+  font-family: var(--font-display);
+  font-weight: 900;
+}
+.pos-quote strong {
+  color: var(--brand-primary);
+  font-weight: 900;
+}
+
+.pos-right {
+  padding-top: 12px;
+}
+.pos-row {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 18px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.pos-row .step {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  padding-top: 2px;
+}
+.pos-row .body-side h4 {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--brand-primary);
+  margin-bottom: 4px;
+}
+.pos-row .body-side .txt {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+.pos-row .body-side .txt strong { color: var(--ink); font-weight: 600; }
+
+.pos-statement {
+  margin-top: 18px;
+  background: var(--brand-primary);
+  color: #fff;
+  padding: 18px 24px;
+  border-left: 6px solid var(--accent);
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  line-height: 1.75;
+  font-weight: 400;
+}
+.pos-statement .lbl {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  color: var(--accent-soft);
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 8px;
+}
+.pos-statement strong {
+  color: #fff;
+  font-weight: 700;
+  background: linear-gradient(transparent 60%, rgba(139,46,46,0.45) 60%);
+  padding: 0 3px;
+}
+
+/* ==========  P9 Messaging  ========== */
+.msg-hero {
+  padding: 20px 0;
+  border-bottom: 2px solid var(--line-strong);
+  margin-bottom: 24px;
+}
+.msg-hero .vp {
+  font-family: var(--font-serif);
+  font-weight: 900;
+  font-size: 62px;
+  line-height: 1.15;
+  color: var(--brand-primary);
+  letter-spacing: -0.01em;
+  max-width: 1500px;
+  margin-bottom: 14px;
+}
+.msg-hero .sub {
+  font-family: var(--font-body);
+  font-size: 18px;
+  color: var(--ink-soft);
+  line-height: 1.55;
+  max-width: 1400px;
+}
+
+.msg-proofs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 28px;
+  margin-bottom: 24px;
+}
+.proof {
+  border-top: 3px solid var(--accent);
+  padding: 14px 0;
+}
+.proof .idx {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.25em;
+  color: var(--accent);
+  text-transform: uppercase;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 6px;
+}
+.proof h4 {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--ink);
+  margin-bottom: 10px;
+}
+.proof ul { list-style: none; padding: 0; }
+.proof li {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+  padding-left: 16px;
+  position: relative;
+}
+.proof li::before {
+  content: "▪"; color: var(--brand-primary);
+  position: absolute; left: 0; top: 0;
+}
+.proof .type-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  margin-top: 8px;
+  display: block;
+}
+
+.msg-channels {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 28px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.ch {
+  padding: 12px 0;
+}
+.ch .k {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.25em;
+  color: var(--brand-primary);
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.ch .v {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--ink-soft);
+  background: var(--paper);
+  padding: 12px 14px;
+  border-left: 3px solid var(--brand-primary);
+  white-space: pre-wrap;
+}
+.ch .v strong { color: var(--ink); font-weight: 700; }
+
+/* ==========  P10 90 day plan  ========== */
+.plan-phases {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0;
+  border-top: 2px solid var(--brand-primary);
+  border-bottom: 1px solid var(--line);
+}
+.phase {
+  padding: 16px 20px;
+  border-right: 1px solid var(--line);
+}
+.phase:last-child { border-right: 0; }
+.phase .rng {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.25em;
+  color: var(--accent);
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.phase h3 {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 22px;
+  color: var(--brand-primary);
+  margin-bottom: 4px;
+}
+.phase .kw {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  font-style: italic;
+  margin-bottom: 0;
+}
+
+.plan-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  margin-top: 14px;
+}
+.plan-tbl th {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 500;
+}
+.plan-tbl td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+.plan-tbl td.n {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+  width: 34px;
+}
+.plan-tbl td.a { color: var(--ink); font-weight: 500; width: 32%; }
+.plan-tbl td.o { font-family: var(--font-body); font-size: 12px; color: var(--brand-primary); font-weight: 500; width: 20%; }
+
+.plan-footer-note {
+  margin-top: 16px;
+  background: var(--paper);
+  border-left: 4px solid var(--accent);
+  padding: 12px 20px;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* ==========  P11 Risks  ========== */
+.risk-wrap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px;
+  height: 100%;
+}
+.risk-col h3.block { margin-bottom: 12px; font-size: 18px; }
+.risk-card {
+  padding: 11px 16px;
+  margin-bottom: 10px;
+  background: var(--paper);
+  border-left: 5px solid var(--accent);
+}
+.risk-card h4 {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.risk-card dl { display: grid; grid-template-columns: 72px 1fr; gap: 4px 12px; font-size: 12px; line-height: 1.5; }
+.risk-card dt {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  padding-top: 2px;
+}
+.risk-card dd { color: var(--ink-soft); }
+
+.metric-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  border-top: 2px solid var(--brand-primary);
+}
+.metric-tbl th {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 500;
+}
+.metric-tbl td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+  color: var(--ink-soft);
+  line-height: 1.45;
+  font-size: 12.5px;
+}
+.metric-tbl td.n {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-weight: 600;
+  width: 32px;
+  text-align: center;
+}
+.metric-tbl td.m { color: var(--ink); font-weight: 500; width: 30%; }
+.metric-tbl td.t {
+  font-family: var(--font-mono);
+  color: var(--brand-primary);
+  font-weight: 500;
+  width: 18%;
+}
+.metric-tbl td.f { font-family: var(--font-mono); font-size: 11px; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.1em; width: 14%; text-align: right; }
+
+.risk-footer-note {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: var(--ink);
+  line-height: 1.55;
+}
+.risk-footer-note strong { color: var(--brand-primary); }
+
+/* ==========  P12 Appendix  ========== */
+.appx-wrap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  height: 100%;
+}
+.appx-col h3.block {
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--brand-primary);
+  font-size: 17px;
+  color: var(--brand-primary);
+}
+.appx-col h4 {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ink);
+  margin: 12px 0 6px;
+}
+table.appx {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+table.appx th {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  text-align: left;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line-strong);
+  font-weight: 500;
+}
+table.appx td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+table.appx td.n { font-family: var(--font-mono); font-size: 10px; color: var(--brand-primary); width: 24px; font-weight: 600; }
+table.appx td.src { color: var(--brand-primary); font-weight: 500; }
+table.appx td.dt {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-mute);
+  white-space: nowrap;
+  text-align: right;
+  width: 48px;
+}
+.appx-info {
+  background: var(--paper);
+  padding: 10px 14px;
+  border-left: 3px solid var(--brand-primary);
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+.appx-info dl { display: grid; grid-template-columns: 110px 1fr; gap: 3px 12px; }
+.appx-info dt {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  padding-top: 2px;
+}
+.appx-info dd { color: var(--ink); }
+.appx-info ul { padding-left: 16px; margin-top: 4px; }
+.appx-info li { font-size: 11px; color: var(--ink-soft); margin-bottom: 2px; }
+
+a { color: var(--brand-primary); text-decoration: none; border-bottom: 1px dotted var(--brand-primary); }
+a:hover { color: var(--accent); border-color: var(--accent); }
+
+/* 列印模式（A4 橫印時的簡化） */
+@media print {
+  html, body { background: white; }
+  [data-slide] { margin: 0; box-shadow: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ╔══════════════════════════════════════════════════════════════════════════
+     P1  封面
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section data-slide class="paper">
+  <div class="cover-bg"></div>
+  <div class="cover-inner">
+    <div class="cover-top">
+      <div class="brand-mark">
+        [範例咖啡品牌]<br>
+        <span style="color:var(--ink-mute); font-weight:400;">INDEPENDENT · SPECIALTY · SINCE 20XX</span>
+        <div class="cover-eyebrow-line"></div>
+      </div>
+      <div class="brand-mark" style="text-align: right;">
+        COMPETITIVE &amp; POSITIONING ANALYSIS<br>
+        <span style="color:var(--ink-mute); font-weight:400;">2026 · SPRING EDITION</span>
+      </div>
+    </div>
+
+    <div class="cover-main">
+      <div class="sub-en">A Market Study for an Independent Specialty Coffee Shop</div>
+      <h1>獨立精品咖啡的<br>下一步</h1>
+      <div class="zh-sub">[範例咖啡品牌] · 2026 競品、定位、90 天行動研究</div>
+    </div>
+
+    <div class="cover-bottom">
+      <div class="field"><span class="k">CLIENT</span><span class="v">[範例咖啡品牌]<br>[範例北部商圈]</span></div>
+      <div class="field"><span class="k">PREPARED FOR</span><span class="v">[負責人] 與合夥人<br>週末決策會議</span></div>
+      <div class="field"><span class="k">BY</span><span class="v">Claude Code Agent<br>sme-ai-kit dogfooding 範例</span></div>
+      <div class="field"><span class="k">DATE · VERSION</span><span class="v">2026 年 4 月<br>v2026-04 · Internal</span></div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ╔══════════════════════════════════════════════════════════════════════════
+     P2  Executive Summary
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section data-slide>
+  <div class="ribbon-top"></div>
+  <div class="slide-header">
+    <span class="tag">Executive Summary</span>
+    <span class="exhibit">Exhibit 02 / 12 · [範例咖啡品牌] × 獨立精品咖啡店競品分析</span>
+  </div>
+
+  <div class="canvas">
+    <div class="exec-grid">
+      <div>
+        <span class="eyebrow">MANAGEMENT SUMMARY</span>
+        <h1 class="page" style="margin-top: 8px;">三個核心發現，<br>與週末會議前的一句話建議。</h1>
+        <hr class="divider-strong" style="margin: 20px 0;">
+        <p class="exec-lede">
+          本次研究針對 <strong>[範例咖啡品牌]</strong> 面臨的五大營運壓力——外部連鎖夾擊、生豆成本上揚、擴店機會、外送平台選擇、熟客流失——進行市場與定位分析。結論是：
+          <strong>外帶紅海的失分不是品牌問題，而是主場選擇問題</strong>。
+        </p>
+      </div>
+
+      <div class="exec-findings">
+        <div class="finding-card">
+          <span class="idx">Finding 01</span>
+          <h3>外部夾擊是現象，<br>不是問題本身。</h3>
+          <p>500m 內新開的路易莎／星巴克確實分流了 <strong>外帶場景</strong>，但我方主場從未是外帶。真正問題是<strong>內用場景的差異化主張還沒被說清楚</strong>。</p>
+          <ul>
+            <li>2024 台灣咖啡市場 800 億元</li>
+            <li>連鎖 230 億、超商現煮 180 億</li>
+            <li>外帶紅海是既定事實，改變不了</li>
+          </ul>
+        </div>
+
+        <div class="finding-card">
+          <span class="idx">Finding 02</span>
+          <h3>毛利壓力不等於<br>漲價信號。</h3>
+          <p>阿拉比卡豆 2024-2025 期貨漲 70%、較 2023 年漲 80%。建議先做<strong>客單價結構改造</strong>（加值品項、熟客禮遇）再評估普調。</p>
+          <ul>
+            <li>單杯毛利 60% → 48%（<span class="ph">假設，待試算</span>）</li>
+            <li>客單價從 <span class="ph">XX</span> 提至 <span class="ph">XX + 20%</span></li>
+            <li>結構升級比硬漲 20% 更好賣</li>
+          </ul>
+        </div>
+
+        <div class="finding-card">
+          <span class="idx">Finding 03</span>
+          <h3>擴第二家前，<br>先解熟客流失。</h3>
+          <p>熟客流失目前無數據（<span class="ph">僅為定性觀察</span>），<strong>沒 CRM 就沒診斷依據</strong>。擴店需要可複製系統；流失意味現場還沒自動化。</p>
+          <ul>
+            <li>90 天內啟動 LINE 官方帳號</li>
+            <li>訪談 10 位流失熟客</li>
+            <li>[範例信義區店面] 評估延後 180 天</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="exec-callout">
+        外帶紅海認輸、內用主場打深、先啟動熟客系統、第二家延後 180 天。
+      </div>
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>來源見 P12 附錄</span>
+    <span class="mid">[範例咖啡品牌] · 內部決策用途 · v2026-04</span>
+    <span class="right">02 — 12</span>
+  </div>
+</section>
+
+
+<!-- ╔══════════════════════════════════════════════════════════════════════════
+     P3  市場地圖
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section data-slide>
+  <div class="ribbon-top"></div>
+  <div class="slide-header">
+    <span class="tag">Market Map</span>
+    <span class="exhibit">Exhibit 03 / 12 · [範例咖啡品牌] × 獨立精品咖啡店競品分析</span>
+  </div>
+
+  <div class="canvas">
+    <span class="eyebrow">TAIWAN COFFEE MARKET · 2024-2025</span>
+    <h1 class="page" style="margin-top: 6px;">市場在長，但不同層各自廝殺。</h1>
+
+    <div class="mkt-stat-row" style="margin-top: 20px;">
+      <div class="mkt-stat">
+        <div class="ttl">市場總產值</div>
+        <div class="num-big">NT$ 800 億</div>
+        <p class="desc">2024 年台灣咖啡市場總產值。其中連鎖咖啡 230 億、超商現煮 180 億，獨立咖啡店 + 其他通路約 390 億。</p>
+        <div class="src">Source: Food Next, Manager Today · 2024</div>
+      </div>
+      <div class="mkt-stat">
+        <div class="ttl">人均消費</div>
+        <div class="num-big">184 杯 / 年</div>
+        <p class="desc">2023 年台灣人均咖啡杯數。較 2021 年的 122 杯成長 51%。過去 5 年年均成長 20%+，逼近日本、南韓水準。</p>
+        <div class="src">Source: BNext, ICO · 2024</div>
+      </div>
+      <div class="mkt-stat">
+        <div class="ttl">全台咖啡館數</div>
+        <div class="num-big">4,096 家</div>
+        <p class="desc">2022 年統計，12 年成長 157%（2011 年 1,592 家）。約 1/4 集中在台北市；獨立咖啡店在一線都市持續密集開店。</p>
+        <div class="src">Source: ETtoday Finance · 2023</div>
+      </div>
+    </div>
+
+    <div class="mkt-timeline">
+      <div class="mkt-tl-node"><div class="num">1,592</div><div class="yr">2011</div></div>
+      <div class="mkt-tl-node"><div class="num">2,400</div><div class="yr">2015</div></div>
+      <div class="mkt-tl-node"><div class="num">3,200</div><div class="yr">2019</div><div class="note">第三波手沖興起</div></div>
+      <div class="mkt-tl-node"><div class="num">4,096</div><div class="yr">2023</div><div class="note">精品咖啡紅海</div></div>
+      <div class="mkt-tl-node"><div class="num mono" style="color: var(--accent);">~4,500</div><div class="yr">2025 <span style="color:var(--accent);">🔴 估</span></div></div>
+    </div>
+
+    <div class="mkt-layers">
+      <h3 class="block">台灣咖啡市場五層結構</h3>
+      <table class="data layers">
+        <thead>
+          <tr>
+            <th>分層</th><th>代表品牌</th><th>定位與特色</th><th>杯價區間</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="lvl">Layer 1</td><td class="reps">星巴克</td><td class="pos">國際連鎖 · 品牌信任 · 空間體驗 · 菜單穩定</td><td class="price">NT$ 130 — 200</td></tr>
+          <tr><td class="lvl">Layer 2</td><td class="reps">路易莎、85 度 C</td><td class="pos">本土連鎖（大）· 通路密度 · 價格戰 · 加盟擴張</td><td class="price">NT$ 45 — 95</td></tr>
+          <tr><td class="lvl">Layer 3</td><td class="reps">cama、多那之、黑沃</td><td class="pos">本土連鎖（中）· 新鮮烘焙 · 社群品牌 · 區域深耕</td><td class="price">NT$ 60 — 120</td></tr>
+          <tr><td class="lvl">Layer 4</td><td class="reps">興波 Simple Kaffa、Fika Fika</td><td class="pos">獨立精品名店 · 世界冠軍敘事 · 目的地消費</td><td class="price">NT$ 150 — 300</td></tr>
+          <tr class="me"><td class="lvl">Layer 5</td><td class="reps">[範例咖啡品牌]（本案）</td><td class="pos">獨立精品一般店 · 社區型 · 烘焙技術 · 關係經營</td><td class="price">NT$ 100 — 200</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>Source: Food Next, Manager Today, BNext, ETtoday (2023-2024)</span>
+    <span class="mid">[範例咖啡品牌] · 內部決策用途 · v2026-04</span>
+    <span class="right">03 — 12</span>
+  </div>
+</section>
+
+
+<!-- ╔══════════════════════════════════════════════════════════════════════════
+     P4  競爭地圖（2×2 定位圖）
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section data-slide>
+  <div class="ribbon-top"></div>
+  <div class="slide-header">
+    <span class="tag">Competitive Landscape</span>
+    <span class="exhibit">Exhibit 04 / 12 · [範例咖啡品牌] × 獨立精品咖啡店競品分析</span>
+  </div>
+
+  <div class="canvas">
+    <span class="eyebrow">2×2 POSITIONING MAP · 價格 × 專業度</span>
+    <h1 class="page" style="margin-top: 4px; font-size: 44px;">空白象限在「專業度高 + 中價位」。</h1>
+
+    <div class="posmap-wrap" style="margin-top: 12px;">
+      <div class="posmap-canvas">
+        <div class="posmap-axis-y"></div>
+        <div class="posmap-axis-x"></div>
+
+        <div class="posmap-label y-top" style="top:14px; left:calc(50% + 8px);">↑ 高專業度 / 敘事深度</div>
+        <div class="posmap-label x-left" style="left:14px; top:calc(50% + 8px);">← 低價</div>
+        <div class="posmap-label x-right" style="right:14px; top:calc(50% + 8px);">高價 →</div>
+
+        <!-- Nodes: top-left to bottom-right (positioned with %) -->
+        <!-- 興波（右上，高專業高價） -->
+        <div class="posmap-node dashed" style="top:14%; left:76%;">
+          <div class="dot"></div>
+          <div class="nm">興波 Simple Kaffa</div>
+          <div class="sub">NT$ 150-300</div>
+        </div>
+        <!-- Fika Fika -->
+        <div class="posmap-node dashed" style="top:22%; left:63%;">
+          <div class="dot"></div>
+          <div class="nm">Fika Fika Cafe</div>
+          <div class="sub">NT$ 140-280</div>
+        </div>
+        <!-- 飯店咖啡 -->
+        <div class="posmap-node hollow" style="top:30%; left:88%;">
+          <div class="dot"></div>
+          <div class="nm">飯店咖啡</div>
+          <div class="sub">NT$ 180-350</div>
+        </div>
+        <!-- 本案位置（[範例咖啡品牌]） -->
+        <div class="posmap-node me" style="top:36%; left:54%;">
+          <div class="dot"></div>
+          <div class="nm">[範例咖啡品牌]</div>
+          <div class="sub">目標象限 · NT$ 100-200</div>
+        </div>
+        <!-- cama -->
+        <div class="posmap-node hollow" style="top:46%; left:42%;">
+          <div class="dot"></div>
+          <div class="nm">cama</div>
+          <div class="sub">NT$ 60-120</div>
+        </div>
+        <!-- 星巴克 -->
+        <div class="posmap-node solid" style="top:58%; left:68%;">
+          <div class="dot"></div>
+          <div class="nm">星巴克</div>
+          <div class="sub">NT$ 130-200</div>
+        </div>
+        <!-- 85 度 C -->
+        <div class="posmap-node hollow" style="top:70%; left:28%;">
+          <div class="dot"></div>
+          <div class="nm">85 度 C</div>
+          <div class="sub">NT$ 45-90</div>
+        </div>
+        <!-- 路易莎 -->
+        <div class="posmap-node solid" style="top:80%; left:17%;">
+          <div class="dot"></div>
+          <div class="nm">路易莎</div>
+          <div class="sub">NT$ 45-95</div>
+        </div>
+        <!-- 超商現煮 -->
+        <div class="posmap-node hollow" style="top:88%; left:10%;">
+          <div class="dot"></div>
+          <div class="nm">超商現煮</div>
+          <div class="sub">NT$ 35-60</div>
+        </div>
+      </div>
+
+      <div class="posmap-legend">
+        <h3 class="block">圖例與說明</h3>
+        <div class="item me"><span class="dot"></span><div><strong>我方目標位置</strong><br>[範例咖啡品牌]</div></div>
+        <div class="item solid"><span class="dot"></span><div><strong>Tier 1 直接競品</strong><br>星巴克、路易莎</div></div>
+        <div class="item hollow"><span class="dot"></span><div><strong>Tier 2 相鄰方案</strong><br>cama、85 度 C、超商現煮、飯店</div></div>
+        <div class="item dashed"><span class="dot"></span><div><strong>Tier 3 頂標參考</strong><br>興波、Fika Fika（不直接競爭）</div></div>
+
+        <div class="posmap-note">
+          <strong>軸線選擇理由</strong>：獨立咖啡店的客戶決策因子前兩名是「價格接受度」與「對咖啡風味的要求」，比「通路類型」「營業時間」更有區辨力。<br><br>
+          <strong>空白象限</strong>：「高專業度 + 中價位」相對稀疏。上有興波太貴（難每週去），下有路易莎沒敘事。<strong>[範例咖啡品牌] 的護城河位置就在這裡</strong>。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>方法：pmm-positioning.md 競爭定位圖</span>
+    <span class="mid">[範例咖啡品牌] · 內部決策用途 · v2026-04</span>
+    <span class="right">04 — 12</span>
+  </div>
+</section>
+
+
+<!-- ╔══════════════════════════════════════════════════════════════════════════
+     P5  Battlecard #1：星巴克
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section data-slide>
+  <div class="ribbon-top"></div>
+  <div class="slide-header">
+    <span class="tag">Battlecard · 01 · 國際連鎖代表</span>
+    <span class="exhibit">Exhibit 05 / 12 · [範例咖啡品牌] × 獨立精品咖啡店競品分析</span>
+  </div>
+
+  <div class="canvas">
+    <span class="eyebrow">TIER 1 · 直接競品</span>
+    <h1 class="page" style="margin-top: 6px; font-size: 48px;">星巴克 <span style="font-style: italic; font-weight: 400; color: var(--ink-mute); font-size: 32px;">—— 第三空間的場景供應商</span></h1>
+
+    <div class="bc-meta" style="margin-top: 20px;">
+      <div class="cell"><div class="k">定位</div><div class="v">「第三空間」場景供應商</div></div>
+      <div class="cell"><div class="k">在台規模</div><div class="v"><span class="n">~560</span> 間門市 · 2025</div></div>
+      <div class="cell"><div class="k">核心客群</div><div class="v">商務外帶 · 生活型內用 · 禮贈場景</div></div>
+      <div class="cell"><div class="k">杯價帶</div><div class="v"><span class="n">NT$ 130 — 200</span> · 中高</div></div>
+    </div>
+
+    <div class="bc-grid-sw">
+      <div class="bc-col">
+        <h3 class="block">他們的優勢</h3>
+        <div class="pt"><span class="idx">01</span><strong>品牌信任。</strong>統一集團背書、全球品牌，連「不懂咖啡的人」都認得。禮贈場合的預設選項。</div>
+        <div class="pt"><span class="idx">02</span><strong>空間與設備投資。</strong>沙發區、插座、Wi-Fi、冷氣——辦公與約談的最低阻力選項。</div>
+        <div class="pt"><span class="idx">03</span><strong>會員生態。</strong>星禮程 Rewards、隨行卡、電子禮品券，鎖客機制綿密且跨通路。</div>
+      </div>
+      <div class="bc-col">
+        <h3 class="block">他們的劣勢</h3>
+        <div class="pt"><span class="idx">01</span><strong>中央廚房 vs 現場烘焙。</strong>風味高度標準化等於可預期、也等於沒驚喜。</div>
+        <div class="pt"><span class="idx">02</span><strong>定價缺彈性。</strong>統一品牌無法依商圈調整；北部商圈常被嫌貴。</div>
+        <div class="pt"><span class="idx">03</span><strong>品牌疲勞。</strong>核心菜單穩定多年，資深客對「新鮮感」有需求時會轉向精品。</div>
+      </div>
+      <div class="bc-col">
+        <h3 class="block adv">我方對策</h3>
+        <div class="pt adv"><span class="idx">01</span><strong>場景差異化。</strong>不爭商務外帶，打「咖啡愛好者的週間下午／假日深度內用」，重疊度降到 40% 以下。</div>
+        <div class="pt adv"><span class="idx">02</span><strong>風味敘事。</strong>每週 1 支單品豆 + barista 故事卡。星巴克 SOP 做不出這個。</div>
+        <div class="pt adv"><span class="idx">03</span><strong>熟客禮遇。</strong>認人、認偏好、免掃碼自動記生日——這是小店的核武。</div>
+      </div>
+    </div>
+
+    <div class="bc-lower">
+      <div>
+        <h3 class="block">殺手提問（Land Mines）</h3>
+        <ol>
+          <li>「您希望 barista 記得您平常喝什麼嗎？」</li>
+          <li>「您最近喝到想分享給朋友的咖啡是哪一杯？」</li>
+          <li>「您週末會為了一杯特別的咖啡多走 10 分鐘路嗎？」</li>
+        </ol>
+      </div>
+      <div>
+        <h3 class="block">應對話術（Talk Track）</h3>
+        <table class="bc-talk-table">
+          <tr>
+            <td>「星巴克比較大牌、安全。」</td>
+            <td>我們不是要取代星巴克。<strong>星巴克適合約人、我們適合專注。</strong>您看您現在是哪種場合？</td>
+          </tr>
+          <tr>
+            <td>「他們的空間比較好。」</td>
+            <td>空間舒適值得錢。<strong>我們投資在咖啡本身</strong>——這週的衣索比亞耶加雪菲我給您試一口？</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>Source: Dailyview 2025</span>
+    <span class="mid">[範例咖啡品牌] · 內部決策用途 · v2026-04</span>
+    <span class="right">05 — 12</span>
+  </div>
+</section>
+
+
+<!-- ╔══════════════════════════════════════════════════════════════════════════
+     P6  Battlecard #2：路易莎
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section data-slide>
+  <div class="ribbon-top"></div>
+  <div class="slide-header">
+    <span class="tag">Battlecard · 02 · 本土連鎖代表</span>
+    <span class="exhibit">Exhibit 06 / 12 · [範例咖啡品牌] × 獨立精品咖啡店競品分析</span>
+  </div>
+
+  <div class="canvas">
+    <span class="eyebrow">TIER 1 · 直接競品</span>
+    <h1 class="page" style="margin-top: 6px; font-size: 48px;">路易莎 <span style="font-style: italic; font-weight: 400; color: var(--ink-mute); font-size: 32px;">—— 平價通路型、上班族日常</span></h1>
+
+    <div class="bc-meta" style="margin-top: 20px;">
+      <div class="cell"><div class="k">定位</div><div class="v">平價通路咖啡 · 上班族日常</div></div>
+      <div class="cell"><div class="k">在台規模</div><div class="v"><span class="n">~560</span> 間（含籌備中）· 2025</div></div>
+      <div class="cell"><div class="k">核心客群</div><div class="v">上班族外帶 · 學生 · 低價敏感群</div></div>
+      <div class="cell"><div class="k">杯價帶</div><div class="v"><span class="n">NT$ 45 — 95</span> · 低</div></div>
+    </div>
+
+    <div class="bc-grid-sw">
+      <div class="bc-col">
+        <h3 class="block">他們的優勢</h3>
+        <div class="pt"><span class="idx">01</span><strong>門市密度 + 24 小時。</strong>密度已超車星巴克；部分 24 小時營業，通路可及性封頂。</div>
+        <div class="pt"><span class="idx">02</span><strong>價格心理錨點。</strong>45-95 元區間讓消費者把「咖啡 = 50 元」視為市場基準。</div>
+        <div class="pt"><span class="idx">03</span><strong>點數 + 吐司配套。</strong>會員點數 + 早午餐配套，單次客單拉到 150-200 元。</div>
+      </div>
+      <div class="bc-col">
+        <h3 class="block">他們的劣勢</h3>
+        <div class="pt"><span class="idx">01</span><strong>品質天花板。</strong>加盟制導致品質浮動；核心客群也不期待精品級風味。</div>
+        <div class="pt"><span class="idx">02</span><strong>品牌格調。</strong>上班族首選 ≠ 禮贈／約會場合；氣氛維度是弱項。</div>
+        <div class="pt"><span class="idx">03</span><strong>咖啡敘事缺失。</strong>不講「豆子的故事」也不會講——那會拉走核心客群。</div>
+      </div>
+      <div class="bc-col">
+        <h3 class="block adv">我方對策</h3>
+        <div class="pt adv"><span class="idx">01</span><strong>絕不對打價格。</strong>不進 45-95 元區間；用 100-200 元分層建構價值。</div>
+        <div class="pt adv"><span class="idx">02</span><strong>放大「氣氛 + 專業」組合。</strong>100 元的差距是「體驗稅」，我們賣的就是體驗。</div>
+        <div class="pt adv"><span class="idx">03</span><strong>堅守不加盟。</strong>獨立性 = 穩定的個人化服務。加盟制永遠做不到。</div>
+      </div>
+    </div>
+
+    <div class="bc-lower">
+      <div>
+        <h3 class="block">殺手提問（Land Mines）</h3>
+        <ol>
+          <li>「您希望 barista 每次都記得您的咖啡偏好嗎？」</li>
+          <li>「您在路易莎喝咖啡的時候，有過『這一杯真特別』的感覺嗎？」</li>
+          <li>「您願意為『有溫度的咖啡館』多付 50 元嗎？」</li>
+        </ol>
+      </div>
+      <div>
+        <h3 class="block">應對話術（Talk Track）</h3>
+        <table class="bc-talk-table">
+          <tr>
+            <td>「路易莎 55 元就有咖啡。」</td>
+            <td>55 元是交易的價格。<strong>我們賣的不是一杯咖啡，是一段 15 分鐘的時光。</strong>您今天有 15 分鐘嗎？</td>
+          </tr>
+          <tr>
+            <td>「他們點數好用、到處都有。」</td>
+            <td>密度是他們的武器。<strong>我們的武器是：您下次來，我會記得您上次喝什麼。</strong>您願意試試看嗎？</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>Source: Dailyview 2025, Business Today 2021</span>
+    <span class="mid">[範例咖啡品牌] · 內部決策用途 · v2026-04</span>
+    <span class="right">06 — 12</span>
+  </div>
+</section>
+
+
+<!-- ╔══════════════════════════════════════════════════════════════════════════
+     P7  Battlecard #3：興波 Simple Kaffa
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section data-slide>
+  <div class="ribbon-top"></div>
+  <div class="slide-header">
+    <span class="tag">Battlecard · 03 · 獨立名店頂標</span>
+    <span class="exhibit">Exhibit 07 / 12 · [範例咖啡品牌] × 獨立精品咖啡店競品分析</span>
+  </div>
+
+  <div class="canvas">
+    <span class="eyebrow">TIER 3 · 頂標參考（不直接競爭）</span>
+    <h1 class="page" style="margin-top: 6px; font-size: 48px;">興波 Simple Kaffa <span style="font-style: italic; font-weight: 400; color: var(--ink-mute); font-size: 28px;">—— 世界冠軍的精品殿堂</span></h1>
+
+    <div class="bc-intro">
+      興波不是在跟 <strong>[範例咖啡品牌]</strong> 搶生意。把它放進 battlecard，是為了<strong>看清獨立精品咖啡的天花板長什麼樣</strong>——從中抽出「我方可學」與「我方不學」的兩個清單。
+    </div>
+
+    <div class="bc-meta">
+      <div class="cell"><div class="k">定位</div><div class="v">世界冠軍精品殿堂 · 目的地消費</div></div>
+      <div class="cell"><div class="k">在台規模</div><div class="v"><span class="n">2</span> 間旗艦 · 忠孝新生、華山</div></div>
+      <div class="cell"><div class="k">核心客群</div><div class="v">發燒友 · 觀光客 · 禮贈 · IG 客</div></div>
+      <div class="cell"><div class="k">杯價帶</div><div class="v"><span class="n">NT$ 150 — 300</span> · 中高</div></div>
+    </div>
+
+    <div class="bc-grid-sw">
+      <div class="bc-col">
+        <h3 class="block">他們的強項</h3>
+        <div class="pt"><span class="idx">01</span><strong>創辦人敘事。</strong>吳則霖 WBC 2016 世界咖啡師冠軍、2020 亞洲 50 大第一名。敘事不可複製。</div>
+        <div class="pt"><span class="idx">02</span><strong>目的地型定位。</strong>「專程去」的客群接受排隊；價位無上限。</div>
+        <div class="pt"><span class="idx">03</span><strong>空間與呈現。</strong>老宅工業風、選品零售——體驗包含在一杯咖啡的價格裡。</div>
+      </div>
+      <div class="bc-col">
+        <h3 class="block">做得到、我方做不到</h3>
+        <div class="pt"><span class="idx">01</span>世界冠軍的 earned media（免廣告成本）</div>
+        <div class="pt"><span class="idx">02</span>300 元單杯的接受度</div>
+        <div class="pt"><span class="idx">03</span>目的地型流量（觀光客）</div>
+        <div class="pt"><span class="idx">04</span>兩間旗艦店的空間氣勢</div>
+      </div>
+      <div class="bc-col">
+        <h3 class="block adv">做得到、我方也做得到</h3>
+        <div class="pt adv"><span class="idx">01</span><strong>每週說一支豆的故事。</strong>興波做了，我方可以做。</div>
+        <div class="pt adv"><span class="idx">02</span><strong>讓熟客覺得「是自家人」。</strong>興波太忙做不到；我方可以做。</div>
+        <div class="pt adv"><span class="idx">03</span><strong>烘焙透明化。</strong>烘焙日誌公開、每批次可溯源。</div>
+        <div class="pt adv"><span class="idx">04</span><strong>視覺美學的投資。</strong>黑板、故事卡、器具擺設——用小錢做。</div>
+      </div>
+    </div>
+
+    <div class="bc-lower">
+      <div>
+        <h3 class="block">學／不學對照</h3>
+        <table class="data" style="font-size: 12.5px;">
+          <tr>
+            <td class="strong" style="color: var(--brand-primary); border-bottom: 2px solid var(--brand-primary);">學（複製到我方）</td>
+            <td class="strong" style="color: var(--accent); border-bottom: 2px solid var(--accent);">不學（避免的陷阱）</td>
+          </tr>
+          <tr><td>豆子故事的敘事能力</td><td>排隊文化（客戶體驗敵人）</td></tr>
+          <tr><td>烘焙的透明度</td><td>300 元單杯（非社區價位）</td></tr>
+          <tr><td>獨立性 / 不加盟</td><td>觀光客導向（破壞熟客節奏）</td></tr>
+          <tr><td>視覺美學投資</td><td>旗艦店氣勢（財務不可行）</td></tr>
+        </table>
+      </div>
+      <div>
+        <h3 class="block">應對話術（Talk Track）</h3>
+        <table class="bc-talk-table">
+          <tr>
+            <td>「他們是世界冠軍欸。」</td>
+            <td>是的，冠軍做的咖啡值得專程去。我們不是冠軍——<strong>但您下次來，我記得您的偏好，這是冠軍做不到的。</strong></td>
+          </tr>
+          <tr>
+            <td>「他們比較厲害。」</td>
+            <td><strong>興波打世界盃、我們打您的週末。</strong>兩件事。</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>Source: Simple Kaffa 官網, ETtoday 2024</span>
+    <span class="mid">[範例咖啡品牌] · 內部決策用途 · v2026-04</span>
+    <span class="right">07 — 12</span>
+  </div>
+</section>
+
+
+<!-- ╔══════════════════════════════════════════════════════════════════════════
+     P8  定位建議（April Dunford 六段）
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section data-slide class="paper">
+  <div class="ribbon-top"></div>
+  <div class="slide-header">
+    <span class="tag">Positioning · April Dunford 六段</span>
+    <span class="exhibit">Exhibit 08 / 12 · [範例咖啡品牌] × 獨立精品咖啡店競品分析</span>
+  </div>
+
+  <div class="canvas">
+    <div class="pos-wrap">
+      <div class="pos-left">
+        <div>
+          <span class="eyebrow">POSITIONING RECOMMENDATION</span>
+          <h1 class="page" style="margin-top: 6px; font-size: 40px; line-height: 1.2;">從空白象限<br>長出主張。</h1>
+        </div>
+
+        <div class="pos-quote">
+          在國際連鎖的便利與<br>
+          世界冠軍的儀式之間，<br>
+          獨立精品的空白地帶，<br>
+          是 <strong>「認得人、<br>說得出故事、<br>負擔得起週五下午」</strong> 的<br>
+          社區咖啡館。
+        </div>
+
+        <div style="font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.2em; color: var(--ink-mute); text-transform: uppercase; line-height: 1.6;">
+          方法論 · pmm-positioning.md<br>
+          April Dunford · Obviously Awesome
+        </div>
+      </div>
+
+      <div class="pos-right">
+        <div class="pos-row">
+          <div class="step">01</div>
+          <div class="body-side">
+            <h4>競爭替代方案</h4>
+            <div class="txt"><strong>直接</strong>：星巴克、路易莎、cama、85 度 C　<strong>相鄰</strong>：超商現煮、外送咖啡　<strong>現狀</strong>：自煮、辦公室沖泡包</div>
+          </div>
+        </div>
+        <div class="pos-row">
+          <div class="step">02</div>
+          <div class="body-side">
+            <h4>獨特屬性（只有我方有）</h4>
+            <div class="txt">自家小批次烘焙（可溯源）· barista 認人並記偏好 · 菜單每 2 週輪換主打單品豆 <span class="ph">待 [負責人] 確認</span></div>
+          </div>
+        </div>
+        <div class="pos-row">
+          <div class="step">03</div>
+          <div class="body-side">
+            <h4>對應客戶價值</h4>
+            <div class="txt">烘焙 → <strong>新鮮 + 稀缺 + 可分享</strong>　認人 → <strong>被記得 + 無 onboarding 成本</strong>　輪換 → <strong>重複造訪的理由</strong></div>
+          </div>
+        </div>
+        <div class="pos-row">
+          <div class="step">04</div>
+          <div class="body-side">
+            <h4>最適客群（ICP）</h4>
+            <div class="txt">28-45 歲內勤白領 / 自由工作者 / 社區住戶 · 每週 2-4 杯 · 80-180 元接受度 · 在乎「今天跟上次有什麼不同」</div>
+          </div>
+        </div>
+        <div class="pos-row">
+          <div class="step">05</div>
+          <div class="body-side">
+            <h4>市場品類選擇 · <strong style="color: var(--accent);">利基深耕</strong></h4>
+            <div class="txt">不選正面對決（通路拼不過）· 不選開創新品類（已存在）· <strong>選「利基深耕」</strong>：專為 [範例北部商圈] 的週間商務 + 週末社區雙模式打造</div>
+          </div>
+        </div>
+        <div class="pos-row" style="border-bottom: 0;">
+          <div class="step">06</div>
+          <div class="body-side">
+            <h4>趨勢對齊（為什麼是現在）</h4>
+            <div class="txt">台灣咖啡消費 5 年年均成長 20%+ · 精品咖啡第三波已成主流 · 2024-2025 生豆漲價讓大連鎖漲不動，小店的品質價值更突出</div>
+          </div>
+        </div>
+
+        <div class="pos-statement">
+          <span class="lbl">Positioning Statement · 定位聲明</span>
+          <strong>為</strong> [範例北部商圈] 的 28-45 歲生活型咖啡愛好者，
+          <strong>其</strong> 每週想在辦公與家庭之外找一個「被記得的小角落」，
+          [範例咖啡品牌] <strong>屬於</strong> 社區型獨立精品咖啡，
+          <strong>提供</strong> 每週新鮮烘焙的單品敘事、barista 個人化熟客服務、中價位可及性，
+          <strong>相較於</strong> 星巴克的標準化、路易莎的價格戰、興波的目的地型儀式感，
+          <strong>我方</strong> 用「認得人 + 說得出故事 + 週五下午消費得起」三件套建立差異化。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>Method: April Dunford · Obviously Awesome</span>
+    <span class="mid">[範例咖啡品牌] · 內部決策用途 · v2026-04</span>
+    <span class="right">08 — 12</span>
+  </div>
+</section>
+
+
+<!-- ╔══════════════════════════════════════════════════════════════════════════
+     P9  訊息框架
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section data-slide>
+  <div class="ribbon-top"></div>
+  <div class="slide-header">
+    <span class="tag">Messaging Framework</span>
+    <span class="exhibit">Exhibit 09 / 12 · [範例咖啡品牌] × 獨立精品咖啡店競品分析</span>
+  </div>
+
+  <div class="canvas">
+    <div class="msg-hero">
+      <span class="eyebrow">VALUE PROPOSITION</span>
+      <div class="vp">咖啡有故事，店裡有人記得您。</div>
+      <div class="sub">每週小批次新鮮烘焙的單品豆 · 熟識您偏好的 barista · 負擔得起的社區價位——三件套打造「被記得的小角落」。</div>
+    </div>
+
+    <div class="msg-proofs">
+      <div class="proof">
+        <span class="idx">Proof 01</span>
+        <h4>烘焙透明</h4>
+        <ul>
+          <li>每批烘焙日誌公開（Batch #、日期、品飲筆記）</li>
+          <li>目標：每月至少 4 批不同產地單品輪替 <span class="ph">待 [負責人] 確認</span></li>
+          <li>一個 barista 一杯、可追溯、可說故事</li>
+        </ul>
+        <span class="type-tag">Type · 數據點 + 產品展示</span>
+      </div>
+      <div class="proof">
+        <span class="idx">Proof 02</span>
+        <h4>熟客認得</h4>
+        <ul>
+          <li>對 100 位最活躍熟客建立偏好標籤</li>
+          <li>不靠 APP、靠 LINE OA + barista 筆記</li>
+          <li>目標：熟客到店 15 秒內可叫名 + 推薦一杯</li>
+        </ul>
+        <span class="type-tag">Type · 客戶引言（蒐集中）</span>
+      </div>
+      <div class="proof">
+        <span class="idx">Proof 03</span>
+        <h4>價位可及</h4>
+        <ul>
+          <li>主力 NT$ 100-180 vs 興波 NT$ 180-300</li>
+          <li>熟客第 10 杯免費</li>
+          <li>月付 <span class="ph">XX</span> 元 · 平日 8-11am 無限暢飲</li>
+        </ul>
+        <span class="type-tag">Type · 免費試用成果</span>
+      </div>
+    </div>
+
+    <div class="msg-channels">
+      <div class="ch">
+        <div class="k">Channel A · 店內 Menu / 黑板</div>
+        <div class="v">這週的豆：<strong>衣索比亞 耶加雪菲 Aricha</strong>
+日曬處理 · 莓果與紅酒 · 烘焙日 2026-04-21
+手沖 ／ 意式 ／ 冰萃皆可
+歡迎問 barista</div>
+      </div>
+      <div class="ch">
+        <div class="k">Channel B · LINE 官方帳號（每週一 10:00）</div>
+        <div class="v">早安 這週的豆：<strong>耶加雪菲 Aricha</strong>
+莓果＋紅酒調性／日曬處理／4-21 剛烘
+熟客到店自動記下偏好
+第 10 杯免費
+回覆「1」領本週限定品飲券</div>
+      </div>
+      <div class="ch">
+        <div class="k">Channel C · Instagram（週二、週五）</div>
+        <div class="v">本週新批烘焙
+<strong>耶加雪菲 Aricha</strong> · 日曬 · Batch #2026-16
+首杯到店的您會被 barista 記得偏好
+#獨立咖啡 #單品豆
+#[範例北部商圈] <span class="ph">待依實際商圈調整</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>方法：pmm-messaging.md · 通路專屬訊息</span>
+    <span class="mid">[範例咖啡品牌] · 內部決策用途 · v2026-04</span>
+    <span class="right">09 — 12</span>
+  </div>
+</section>
+
+
+<!-- ╔══════════════════════════════════════════════════════════════════════════
+     P10  90 天行動清單
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section data-slide>
+  <div class="ribbon-top"></div>
+  <div class="slide-header">
+    <span class="tag">90-Day Action Plan</span>
+    <span class="exhibit">Exhibit 10 / 12 · [範例咖啡品牌] × 獨立精品咖啡店競品分析</span>
+  </div>
+
+  <div class="canvas">
+    <span class="eyebrow">EXECUTION ROADMAP</span>
+    <h1 class="page" style="margin-top: 6px; font-size: 44px;">90 天內不擴店、不上外送、不漲價。</h1>
+
+    <div class="plan-phases" style="margin-top: 18px;">
+      <div class="phase">
+        <div class="rng">Day 1 — 30</div>
+        <h3>止血與聚焦</h3>
+        <div class="kw">先看清自己</div>
+      </div>
+      <div class="phase">
+        <div class="rng">Day 31 — 60</div>
+        <h3>差異化啟動</h3>
+        <div class="kw">把故事講出來</div>
+      </div>
+      <div class="phase">
+        <div class="rng">Day 61 — 90</div>
+        <h3>試水與調整</h3>
+        <div class="kw">量測主張的成立性</div>
+      </div>
+    </div>
+
+    <table class="plan-tbl">
+      <thead>
+        <tr><th>#</th><th>行動</th><th>負責</th><th>完成標準</th><th>階段</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="n">01</td><td class="a">盤點現有熟客清單（最近 3 月 ≥ 3 訪）</td><td class="o">[負責人]</td><td>80-150 人清單<span class="ph" style="margin-left:6px;">預估</span></td><td style="font-family:var(--font-mono); font-size:10px; color:var(--ink-mute); letter-spacing:0.15em;">DAY 1-30</td></tr>
+        <tr><td class="n">02</td><td class="a">訪談 10 位流失熟客（半年未回訪）</td><td class="o">[負責人] + [員工甲]</td><td>10 份筆記 + 3 大流失原因</td><td style="font-family:var(--font-mono); font-size:10px; color:var(--ink-mute); letter-spacing:0.15em;">DAY 1-30</td></tr>
+        <tr><td class="n">03</td><td class="a">啟動 LINE 官方帳號（基本版免費）</td><td class="o">[員工乙]</td><td>發出第一則群發推播</td><td style="font-family:var(--font-mono); font-size:10px; color:var(--ink-mute); letter-spacing:0.15em;">DAY 1-30</td></tr>
+        <tr><td class="n">04</td><td class="a">計算每杯咖啡真實毛利（含生豆、包材、人力、店租攤提）</td><td class="o">[負責人]</td><td>填入 Exec Summary 🔴 欄位</td><td style="font-family:var(--font-mono); font-size:10px; color:var(--ink-mute); letter-spacing:0.15em;">DAY 1-30</td></tr>
+        <tr><td class="n">05</td><td class="a">決定 Uber Eats 暫不上線</td><td class="o">[負責人]</td><td>30% 抽成 × 低客單 = 毛利負值</td><td style="font-family:var(--font-mono); font-size:10px; color:var(--ink-mute); letter-spacing:0.15em;">DAY 1-30</td></tr>
+        <tr><td class="n">06</td><td class="a">建立「本週豆」系統（週一換新 + 故事卡）</td><td class="o">[員工甲]</td><td>8 週不間斷</td><td style="font-family:var(--font-mono); font-size:10px; color:var(--ink-mute); letter-spacing:0.15em;">DAY 31-60</td></tr>
+        <tr><td class="n">07</td><td class="a">LINE OA 熟客標籤（手沖／濃縮／奶類／冰熱）</td><td class="o">[員工乙]</td><td>至少 50 位熟客打標</td><td style="font-family:var(--font-mono); font-size:10px; color:var(--ink-mute); letter-spacing:0.15em;">DAY 31-60</td></tr>
+        <tr><td class="n">08</td><td class="a">店內黑板改版：本週豆 + barista 一句話推薦</td><td class="o">[負責人] + [員工甲]</td><td>每週更換</td><td style="font-family:var(--font-mono); font-size:10px; color:var(--ink-mute); letter-spacing:0.15em;">DAY 31-60</td></tr>
+        <tr><td class="n">09</td><td class="a">Google 商家檔案優化（10 張照片 + 關鍵字）</td><td class="o">[員工乙]</td><td>完成度達 100%</td><td style="font-family:var(--font-mono); font-size:10px; color:var(--ink-mute); letter-spacing:0.15em;">DAY 31-60</td></tr>
+        <tr><td class="n">10</td><td class="a">引導 20 位滿意客人留五星評論</td><td class="o">[員工甲]</td><td>至少 20 則新評論</td><td style="font-family:var(--font-mono); font-size:10px; color:var(--ink-mute); letter-spacing:0.15em;">DAY 31-60</td></tr>
+        <tr><td class="n">11</td><td class="a">發佈「第 10 杯免費」熟客方案</td><td class="o">[負責人]</td><td>至少 50 人參加</td><td style="font-family:var(--font-mono); font-size:10px; color:var(--ink-mute); letter-spacing:0.15em;">DAY 61-90</td></tr>
+        <tr><td class="n">12</td><td class="a">測試「月付平日早晨無限暢飲」</td><td class="o">[負責人]</td><td><span class="ph">目標人數 + 月費</span>待定</td><td style="font-family:var(--font-mono); font-size:10px; color:var(--ink-mute); letter-spacing:0.15em;">DAY 61-90</td></tr>
+        <tr><td class="n">13</td><td class="a">復盤熟客 LTV（回訪率、客單、轉介）</td><td class="o">[負責人]</td><td>建立月度儀表板</td><td style="font-family:var(--font-mono); font-size:10px; color:var(--ink-mute); letter-spacing:0.15em;">DAY 61-90</td></tr>
+        <tr><td class="n">14</td><td class="a"><strong>決策閘</strong>：熟客回訪率 &gt; 60% 再評估 [範例信義區店面]；&lt; 60% 延 180 天</td><td class="o">[負責人] + 合夥人</td><td>Day 91 會議決議</td><td style="font-family:var(--font-mono); font-size:10px; color:var(--ink-mute); letter-spacing:0.15em;">DAY 61-90</td></tr>
+      </tbody>
+    </table>
+
+    <div class="plan-footer-note">
+      把 [範例北部商圈] 的現有店做到熟客系統化後，再談下一步。
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>方法：pmm-launch.md Day-N 執行</span>
+    <span class="mid">[範例咖啡品牌] · 內部決策用途 · v2026-04</span>
+    <span class="right">10 — 12</span>
+  </div>
+</section>
+
+
+<!-- ╔══════════════════════════════════════════════════════════════════════════
+     P11  風險與監控指標
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section data-slide>
+  <div class="ribbon-top"></div>
+  <div class="slide-header">
+    <span class="tag">Risks &amp; Monitoring</span>
+    <span class="exhibit">Exhibit 11 / 12 · [範例咖啡品牌] × 獨立精品咖啡店競品分析</span>
+  </div>
+
+  <div class="canvas">
+    <span class="eyebrow">RISKS &amp; GUARDRAILS</span>
+    <h1 class="page" style="margin-top: 6px; font-size: 44px;">三個風險、五個指標，每月最後一個週日回顧。</h1>
+
+    <div class="risk-wrap" style="margin-top: 20px;">
+      <div class="risk-col">
+        <h3 class="block">主要風險（依嚴重度排序）</h3>
+
+        <div class="risk-card">
+          <h4>⚠ 風險 01 · 生豆續漲 15%+（外部不可控）</h4>
+          <dl>
+            <dt>觸發</dt><dd>巴西第 2 次乾旱 · 運費再漲 · 新台幣對美元走弱</dd>
+            <dt>緩衝</dt><dd>90 天內庫存鎖定 60 天用量；長期建立 2 家以上供應商</dd>
+            <dt>閾值</dt><dd>單杯毛利跌破 40% 啟動客單結構調整（加值品項，不硬漲單價）</dd>
+          </dl>
+        </div>
+
+        <div class="risk-card">
+          <h4>⚠ 風險 02 · 熟客流失加速（內部可控）</h4>
+          <dl>
+            <dt>觸發</dt><dd>barista 流動 · 假日客滿體驗下降 · 價格心理線失守</dd>
+            <dt>緩衝</dt><dd>LINE OA 推播上限 2 則/週；barista 排班穩定；熟客專屬時段</dd>
+            <dt>閾值</dt><dd>連 2 月熟客回訪率 &lt; 50% → 暫停對外行銷、內部整改</dd>
+          </dl>
+        </div>
+
+        <div class="risk-card">
+          <h4>⚠ 風險 03 · 擴店人力斷鏈（若啟動第二家）</h4>
+          <dl>
+            <dt>觸發</dt><dd>[範例信義區店面] 開幕後原店 barista 被調去、熟客體驗惡化</dd>
+            <dt>緩衝</dt><dd>先把 [範例北部商圈] 的熟客系統標準化，再招 1 位可獨立輪店</dd>
+            <dt>閾值</dt><dd>有 2 位以上可獨立輪店 barista 才啟動第二家</dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="risk-col">
+        <h3 class="block">月度監控指標</h3>
+
+        <table class="metric-tbl">
+          <thead>
+            <tr><th>#</th><th>指標</th><th>目標</th><th>測量方式</th><th>頻率</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="n">01</td>
+              <td class="m">熟客回訪率（90 天內 ≥ 2 訪）</td>
+              <td class="t">60%+</td>
+              <td>LINE OA + POS 比對</td>
+              <td class="f">Monthly</td>
+            </tr>
+            <tr>
+              <td class="n">02</td>
+              <td class="m">單杯毛利率</td>
+              <td class="t">50%+</td>
+              <td>進銷存 + 人力攤提</td>
+              <td class="f">Monthly</td>
+            </tr>
+            <tr>
+              <td class="n">03</td>
+              <td class="m">平均客單價</td>
+              <td class="t"><span class="ph">XX</span></td>
+              <td>POS 平均值</td>
+              <td class="f">Weekly</td>
+            </tr>
+            <tr>
+              <td class="n">04</td>
+              <td class="m">Google 商家評論與評分</td>
+              <td class="t">月增 5+ · 總 4.7+</td>
+              <td>Google Business</td>
+              <td class="f">Monthly</td>
+            </tr>
+            <tr>
+              <td class="n">05</td>
+              <td class="m">LINE OA 活躍好友數</td>
+              <td class="t">月增 20+</td>
+              <td>LINE OA 後台</td>
+              <td class="f">Monthly</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="risk-footer-note">
+          指標本身不會改善生意，<strong>定期看 + 快速反應</strong>才會。<br>
+          建議每月最後一個週日做 1 小時回顧。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>方法：pmm-competitive.md · 月度復盤</span>
+    <span class="mid">[範例咖啡品牌] · 內部決策用途 · v2026-04</span>
+    <span class="right">11 — 12</span>
+  </div>
+</section>
+
+
+<!-- ╔══════════════════════════════════════════════════════════════════════════
+     P12  附錄
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section data-slide class="paper">
+  <div class="ribbon-top"></div>
+  <div class="slide-header">
+    <span class="tag">Appendix · 資料來源與假設</span>
+    <span class="exhibit">Exhibit 12 / 12 · [範例咖啡品牌] × 獨立精品咖啡店競品分析</span>
+  </div>
+
+  <div class="canvas">
+    <span class="eyebrow">DATA PROVENANCE &amp; ASSUMPTIONS</span>
+    <h1 class="page" style="margin-top: 4px; font-size: 36px;">所有數字都可查、所有假設都標記。</h1>
+
+    <div class="appx-wrap" style="margin-top: 14px;">
+      <div class="appx-col">
+        <h3 class="block">A · 公開資料來源（🟢 可稽核）</h3>
+
+        <table class="appx">
+          <thead>
+            <tr><th>#</th><th>引用段</th><th>來源</th><th>日期</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="n">01</td><td>台灣咖啡市場總產值 800 億</td><td class="src">Food Next 專欄</td><td class="dt">2024</td></tr>
+            <tr><td class="n">02</td><td>連鎖咖啡 / 超商咖啡市場細分</td><td class="src">Manager Today</td><td class="dt">2024</td></tr>
+            <tr><td class="n">03</td><td>人均 184 杯 / 年、5 年年均 20% 成長</td><td class="src">BNext 數位時代</td><td class="dt">2024</td></tr>
+            <tr><td class="n">04</td><td>台灣咖啡館 4,096 家</td><td class="src">ETtoday 財經</td><td class="dt">2023</td></tr>
+            <tr><td class="n">05</td><td>星巴克 560 間 · 路易莎 560 間</td><td class="src">Dailyview</td><td class="dt">2025</td></tr>
+            <tr><td class="n">06</td><td>阿拉比卡豆漲幅 70-80%</td><td class="src">公視新聞網 PNN</td><td class="dt">2024</td></tr>
+            <tr><td class="n">07</td><td>興波 Simple Kaffa 定位資料</td><td class="src">Simple Kaffa 官網</td><td class="dt">2024</td></tr>
+            <tr><td class="n">08</td><td>路易莎門市策略 / 毛利分析</td><td class="src">商業周刊 今周刊</td><td class="dt">2021</td></tr>
+          </tbody>
+        </table>
+
+        <h4>方法論註記</h4>
+        <div class="appx-info">
+          <dl>
+            <dt>競品分析</dt><dd>pmm-competitive.md · Battlecard 模板（Tier 1/2/3）</dd>
+            <dt>定位方法</dt><dd>pmm-positioning.md · April Dunford 六段</dd>
+            <dt>訊息框架</dt><dd>pmm-messaging.md · 通路專屬訊息</dd>
+            <dt>視覺設計</dt><dd>sme-design · 顧問版主結構 + 雜誌氣質混搭</dd>
+            <dt>反 slop</dt><dd>anti-slop.md · 必避清單一一過濾</dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="appx-col">
+        <h3 class="block">B · <span style="color: var(--accent);">🔴</span> 假設清單（待 [負責人] 提供實數）</h3>
+
+        <table class="appx">
+          <thead>
+            <tr><th>#</th><th>欄位</th><th>目前假設 / 佔位</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="n">01</td><td>公司名</td><td><span class="ph">[範例咖啡品牌]</span></td></tr>
+            <tr><td class="n">02</td><td>店址</td><td><span class="ph">[範例北部商圈]</span></td></tr>
+            <tr><td class="n">03</td><td>負責人姓名</td><td><span class="ph">[負責人]</span></td></tr>
+            <tr><td class="n">04</td><td>員工</td><td><span class="ph">[員工甲] [員工乙]</span></td></tr>
+            <tr><td class="n">05</td><td>第二家店址</td><td><span class="ph">[範例信義區店面]</span></td></tr>
+            <tr><td class="n">06</td><td>單杯毛利</td><td>60% → 48%（假設）</td></tr>
+            <tr><td class="n">07</td><td>熟客流失率</td><td>未量化（定性觀察）</td></tr>
+            <tr><td class="n">08</td><td>客單價目標</td><td><span class="ph">XX</span> 元</td></tr>
+            <tr><td class="n">09</td><td>月付無限暢飲定價</td><td><span class="ph">XX</span> 元</td></tr>
+            <tr><td class="n">10</td><td>熟客清單估算</td><td>80-150 人</td></tr>
+          </tbody>
+        </table>
+
+        <h4>有效期與更新時機</h4>
+        <div class="appx-info">
+          <dl>
+            <dt>撰寫日</dt><dd>2026-04-24</dd>
+            <dt>市場資料截止</dt><dd>公開資料 2024-2025</dd>
+            <dt>建議下次更新</dt><dd>2026-10（半年後）</dd>
+          </dl>
+          <div style="margin-top: 8px; font-weight: 600; color: var(--ink);">必須重新分析的觸發事件：</div>
+          <ul>
+            <li>[範例咖啡品牌] 500m 內再新開一家連鎖咖啡</li>
+            <li>生豆成本再漲 15%+</li>
+            <li>熟客回訪率連 2 月 &lt; 50%</li>
+            <li>[範例信義區店面] 擴店啟動</li>
+          </ul>
+        </div>
+
+        <h4>交付說明</h4>
+        <div class="appx-info">
+          <dl>
+            <dt>HTML 版</dt><dd>report.html（電視投影 / A4 列印 / LINE 截圖分享）</dd>
+            <dt>PPT 版</dt><dd>report.pptx（截圖版，每頁 1920×1080 圖片；可播放、列印）</dd>
+            <dt>修改方式</dt><dd>改 report.html 的 CSS vars 後重跑 scripts/html_to_pptx.mjs</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>sme-ai-kit · social-media + sme-design 雙 skill dogfooding 範例</span>
+    <span class="mid">[範例咖啡品牌] · 內部決策用途 · v2026-04</span>
+    <span class="right">12 — 12</span>
+  </div>
+</section>
+
+</body>
+</html>
