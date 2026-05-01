@@ -43,5 +43,9 @@ docs/design.md
 .claude/memory/
 .claude/skills/*/node_modules/
 
-# Codex plugin 本地快取
-.codex
+# Codex CLI 本地快取（user-specific；保留 hooks.json / agents/*.toml 等 repo 設定）
+.codex/sessions/
+.codex/logs/
+.codex/cache/
+.codex/state*
+.codex/history*
