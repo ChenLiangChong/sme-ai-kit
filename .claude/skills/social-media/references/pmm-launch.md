@@ -2,6 +2,9 @@
 
 分層上市規劃、上市日檢核清單、利害關係人協調與上市後監控。
 
+> **對應 agent**：`.claude/agents/launch-coordinator.md`（thin proxy）
+> 本檔是方法論的**單一來源**；agent 提供結構化 I/O schema 強制 + 紀律框架。修改本檔內容時，agent 自動受惠。
+
 ---
 
 > **工具可用性**：本模組會嘗試呼叫 `query_knowledge`（屬 business-db MCP）載入既有脈絡。若該工具不可用（例如第一堂課只裝了 Claude Desktop + social-media skill），請直接向使用者詢問所需資訊，不要因工具缺失而停止。

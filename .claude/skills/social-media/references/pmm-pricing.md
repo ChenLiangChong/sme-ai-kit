@@ -2,6 +2,9 @@
 
 定價模型、競品定價分析、付費意願驗證與方案組合。
 
+> **對應 agent**：`.claude/agents/pricing-analyst.md`（thin proxy）
+> 本檔是方法論的**單一來源**；agent 提供結構化 I/O schema 強制 + 紀律框架。修改本檔內容時，agent 自動受惠。
+
 ---
 
 > **工具可用性**：本模組會嘗試呼叫 `query_knowledge`（屬 business-db MCP）載入既有品牌／行銷脈絡。若該工具不可用（例如第一堂課只裝了 Claude Desktop + social-media skill，尚未安裝 SME-AI-Kit），請直接向使用者詢問所需的品牌／行銷資訊，不要因工具缺失而停止。

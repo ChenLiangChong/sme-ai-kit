@@ -21,14 +21,15 @@
 ### 硬性規則
 
 - **全程繁體中文（台灣用詞，例：通路不是渠道）**
-- **必須主動 WebSearch 抓真實公開資料**（市場規模、競品數字、產業趨勢、價格動態）— 不可只用內部知識、不可用 🔴 帶過所有數字。每跑一個 PMM 模組前先 WebSearch 對應主題。
+- **必須主動 WebSearch 抓真實公開資料**（市場規模、競品數字、產業趨勢、價格動態）— 不可只用內部知識、不可用 🔴 帶過所有數字。每個 subagent 派出去前自己 WebSearch 對應主題。
 - 不編具體資料——沒公開來源的數字標 🔴 留給使用者補
 - 不編人名／客戶見證／匿名權威引述
 - 信心標註 🟢 可信（有來源）/ 🟡 推論（行業常態）/ 🔴 需補
 - 反 AI slop（對照 `.claude/skills/sme-design/references/anti-slop.md`）
 - **每個階段開始時用 `## ▶ {你現在在做什麼}` 清楚標示**——這很關鍵，老師要追你的進度才能同步解說
-- **PPT 至少 11 頁**（封面、Exec Summary、產業概況、客群、3 家 battlecard 各一頁、定位、訊息、行動、風險、方法論）— 不可低於 11 頁
-- **痛點頁 + 競品頁要圖表 + 數字**（簡單 bar / table 即可），不可純文字
+- **PPT 至少 11 頁** — 不可低於 11 頁。頁面結構自己依學員 case 設計（見 Step 2）
+- **痛點頁 + 競品頁要圖表 + 數字**（簡單 bar / dot 密度 / table 即可），不可純文字
+- **最後一頁必含信心統計**（🟢🟡🔴 各幾條 + 主要來源清單）
 
 ### 安裝流程
 
@@ -73,35 +74,22 @@
 
 #### Step 1 — 行銷產業分析（social-media skill）
 
-**至少必跑以下 6 個 PMM 模組**：
-
-1. `pmm-market`
-2. `pmm-competitive`
-3. `pmm-positioning`
-4. `pmm-messaging`
-5. `taiwan-market`
-6. `pmm-patterns`
-
-**架構：用 Task tool 派發 6 個 subagent 並行執行**（每個 PMM 模組一個獨立 subagent，同一訊息內發出 6 個 Task tool calls）。每個 subagent 必跑三步：
+**架構：用 Task tool 並行派發 subagent**（同一訊息發出多個 Task tool calls）。模組怎麼選由你判斷——讀 `.claude/skills/social-media/SKILL.md` 看清單，依學員產業 + 痛點挑相關的派出去。每個 subagent 必跑三步：
 
 - (a) **WebSearch** 該主題真實公開資料（市場規模、競品數字、產業趨勢、價格動態）
-- (b) **Read** 該模組 reference 檔（`.claude/skills/social-media/references/{模組}.md`）
-- (c) **寫**對應 analysis 章節（含真實數據 + 信心標註 🟢🟡🔴 + 來源 URL）
+- (b) **Read** 對應 reference 檔
+- (c) **寫**該角度的 analysis 章節（含真實數據 + 信心標註 🟢🟡🔴 + 來源 URL）
 
 主 agent（你）的角色：
-1. **派發**：同一訊息 6 個 Task tool calls 並行
-2. **彙總**：把 6 份回傳的 analysis 章節合成一份完整 `analysis.md`
-3. **解衝突**：不同模組結論若衝突（例：`pmm-positioning` 主張利基深耕、但 `pmm-messaging` 寫成大眾化訊息），主 agent 必須 reason 後產出統一版本，不可直接拼接
+1. **判斷派哪些**：依產業 + 痛點挑模組，至少派 5 個以上不同角度才有深度
+2. **彙總**：把回傳的章節合成一份完整 `analysis.md`
+3. **解衝突**：不同模組結論衝突時，主 agent reason 後產出統一版本，不可直接拼接
 
-**為什麼 subagent 並行而非 sequential**：每位學員報告基於 6 個獨立 deep research、subagent 之間 context 不互相污染、整體跑得更快、深度更穩定。Sequential 跑會 context overload、後面模組品質下降（這是第一/第二輪 dry run 觀察到的真實問題）。
-
-**如果學員 case 需要更深入**，可額外派 subagent 跑 `pmm-pricing`、`pmm-gtm`、`pmm-launch`、`paid-acquisition`、`growth-loops` 等（同樣 a-b-c 三步流程）。
-
-**核心原則**：每位學員依其產業、客群、痛點得到的報告必須**互不相同**——這套工具的價值就是客製化、不是模板。精品咖啡店、精品皮鞋店、社區牙科診所跑出來的會是三份完全不同的報告。
+**核心原則**：每位學員依其產業、客群、痛點得到的報告必須**互不相同**——這套工具的價值就是客製化，不是模板。精品咖啡店、精品皮鞋店、約會顧問跑出來的會是三份完全不同的報告。
 
 #### Step 2 — 設計 PPT（sme-design skill）
 
-至少 11 頁（封面、Exec Summary、產業概況、客群、3 家 battlecard 各一頁、定位、訊息、行動、風險、方法論）。風格依學員受眾選（顧問版 / 雜誌版 / 新創 Pitch / 政府標案 / 日式極簡 / 經濟日報社論版任一）。
+至少 11 頁。頁面結構由你依學員產業 + 痛點從零設計（封面 / Exec Summary / 客群 / 痛點 / 競爭 / 定位 / 訊息 / 行動 / 方法論等是常見骨幹，但要不要拆 3 家 battlecard、要不要單獨風險頁、要不要 P&L 頁，自己判斷）。最後一頁必含**信心統計**（🟢🟡🔴 各幾條 + 主要來源清單）。視覺風格依學員受眾與產業氣質從零設計，不要套既有模板。
 
 **HTML 必含 viewport scale 自適應**（學員小螢幕開瀏覽器才不會被切）：
 

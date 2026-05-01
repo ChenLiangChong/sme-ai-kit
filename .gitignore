@@ -38,6 +38,7 @@ data/import_*.sql
 docs/session-scan/
 docs/skill-consolidation-plan.md
 docs/analysis/
+docs/selfimage/
 docs/design.md
 .claude/memory/
 .claude/skills/*/node_modules/

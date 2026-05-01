@@ -2,6 +2,9 @@
 
 PMM 工作流的反合理化模式、壓力抵抗、執行回報與品質驗證。
 
+> **共用紀律檔**：所有 7 個 PMM agent 都引用本檔的通用紀律（market-researcher / positioning-strategist / messaging-specialist / pricing-analyst / competitive-strategist / gtm-planner / launch-coordinator）。
+> agent 自身只保留**該角色專屬**的反合理化／壓力抵抗（3-4 條）；通用紀律放在這裡單一維護。
+
 ---
 
 > **工具可用性**：本模組會嘗試呼叫 `query_knowledge`（屬 business-db MCP）載入既有脈絡。若該工具不可用（例如第一堂課只裝了 Claude Desktop + social-media skill），請直接向使用者詢問所需資訊，不要因工具缺失而停止。

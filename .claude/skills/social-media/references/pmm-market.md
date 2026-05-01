@@ -2,6 +2,9 @@
 
 TAM / SAM / SOM、客群分類、趨勢分析、ICP 定義與國際市場進入。
 
+> **對應 agent**：`.claude/agents/market-researcher.md`（thin proxy）
+> 本檔是方法論的**單一來源**；agent 提供結構化 I/O schema 強制 + 紀律框架。修改本檔內容時，agent 自動受惠。
+
 ---
 
 > **工具可用性**：本模組會嘗試呼叫 `query_knowledge`（屬 business-db MCP）載入既有品牌／競品／市場脈絡。若該工具不可用（例如第一堂課只裝了 Claude Desktop + social-media skill），請直接向使用者詢問所需資訊，不要因工具缺失而停止。
