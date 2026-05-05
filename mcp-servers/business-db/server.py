@@ -546,6 +546,7 @@ def store_fact(
     source_quote: str = "",
     set_by: str = "",
     business_unit: str = "",
+    related_rule_ids: list[int] = [],
 ) -> str:
     """儲存企業規則或知識。反捏造機制：source_type='explicit' 時必須附上 source_quote（老闆原話）。
 
@@ -557,6 +558,7 @@ def store_fact(
         source_quote: 老闆原話引用（source_type=explicit 時必填）
         set_by: 誰設定的（如老闆姓名）
         business_unit: 所屬事業體（如 brand_c, brand_d），留空=全域規則
+        related_rule_ids: 跟此規則相關的既有 rule id（list of int、可空）— 寫進 rule_relations as 'related'
     """
     if source_type not in ("explicit", "observed", "inferred"):
         return "ERROR: source_type 必須是 explicit, observed, 或 inferred"
@@ -612,9 +614,30 @@ def store_fact(
                 except sqlite3.IntegrityError:
                     pass
 
+        # 手動關聯（AI 主動傳入的 related_rule_ids）
+        linked = []
+        for rid in (related_rule_ids or []):
+            if rid == rule_id:
+                continue
+            exists = db.execute("SELECT id, title FROM business_rules WHERE id=? AND superseded_by IS NULL", (rid,)).fetchone()
+            if not exists:
+                continue
+            a, b = min(rule_id, rid), max(rule_id, rid)
+            try:
+                db.execute(
+                    "INSERT INTO rule_relations (rule_id_a, rule_id_b, relation_type, created_by) VALUES (?,?,?,?)",
+                    (a, b, "related", set_by or "system"),
+                )
+                linked.append(f"#{rid} {exists['title']}")
+            except sqlite3.IntegrityError:
+                pass
+
         db.commit()
         bu_warn = _validate_business_unit(db, business_unit)
-        return f"✅ 已儲存規則 #{rule_id} [{category}] {title}" + warning + bu_warn
+        msg = f"✅ 已儲存規則 #{rule_id} [{category}] {title}" + warning + bu_warn
+        if linked:
+            msg += f"\n   關聯：{', '.join(linked)}"
+        return msg
     finally:
         db.close()
 
@@ -663,13 +686,13 @@ def query_knowledge(question: str, category: str = "", business_unit: str = "") 
                 results.append(f"- **[#{r['id']}] {r['title']}** [{r['category']}]{bu_label} ({src})")
                 results.append(f"  {r['content'][:200]}")
 
-            # 交叉引用
+            # 交叉引用（顯示相關規則 content snippet、AI 一次帶全 context）
             rule_ids = [r["id"] for r in rules]
             placeholders = ",".join("?" * len(rule_ids))
             relations = db.execute(
                 f"""SELECT rr.relation_type,
-                           ba.id as id_a, ba.title as title_a,
-                           bb.id as id_b, bb.title as title_b
+                           ba.id as id_a, ba.title as title_a, ba.content as content_a, ba.category as cat_a,
+                           bb.id as id_b, bb.title as title_b, bb.content as content_b, bb.category as cat_b
                     FROM rule_relations rr
                     JOIN business_rules ba ON rr.rule_id_a = ba.id
                     JOIN business_rules bb ON rr.rule_id_b = bb.id
@@ -680,10 +703,30 @@ def query_knowledge(question: str, category: str = "", business_unit: str = "") 
             ).fetchall()
             if relations:
                 type_labels = {"related": "相關", "depends_on": "依賴", "conflicts_with": "⚠️衝突"}
-                results.append("\n## 🔗 相關規則（交叉引用）")
+                main_id_set = set(rule_ids)
+                seen_others = set()
+                items = []
                 for rel in relations:
                     label = type_labels.get(rel["relation_type"], rel["relation_type"])
-                    results.append(f"- [{label}] [#{rel['id_a']}] {rel['title_a']} ↔ [#{rel['id_b']}] {rel['title_b']}")
+                    # 偵測哪邊是「另一條」（不在主搜尋結果裡）
+                    if rel["id_a"] in main_id_set and rel["id_b"] not in main_id_set:
+                        other_id, other_title, other_content, other_cat = rel["id_b"], rel["title_b"], rel["content_b"], rel["cat_b"]
+                        main_id = rel["id_a"]
+                    elif rel["id_b"] in main_id_set and rel["id_a"] not in main_id_set:
+                        other_id, other_title, other_content, other_cat = rel["id_a"], rel["title_a"], rel["content_a"], rel["cat_a"]
+                        main_id = rel["id_b"]
+                    else:
+                        # 兩邊都在主搜尋結果、或兩邊都不在 — 退回顯示 pair label
+                        items.append(f"- [{label}] [#{rel['id_a']}] {rel['title_a']} ↔ [#{rel['id_b']}] {rel['title_b']}")
+                        continue
+                    if other_id in seen_others:
+                        continue
+                    seen_others.add(other_id)
+                    snippet = (other_content or "")[:160].replace("\n", " ")
+                    items.append(f"- [{label} ← #{main_id}] [#{other_id}] {other_title} [{other_cat}]\n  {snippet}")
+                if items:
+                    results.append("\n## 🔗 相關規則（交叉引用）")
+                    results.extend(items)
 
         # 搜尋任務
         tasks = db.execute(
@@ -1336,6 +1379,91 @@ def log_interaction(
         )
         db.commit()
         return f"✅ 已記錄：{actor} → {action}"
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def log_decision(
+    title: str,
+    reason: str,
+    supersedes_rule_ids: list[int] = [],
+    related_rule_ids: list[int] = [],
+    source_quote: str = "",
+    set_by: str = "",
+    business_unit: str = "",
+) -> str:
+    """記錄決策（為什麼這樣決定）。寫進 business_rules with category='decision_record'。
+    可選擇同時把舊規則標為 superseded（透過 supersedes_rule_ids）。
+    可選擇 link 到相關規則（透過 related_rule_ids）。
+    查詢決策用 query_knowledge(category='decision_record')。
+
+    Args:
+        title: 決策摘要（一句話、不超過 60 字）
+        reason: 為什麼這樣決定（rationale、含背景）
+        supersedes_rule_ids: 此決策廢棄哪些舊 rule id（list of int、可空）
+        related_rule_ids: 跟此決策相關的既有 rule id（不廢棄、只是 cross-ref）
+        source_quote: 老闆原話（recommended）
+        set_by: 誰做的決定（如老闆姓名）
+        business_unit: 所屬事業體（如 dreamwalkr），留空=全域
+    """
+    sq = (source_quote or "").strip()
+    src_type = "explicit" if sq else "inferred"
+
+    db = get_db()
+    try:
+        cur = db.execute(
+            """INSERT INTO business_rules
+               (category, title, content, source_type, source_quote, set_by, business_unit)
+               VALUES ('decision_record', ?, ?, ?, ?, ?, ?)""",
+            (title, reason, src_type, sq or None, set_by or "system", business_unit or None),
+        )
+        new_id = cur.lastrowid
+
+        superseded = []
+        for rid in (supersedes_rule_ids or []):
+            r = db.execute(
+                "SELECT id, title FROM business_rules WHERE id = ? AND superseded_by IS NULL",
+                (rid,),
+            ).fetchone()
+            if r:
+                db.execute(
+                    "UPDATE business_rules SET superseded_by = ? WHERE id = ?",
+                    (new_id, rid),
+                )
+                superseded.append(f"#{rid} {r['title']}")
+
+        linked = []
+        for rid in (related_rule_ids or []):
+            if rid == new_id:
+                continue
+            exists = db.execute("SELECT id, title FROM business_rules WHERE id=? AND superseded_by IS NULL", (rid,)).fetchone()
+            if not exists:
+                continue
+            a, b = min(new_id, rid), max(new_id, rid)
+            try:
+                db.execute(
+                    "INSERT INTO rule_relations (rule_id_a, rule_id_b, relation_type, created_by) VALUES (?,?,?,?)",
+                    (a, b, "related", set_by or "system"),
+                )
+                linked.append(f"#{rid} {exists['title']}")
+            except sqlite3.IntegrityError:
+                pass
+
+        db.execute(
+            "INSERT INTO interaction_log (actor, action, target_type, target_id, detail, business_unit) VALUES (?,?,?,?,?,?)",
+            (set_by or "system", "decision_logged", "rule", new_id, title, business_unit or None),
+        )
+
+        db.commit()
+        msg = f"✅ 已記錄決策 #{new_id}（{src_type}）：{title}"
+        if src_type == "inferred":
+            msg += "\n   ⚠️ 沒附 source_quote、標 inferred；建議下次補老闆原話"
+        if superseded:
+            msg += f"\n   廢棄：{', '.join(superseded)}"
+        if linked:
+            msg += f"\n   關聯：{', '.join(linked)}"
+        return msg
     finally:
         db.close()
 
