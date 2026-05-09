@@ -141,7 +141,30 @@ import server; print(len(server.mcp._tool_manager._tools))
 " 2>/dev/null)
 ok "business-db：$TOOLS 個 MCP tools"
 [[ -f "$ROOT/CLAUDE.md" ]] && ok "CLAUDE.md" || err "CLAUDE.md 不存在"
-[[ -f "$ROOT/.claude/settings.local.json" ]] && ok "settings.local.json" || err "settings.local.json 不存在"
+
+LOCAL_SETTINGS="$ROOT/.claude/settings.local.json"
+if [[ ! -f "$LOCAL_SETTINGS" ]]; then
+    mkdir -p "$ROOT/.claude"
+    cat > "$LOCAL_SETTINGS" <<'LOCALJSON'
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash install.sh)",
+      "Bash(bash start.sh)",
+      "Bash(bash start-force.sh)",
+      "Bash(./.venv/bin/python3:*)",
+      "Bash(./.venv/bin/pip:*)",
+      "Read(./data/**)",
+      "Read(./mcp-servers/**)"
+    ],
+    "deny": []
+  }
+}
+LOCALJSON
+    ok "settings.local.json 已建立（基本權限白名單）"
+else
+    ok "settings.local.json 已存在"
+fi
 
 # ── 完成 ──────────────────────────────────────────────
 
