@@ -15,8 +15,20 @@ data/line-channels.json
 # 打包產物
 dist/
 
-# 客戶資產（含圖片等敏感資料）
-docs/*-assets/
+# docs/ 預設不追蹤、只 whitelist 通用內容
+# （客戶資料、IG 素材、課程草稿、研究筆記、個人圖片等都在這裡）
+docs/*
+!docs/project-overview.html
+!docs/skill-translation/
+!docs/course/
+
+# course/ 內預設不追蹤、只 whitelist lesson-01 舊版 3 檔
+docs/course/*
+!docs/course/lesson-01/
+docs/course/lesson-01/*
+!docs/course/lesson-01/lesson-01-flow.md
+!docs/course/lesson-01/lesson-01-overview.html
+!docs/course/lesson-01/lesson-01.md
 
 # 執行環境
 .venv/
@@ -28,18 +40,12 @@ bun.lockb
 # OS
 .DS_Store
 Thumbs.db
-docs/client-*
 
 # FUSE 暫存檔（雲端掛載留下的）
 data/.fuse_hidden*
 
 # 個人業務資料（不上傳通用版）
 data/import_*.sql
-docs/session-scan/
-docs/skill-consolidation-plan.md
-docs/analysis/
-docs/selfimage/
-docs/design.md
 .claude/memory/
 .claude/skills/*/node_modules/
 
