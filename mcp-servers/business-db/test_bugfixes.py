@@ -215,7 +215,7 @@ server.store_fact(
 
 # 應該可以連續呼叫 update_rule 多次不撞 UNIQUE
 r1 = server.update_rule(rule_id=1, new_content="version 2", reason="第一次更新")
-_assert("Bug #3: first update_rule success", "✅" in r1, r1[:200])
+_assert("Bug #3: first update_rule success", "已更新" in r1, r1[:200])
 
 # 找到剛新建的 rule id（#1 已 superseded）
 db = server.get_db()
@@ -227,7 +227,7 @@ db.close()
 _assert("Bug #3: new active rule exists after first update", latest is not None)
 
 r2 = server.update_rule(rule_id=latest["id"], new_content="version 3", reason="第二次更新")
-_assert("Bug #3: second update_rule success", "✅" in r2, r2[:200])
+_assert("Bug #3: second update_rule success", "已更新" in r2, r2[:200])
 
 db = server.get_db()
 latest2 = db.execute(
@@ -318,7 +318,7 @@ print("\n=== Bug #5: update_stock quantity_change=0 ===")
 
 _reset_db()
 r = server.update_stock(sku="ZERO-001", quantity_change=0, name="Zero Stock SKU", sell_price=1200)
-_assert("Bug #5: quantity_change=0 creates SKU", "✅" in r or "新建品項" in r, r[:200])
+_assert("Bug #5: quantity_change=0 creates SKU", "新建品項" in r and "ZERO-001" in r, r[:200])
 
 db = server.get_db()
 inv = db.execute("SELECT * FROM inventory WHERE sku='ZERO-001'").fetchone()
@@ -403,7 +403,7 @@ r = server.record_transaction(
     description="test expense", business_unit="brand_c",
 )
 _assert("Bug #8: record_transaction NT$10,000 passes threshold (company fallback)",
-        "✅" in r and "超過審核門檻" not in r, r[:200])
+        "帳目 #" in r and "超過審核門檻" not in r, r[:200])
 
 
 # ============================================================
@@ -447,8 +447,8 @@ _assert("purpose: register with purpose includes purpose in return",
         "協調訂單" in r, r[:300])
 
 r = server.list_line_groups(channel_id="brand_c")
-_assert("purpose: list_line_groups shows purpose", "🎯 功能：協調訂單" in r, r[:300])
-_assert("purpose: list_line_groups shows notes separately", "📝 備註：成員：老闆" in r, r[:300])
+_assert("purpose: list_line_groups shows purpose", "功能：協調訂單" in r, r[:300])
+_assert("purpose: list_line_groups shows notes separately", "備註：成員：老闆" in r, r[:300])
 
 # update purpose via re-register
 server.register_line_group(
@@ -486,7 +486,7 @@ r = server.register_partner(
     business_units="brand_e,brand_a,brand_c",
     payment_terms="案件計酬",
 )
-_assert("partners: register success", "✅" in r and "#1" in r, r[:200])
+_assert("partners: register success", "已註冊" in r and "#1" in r, r[:200])
 
 # 再 register 一個
 server.register_partner(name="Bonny 社群", role="社群發布", business_units="brand_e,brand_a")

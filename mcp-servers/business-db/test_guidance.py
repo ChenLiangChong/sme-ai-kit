@@ -33,7 +33,7 @@ failed = 0
 def check(name, result, *keywords):
     global passed, failed
     ok = all(kw in result for kw in keywords)
-    status = "✅" if ok else "❌"
+    status = "PASS" if ok else "FAIL"
     print(f"{status} {name}")
     if not ok:
         for kw in keywords:
@@ -49,7 +49,7 @@ def check(name, result, *keywords):
 print("\n=== Test 1: create_order guidance ===")
 items = json.dumps([{"sku": "SKU-A001", "name": "香氛蠟燭", "qty": 10, "price": 425}])
 result = server.create_order(customer_id=1, items_json=items, created_by="test")
-check("create_order has next_steps", result, "👉 下一步")
+check("create_order has next_steps", result, "下一步")
 check("create_order mentions payment terms", result, "net30")
 check("create_order mentions update_order confirmed", result, "update_order", "confirmed")
 check("create_order mentions LINE notify", result, "LINE 通知")
@@ -88,10 +88,10 @@ db.commit()
 db.close()
 
 result = server.fulfill_order(order_id=order_id)
-check("fulfill_order has auto_completed", result, "📋 已自動完成")
+check("fulfill_order has auto_completed", result, "已自動完成")
 check("fulfill_order mentions stock deducted", result, "庫存已扣減")
 check("fulfill_order mentions receivable", result, "應收帳款")
-check("fulfill_order has next_steps", result, "👉 下一步")
+check("fulfill_order has next_steps", result, "下一步")
 check("fulfill_order mentions update_order shipped", result, "update_order", "driver")
 check("fulfill_order mentions LINE notify", result, "LINE 通知")
 check("fulfill_order has warnings", result, "不要再手動 update_stock", "不要再手動 record_transaction")
@@ -102,26 +102,26 @@ check("fulfill_order has warnings", result, "不要再手動 update_stock", "不
 # === Test 4: update_stock incoming guidance ===
 print("\n=== Test 4: update_stock guidance ===")
 result = server.update_stock(sku="SKU-A001", quantity_change=20, reason="進貨")
-check("update_stock incoming has next_steps", result, "👉 下一步")
+check("update_stock incoming has next_steps", result, "下一步")
 check("update_stock incoming mentions record_transaction", result, "record_transaction", "inventory_purchase")
 check("update_stock incoming mentions amount", result, "4000")  # 20 * 200
 
 # New item creation
 result = server.update_stock(sku="NEW-001", quantity_change=10, reason="新品", name="新商品", unit_cost=150, unit="組")
-check("update_stock new item has guidance", result, "👉 下一步", "record_transaction")
+check("update_stock new item has guidance", result, "下一步", "record_transaction")
 check("update_stock new item mentions cost", result, "1500")  # 10 * 150
 
 
 # === Test 5: record_transaction threshold block guidance ===
 print("\n=== Test 5: record_transaction threshold guidance ===")
 result = server.record_transaction(type="expense", amount=8000, category="inventory_purchase", description="大筆進貨")
-check("record_transaction blocked has guidance", result, "👉 下一步", "create_approval")
+check("record_transaction blocked has guidance", result, "下一步", "create_approval")
 check("record_transaction blocked has structured detail", result, "resume_action")
 
 # Success with related order
 result = server.record_transaction(type="income", amount=500, category="sales_revenue", related_order_id=order_id, payment_status="paid")
 # Order already shipped, this is a partial payment
-check("record_transaction success with order", result, "✅")
+check("record_transaction success with order", result, "帳目 #")
 
 
 # === Test 6: resolve_approval with structured detail ===
@@ -141,7 +141,7 @@ approval_id = int(match.group(1))
 result = server.resolve_approval(approval_id=approval_id, decision="approved", decided_by="Boss")
 check("resolve_approval has original summary", result, "進貨 NT$8,000")
 check("resolve_approval has resume action", result, "record_transaction")
-check("resolve_approval has next_steps", result, "👉 下一步")
+check("resolve_approval has next_steps", result, "下一步")
 check("resolve_approval has then step", result, "記帳完成後通知採購人員")
 
 
@@ -154,7 +154,7 @@ db.close()
 if txn:
     # Full payment
     result = server.record_payment(transaction_id=txn["id"], amount=txn["amount"])
-    check("record_payment full has guidance", result, "👉 下一步")
+    check("record_payment full has guidance", result, "下一步")
     check("record_payment full mentions update_order paid", result, "update_order", "paid")
 
 
@@ -177,10 +177,10 @@ check("context_summary shows pending orders", result, "進行中訂單")
 # === Test 9: find_customer shows payment_terms ===
 print("\n=== Test 9: find_customer display ===")
 result = server.find_customer(query="預付")
-check("find_customer shows prepaid", result, "📄prepaid")
+check("find_customer shows prepaid", result, "prepaid")
 
 result = server.find_customer(query="好好")
-check("find_customer shows discount", result, "🏷️15%off")
+check("find_customer shows discount", result, "15%off")
 
 
 # === Test 10: fulfill_order with low stock alert ===
@@ -204,7 +204,7 @@ result = server.create_approval(type="expense", summary="測試駁回", detail=d
 match = re.search(r"#(\d+)", result)
 rej_id = int(match.group(1))
 result = server.resolve_approval(approval_id=rej_id, decision="rejected", decided_by="Boss")
-check("resolve_approval rejected has icon", result, "❌")
+check("resolve_approval rejected has icon", result, "[駁回]")
 check("resolve_approval rejected has summary", result, "測試駁回")
 check("resolve_approval rejected has original detail", result, "原始請求")
 

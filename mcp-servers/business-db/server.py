@@ -170,7 +170,7 @@ def init_db():
         db.execute("PRAGMA legacy_alter_table=OFF")
 
     # Migration: line_groups UNIQUE(group_id) → UNIQUE(channel_id, group_id)
-    # ⚠️ 修正：原條件左側帶空格、右側移除空格，永遠不匹配，導致 rebuild 每次 init_db 都觸發。
+    # 注意：修正：原條件左側帶空格、右側移除空格，永遠不匹配，導致 rebuild 每次 init_db 都觸發。
     # 現在兩邊都 normalize。
     lg_schema = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='line_groups'").fetchone()
     if lg_schema and lg_schema["sql"] and "UNIQUE(channel_id,group_id)" not in lg_schema["sql"].replace(" ", ""):
@@ -419,7 +419,7 @@ def _validate_business_unit(db, business_unit: str) -> str:
         return ""
     entity = db.execute("SELECT id FROM business_entities WHERE id = ?", (business_unit,)).fetchone()
     if not entity:
-        return f"\n⚠️ 事業體 '{business_unit}' 未登錄（register_business_entity），資料已存入但無法按事業體篩選彙總。"
+        return f"\n注意：事業體 '{business_unit}' 未登錄（register_business_entity），資料已存入但無法按事業體篩選彙總。"
     return ""
 
 
@@ -442,11 +442,11 @@ def _build_guidance(
     """Build structured guidance block for tool returns."""
     parts: list[str] = []
     if auto_done:
-        parts.append("\n📋 已自動完成：\n" + "\n".join(f"- {s}" for s in auto_done))
+        parts.append("\n已自動完成：\n" + "\n".join(f"- {s}" for s in auto_done))
     if next_steps:
-        parts.append("\n👉 下一步：\n" + "\n".join(f"{i+1}. {s}" for i, s in enumerate(next_steps)))
+        parts.append("\n下一步：\n" + "\n".join(f"{i+1}. {s}" for i, s in enumerate(next_steps)))
     if warnings:
-        parts.append("\n⚠️ 注意：\n" + "\n".join(f"- {s}" for s in warnings))
+        parts.append("\n注意：注意：\n" + "\n".join(f"- {s}" for s in warnings))
     return "\n".join(parts) if parts else ""
 
 
@@ -589,7 +589,7 @@ def store_fact(
             conflict_list = "\n".join(
                 f"  - [#{r['id']}] {r['title']}: {r['content'][:80]}" for r in conflicts[:5]
             )
-            warning = f"\n⚠️ 發現 {len(conflicts)} 條可能衝突的規則：\n{conflict_list}\n如需取代舊規則，請用 update_rule 工具。"
+            warning = f"\n注意：發現 {len(conflicts)} 條可能衝突的規則：\n{conflict_list}\n如需取代舊規則，請用 update_rule 工具。"
 
         cursor = db.execute(
             "INSERT INTO business_rules (category, title, content, source_type, source_quote, set_by, business_unit) VALUES (?,?,?,?,?,?,?)",
@@ -634,7 +634,7 @@ def store_fact(
 
         db.commit()
         bu_warn = _validate_business_unit(db, business_unit)
-        msg = f"✅ 已儲存規則 #{rule_id} [{category}] {title}" + warning + bu_warn
+        msg = f"已儲存規則 #{rule_id} [{category}] {title}" + warning + bu_warn
         if linked:
             msg += f"\n   關聯：{', '.join(linked)}"
         return msg
@@ -679,7 +679,7 @@ def query_knowledge(question: str, category: str = "", business_unit: str = "") 
         ).fetchall()
 
         if rules:
-            results.append("## 📋 企業規則")
+            results.append("## 企業規則")
             for r in rules:
                 src = {"explicit": "老闆指示", "observed": "觀察慣例", "inferred": "AI推斷"}.get(r["source_type"], r["source_type"])
                 bu_label = f" [{r['business_unit']}]" if r["business_unit"] else " [全域]"
@@ -702,7 +702,7 @@ def query_knowledge(question: str, category: str = "", business_unit: str = "") 
                 rule_ids + rule_ids,
             ).fetchall()
             if relations:
-                type_labels = {"related": "相關", "depends_on": "依賴", "conflicts_with": "⚠️衝突"}
+                type_labels = {"related": "相關", "depends_on": "依賴", "conflicts_with": "衝突"}
                 main_id_set = set(rule_ids)
                 seen_others = set()
                 items = []
@@ -725,7 +725,7 @@ def query_knowledge(question: str, category: str = "", business_unit: str = "") 
                     snippet = (other_content or "")[:160].replace("\n", " ")
                     items.append(f"- [{label} ← #{main_id}] [#{other_id}] {other_title} [{other_cat}]\n  {snippet}")
                 if items:
-                    results.append("\n## 🔗 相關規則（交叉引用）")
+                    results.append("\n## 相關規則（交叉引用）")
                     results.extend(items)
 
         # 搜尋任務
@@ -738,9 +738,9 @@ def query_knowledge(question: str, category: str = "", business_unit: str = "") 
         ).fetchall()
 
         if tasks:
-            results.append("\n## 📝 相關任務")
+            results.append("\n## 相關任務")
             for t in tasks:
-                status_icon = {"pending": "⏳", "in_progress": "🔄", "done": "✅", "cancelled": "❌"}.get(t["status"], "")
+                status_icon = {"pending": "[待處理]", "in_progress": "[進行中]", "done": "[已完成]", "cancelled": "[已取消]"}.get(t["status"], "")
                 results.append(f"- {status_icon} [#{t['id']}] {t['title']} → {t['assignee'] or '未指派'}")
 
         # 搜尋客戶
@@ -753,7 +753,7 @@ def query_knowledge(question: str, category: str = "", business_unit: str = "") 
         ).fetchall()
 
         if customers:
-            results.append("\n## 👤 相關客戶")
+            results.append("\n## 相關客戶")
             for c in customers:
                 results.append(f"- **{c['name']}** {c['phone'] or ''} {c['tags'] or ''}")
 
@@ -767,9 +767,9 @@ def query_knowledge(question: str, category: str = "", business_unit: str = "") 
         ).fetchall()
 
         if inventory:
-            results.append("\n## 📦 相關庫存")
+            results.append("\n## 相關庫存")
             for i in inventory:
-                alert = " ⚠️ 低於安全庫存" if i["current_stock"] <= i["min_stock"] else ""
+                alert = " 注意：低於安全庫存" if i["current_stock"] <= i["min_stock"] else ""
                 results.append(f"- [{i['sku']}] {i['name']}: {i['current_stock']}{i['unit']}{alert}")
 
         if not results:
@@ -854,15 +854,15 @@ def update_rule(rule_id: int, new_content: str, reason: str, actor_user_id: str 
 
         related_warning = ""
         if relations:
-            type_labels = {"related": "相關", "depends_on": "依賴", "conflicts_with": "⚠️衝突"}
+            type_labels = {"related": "相關", "depends_on": "依賴", "conflicts_with": "衝突"}
             rel_list = "\n".join(
                 f"  - [#{r['related_id']}] {r['title']} [{r['category']}]（{type_labels.get(r['relation_type'], r['relation_type'])}）"
                 for r in relations[:5]
             )
-            related_warning = f"\n\n🔗 以下 {len(relations)} 條關聯規則可能也需要檢查：\n{rel_list}"
+            related_warning = f"\n\n以下 {len(relations)} 條關聯規則可能也需要檢查：\n{rel_list}"
 
         db.commit()
-        return f"✅ 規則已更新：#{rule_id} → #{new_id}\n原因：{reason}" + related_warning
+        return f"規則已更新：#{rule_id} → #{new_id}\n原因：{reason}" + related_warning
     finally:
         db.close()
 
@@ -909,13 +909,13 @@ def knowledge_changelog(days: int = 7) -> str:
             created = [e for e in entries if e["action"] == "rule_created"]
             updated = [e for e in entries if e["action"] == "rule_updated"]
             if created:
-                lines.append(f"📝 新增 {len(created)} 條：")
+                lines.append(f"新增 {len(created)} 條：")
                 for e in created:
                     cat = f"[{e['category']}] " if e["category"] else ""
                     title = e["title"] or e["detail"] or ""
                     lines.append(f"- [#{e['target_id']}] {cat}{title}")
             if updated:
-                lines.append(f"🔄 更新 {len(updated)} 條：")
+                lines.append(f"更新 {len(updated)} 條：")
                 for e in updated:
                     cat = f"[{e['category']}] " if e["category"] else ""
                     title = e["title"] or ""
@@ -981,14 +981,14 @@ def lint_knowledge(checks: str = "all") -> str:
                             pairs.append((a, b))
 
             if pairs:
-                sections.append(f"### 🔍 潛在矛盾（{len(pairs)} 組）")
+                sections.append(f"### 潛在矛盾（{len(pairs)} 組）")
                 for a, b in pairs[:10]:
                     sections.append(f"- [#{a['id']}] {a['title']} ↔ [#{b['id']}] {b['title']} [{a['category']}]")
                     sections.append(f"  #{a['id']}: {a['content'][:80]}")
                     sections.append(f"  #{b['id']}: {b['content'][:80]}")
                 suggestions.append(f"檢討 {len(pairs)} 組可能矛盾的規則")
             else:
-                sections.append("### 🔍 潛在矛盾\n✅ 未發現矛盾")
+                sections.append("### 潛在矛盾\n未發現矛盾")
 
         # --- 2. 過期檢查 ---
         if run_all or "stale" in requested:
@@ -1000,12 +1000,12 @@ def lint_knowledge(checks: str = "all") -> str:
             ).fetchall()
 
             if stale:
-                sections.append(f"\n### ⏰ 可能過期（{len(stale)} 條，超過 6 個月未更新）")
+                sections.append(f"\n### 可能過期（{len(stale)} 條，超過 6 個月未更新）")
                 for r in stale[:15]:
                     sections.append(f"- [#{r['id']}] {r['title']} [{r['category']}] — 建立於 {r['created_at'][:10]}")
                 suggestions.append(f"檢討 {len(stale)} 條可能過期的規則")
             else:
-                sections.append("\n### ⏰ 過期檢查\n✅ 所有規則都在 6 個月內")
+                sections.append("\n### 過期檢查\n所有規則都在 6 個月內")
 
         # --- 3. 覆蓋分析 ---
         if run_all or "coverage" in requested:
@@ -1015,23 +1015,23 @@ def lint_knowledge(checks: str = "all") -> str:
             ).fetchall()
             count_map = {r["category"]: r["cnt"] for r in counts}
 
-            sections.append("\n### 📊 覆蓋分析")
+            sections.append("\n### 覆蓋分析")
             empty_cats = []
             low_cats = []
             for cat in _KNOWN_CATEGORIES:
                 cnt = count_map.get(cat, 0)
                 if cnt == 0:
-                    sections.append(f"- ❌ {cat}: 0 條（空白）")
+                    sections.append(f"- {cat}: 0 條（空白）")
                     empty_cats.append(cat)
                 elif cnt <= 2:
-                    sections.append(f"- ⚠️ {cat}: {cnt} 條（偏少）")
+                    sections.append(f"- 注意：{cat}: {cnt} 條（偏少）")
                     low_cats.append(cat)
                 else:
-                    sections.append(f"- ✅ {cat}: {cnt} 條")
+                    sections.append(f"- {cat}: {cnt} 條")
             # 顯示不在已知類別的自訂類別
             for cat, cnt in count_map.items():
                 if cat not in _KNOWN_CATEGORIES:
-                    sections.append(f"- 📁 {cat}: {cnt} 條（自訂類別）")
+                    sections.append(f"- {cat}: {cnt} 條（自訂類別）")
 
             if empty_cats:
                 suggestions.append(f"補充 {', '.join(empty_cats)} 類別的規則")
@@ -1047,16 +1047,16 @@ def lint_knowledge(checks: str = "all") -> str:
             ).fetchall()
 
             if orphaned:
-                sections.append(f"\n### 🔗 孤立鏈（{len(orphaned)} 條）")
+                sections.append(f"\n### 孤立鏈（{len(orphaned)} 條）")
                 for r in orphaned[:10]:
                     sections.append(f"- [#{r['id']}] {r['title']} → superseded_by #{r['superseded_by']}（不存在）")
                 suggestions.append(f"修復 {len(orphaned)} 條孤立引用")
             else:
-                sections.append("\n### 🔗 孤立鏈檢查\n✅ 資料完整性正常")
+                sections.append("\n### 孤立鏈檢查\n資料完整性正常")
 
         # --- 建議 ---
         if suggestions:
-            sections.append("\n### 📋 建議")
+            sections.append("\n### 建議")
             for s in suggestions:
                 sections.append(f"- {s}")
 
@@ -1105,10 +1105,54 @@ def link_rules(rule_id_a: int, rule_id_b: int, relation_type: str = "related") -
             )
             db.commit()
         except sqlite3.IntegrityError:
-            return f"ℹ️ 關聯已存在：#{ra} ↔ #{rb} ({relation_type})"
+            return f"關聯已存在：#{ra} ↔ #{rb} ({relation_type})"
 
         type_label = {"related": "相關", "depends_on": "依賴", "conflicts_with": "衝突"}.get(relation_type, relation_type)
-        return f"✅ 已建立關聯：[#{ra}] {a['title']} ↔ [#{rb}] {b['title']} （{type_label}）"
+        return f"已建立關聯：[#{ra}] {a['title']} ↔ [#{rb}] {b['title']} （{type_label}）"
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def get_rule(rule_id: int) -> str:
+    """查看單筆規則完整內容（含 source_quote、被誰取代／取代了誰）。
+
+    Args:
+        rule_id: 規則 ID
+    """
+    db = get_db()
+    try:
+        r = db.execute("SELECT * FROM business_rules WHERE id = ?", (rule_id,)).fetchone()
+        if not r:
+            return f"ERROR: 找不到規則 #{rule_id}"
+
+        superseded_str = ""
+        if r["superseded_by"]:
+            sup = db.execute("SELECT title FROM business_rules WHERE id = ?", (r["superseded_by"],)).fetchone()
+            superseded_str = f"\n- 已被取代：[#{r['superseded_by']}] {sup['title'] if sup else '（已刪除）'}"
+
+        supersedes = db.execute(
+            "SELECT id, title FROM business_rules WHERE superseded_by = ?",
+            (rule_id,),
+        ).fetchall()
+        supersedes_str = ""
+        if supersedes:
+            sup_lines = [f"  - [#{s['id']}] {s['title']}" for s in supersedes]
+            supersedes_str = "\n- 取代了：\n" + "\n".join(sup_lines)
+
+        source_quote_str = f"\n- 老闆原話：「{r['source_quote']}」" if r["source_quote"] else ""
+
+        return (
+            f"## 規則 #{rule_id}：{r['title']} [{r['category']}]\n"
+            f"- 來源類型：{r['source_type'] or '未指定'}\n"
+            f"- 設定者：{r['set_by'] or '未知'}\n"
+            f"- 事業體：{r['business_unit'] or '全域'}\n"
+            f"- 建立：{r['created_at']}"
+            f"{source_quote_str}"
+            f"{superseded_str}"
+            f"{supersedes_str}\n"
+            f"\n### 內容\n{r['content']}"
+        )
     finally:
         db.close()
 
@@ -1141,7 +1185,7 @@ def get_rule_relations(rule_id: int) -> str:
         if not relations:
             return f"規則 [#{rule_id}] {rule['title']} 沒有任何關聯。"
 
-        type_labels = {"related": "相關", "depends_on": "依賴", "conflicts_with": "⚠️衝突"}
+        type_labels = {"related": "相關", "depends_on": "依賴", "conflicts_with": "衝突"}
         lines = [f"## 規則 [#{rule_id}] {rule['title']} 的關聯\n"]
         for rel in relations:
             label = type_labels.get(rel["relation_type"], rel["relation_type"])
@@ -1171,7 +1215,7 @@ def get_context_summary(scope: str = "full") -> str:
         # 公司資訊
         company = db.execute("SELECT * FROM company WHERE id = 1").fetchone()
         if company:
-            sections.append(f"## 🏢 {company['name']}（{company['industry'] or '未設定'}）")
+            sections.append(f"## {company['name']}（{company['industry'] or '未設定'}）")
 
         # 待處理任務
         pending = db.execute(
@@ -1179,9 +1223,9 @@ def get_context_summary(scope: str = "full") -> str:
             (20 if scope == "full" else 5,),
         ).fetchall()
         if pending:
-            sections.append(f"\n## 📝 待處理任務（{len(pending)} 項）")
+            sections.append(f"\n## 待處理任務（{len(pending)} 項）")
             for t in pending:
-                pri = {"urgent": "🔴", "normal": "🟡", "low": "🟢"}.get(t["priority"], "")
+                pri = {"urgent": "[急]", "normal": "[普通]", "low": "[低]"}.get(t["priority"], "")
                 due = f" 截止:{t['due_date']}" if t["due_date"] else ""
                 sections.append(f"- {pri} [#{t['id']}] {t['title']} → {t['assignee'] or '未指派'}{due}")
 
@@ -1197,7 +1241,7 @@ def get_context_summary(scope: str = "full") -> str:
             "SELECT id, type, summary, detail, requester, created_at, expires_at FROM approvals WHERE status = 'waiting' ORDER BY created_at",
         ).fetchall()
         if approvals:
-            sections.append(f"\n## ⏳ 等待審核（{len(approvals)} 項）")
+            sections.append(f"\n## 等待審核（{len(approvals)} 項）")
             now = datetime.now()
             for a in approvals:
                 detail_hint = ""
@@ -1215,7 +1259,7 @@ def get_context_summary(scope: str = "full") -> str:
                     created = datetime.strptime(a["created_at"], "%Y-%m-%d %H:%M:%S")
                     hours_waiting = (now - created).total_seconds() / 3600
                     if hours_waiting > 48:
-                        age_warning = f" 🔴 已等待 {int(hours_waiting)}h — 建議重新通知主管"
+                        age_warning = f" 已等待 {int(hours_waiting)}h — 建議重新通知主管"
                 except (ValueError, TypeError):
                     pass
                 sections.append(f"- [#{a['id']}] {a['type']}: {a['summary']} (申請人:{a['requester'] or '?'}){detail_hint}{age_warning}")
@@ -1225,7 +1269,7 @@ def get_context_summary(scope: str = "full") -> str:
             "SELECT id, user_name, content, created_at FROM line_messages WHERE direction='inbound' AND status='queued' ORDER BY created_at",
         ).fetchall()
         if queued:
-            sections.append(f"\n## 💬 未處理 LINE 訊息（{len(queued)} 則）")
+            sections.append(f"\n## 未處理 LINE 訊息（{len(queued)} 則）")
             for m in queued:
                 sections.append(f"- [{m['created_at']}] {m['user_name'] or '?'}: {m['content'][:100]}")
 
@@ -1234,7 +1278,7 @@ def get_context_summary(scope: str = "full") -> str:
             "SELECT sku, name, current_stock, min_stock, unit FROM inventory WHERE current_stock <= min_stock AND min_stock > 0",
         ).fetchall()
         if alerts:
-            sections.append(f"\n## ⚠️ 庫存警報（{len(alerts)} 項）")
+            sections.append(f"\n## 庫存警報（{len(alerts)} 項）")
             for a in alerts:
                 sections.append(f"- [{a['sku']}] {a['name']}: 剩 {a['current_stock']}{a['unit']}（安全庫存 {a['min_stock']}）")
 
@@ -1245,7 +1289,7 @@ def get_context_summary(scope: str = "full") -> str:
                 recent_rules = db.execute(
                     "SELECT category, title FROM business_rules WHERE superseded_by IS NULL ORDER BY created_at DESC LIMIT 10"
                 ).fetchall()
-                sections.append(f"\n## 📋 企業規則（共 {rules_count} 條有效）")
+                sections.append(f"\n## 企業規則（共 {rules_count} 條有效）")
                 for r in recent_rules:
                     sections.append(f"- [{r['category']}] {r['title']}")
 
@@ -1254,7 +1298,7 @@ def get_context_summary(scope: str = "full") -> str:
                 "SELECT summary, pending_items, created_at FROM session_handoffs ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
             if handoff:
-                sections.append(f"\n## 🔄 上次 Session 交接（{handoff['created_at']}）")
+                sections.append(f"\n## 上次 Session 交接（{handoff['created_at']}）")
                 sections.append(handoff["summary"])
 
             # 進行中的訂單（含下一步提示）
@@ -1265,8 +1309,8 @@ def get_context_summary(scope: str = "full") -> str:
                    ORDER BY o.created_at DESC LIMIT 10"""
             ).fetchall()
             if active_orders:
-                sections.append(f"\n## 📦 進行中訂單（{len(active_orders)} 筆）")
-                status_icon = {"pending": "⏳", "confirmed": "✅", "shipped": "🚚", "delivered": "📦"}
+                sections.append(f"\n## 進行中訂單（{len(active_orders)} 筆）")
+                status_icon = {"pending": "[待處理]", "confirmed": "[已確認]", "shipped": "[已出貨]", "delivered": "[已送達]"}
                 for o in active_orders:
                     hint = ""
                     if o["status"] == "pending":
@@ -1290,7 +1334,7 @@ def get_context_summary(scope: str = "full") -> str:
             overdue_count = db.execute("SELECT COUNT(*) as c FROM transactions WHERE payment_status = 'overdue'").fetchone()["c"]
             if overdue_count:
                 overdue_total = db.execute("SELECT COALESCE(SUM(amount - paid_amount), 0) as s FROM transactions WHERE payment_status = 'overdue'").fetchone()["s"]
-                sections.append(f"\n## 🔴 逾期帳款：{overdue_count} 筆，合計 NT${overdue_total:,.0f}")
+                sections.append(f"\n## 逾期帳款：{overdue_count} 筆，合計 NT${overdue_total:,.0f}")
 
             # 統計
             stats = {
@@ -1299,13 +1343,13 @@ def get_context_summary(scope: str = "full") -> str:
                 "供應商": db.execute("SELECT COUNT(*) as c FROM customers WHERE type='supplier'").fetchone()["c"],
                 "庫存品項": db.execute("SELECT COUNT(*) as c FROM inventory").fetchone()["c"],
             }
-            sections.append(f"\n## 📊 數據統計")
+            sections.append(f"\n## 數據統計")
             sections.append(" | ".join(f"{k}: {v}" for k, v in stats.items()))
 
             # 昨日快照趨勢比較
             yesterday = db.execute("SELECT * FROM daily_snapshots ORDER BY snapshot_date DESC LIMIT 1").fetchone()
             if yesterday:
-                sections.append(f"\n## 📈 趨勢（vs {yesterday['snapshot_date']}）")
+                sections.append(f"\n## 趨勢（vs {yesterday['snapshot_date']}）")
                 current_pending = db.execute("SELECT COUNT(*) as c FROM tasks WHERE status IN ('pending','in_progress')").fetchone()["c"]
                 delta_tasks = current_pending - yesterday["pending_tasks"]
                 delta_str = f"+{delta_tasks}" if delta_tasks > 0 else str(delta_tasks)
@@ -1326,7 +1370,7 @@ def get_context_summary(scope: str = "full") -> str:
             if month == 5:
                 reminders.append("5 月：營所稅 + 綜所稅申報")
             if reminders:
-                sections.append("\n## 📅 日期提醒")
+                sections.append("\n## 日期提醒")
                 for r in reminders:
                     sections.append(f"- {r}")
 
@@ -1338,11 +1382,11 @@ def get_context_summary(scope: str = "full") -> str:
                 "GROUP BY channel_id", (month_start,),
             ).fetchall()
             if push_counts:
-                sections.append("\n## 📨 LINE 推送額度（免費方案 200 則/月）")
+                sections.append("\n## LINE 推送額度（免費方案 200 則/月）")
                 for pc in push_counts:
                     used = pc["cnt"]
                     pct = used / 200 * 100
-                    tag = " 🔴 超限" if pct >= 100 else " ⚠️ 接近上限" if pct >= 80 else ""
+                    tag = " 超限" if pct >= 100 else " 注意：接近上限" if pct >= 80 else ""
                     sections.append(f"- {pc['channel_id']}: {used}/200 ({pct:.0f}%){tag}")
 
         if not sections:
@@ -1378,7 +1422,7 @@ def log_interaction(
             (actor, action, target_type or None, target_id or None, detail or None, business_unit or None),
         )
         db.commit()
-        return f"✅ 已記錄：{actor} → {action}"
+        return f"已記錄：{actor} → {action}"
     finally:
         db.close()
 
@@ -1456,9 +1500,9 @@ def log_decision(
         )
 
         db.commit()
-        msg = f"✅ 已記錄決策 #{new_id}（{src_type}）：{title}"
+        msg = f"已記錄決策 #{new_id}（{src_type}）：{title}"
         if src_type == "inferred":
-            msg += "\n   ⚠️ 沒附 source_quote、標 inferred；建議下次補老闆原話"
+            msg += "\n   注意：沒附 source_quote、標 inferred；建議下次補老闆原話"
         if superseded:
             msg += f"\n   廢棄：{', '.join(superseded)}"
         if linked:
@@ -1520,9 +1564,9 @@ def create_task(
             (created_by or "system", "task_created", "task", task_id, title, business_unit or None),
         )
         db.commit()
-        pri_icon = {"urgent": "🔴", "normal": "🟡", "low": "🟢"}[priority]
+        pri_icon = {"urgent": "[急]", "normal": "[普通]", "low": "[低]"}[priority]
         bu_warn = _validate_business_unit(db, business_unit)
-        return f"✅ 任務 #{task_id} 已建立 {pri_icon} {title}" + (f" → {assignee}" if assignee else "") + bu_warn
+        return f"任務 #{task_id} 已建立 {pri_icon} {title}" + (f" → {assignee}" if assignee else "") + bu_warn
     finally:
         db.close()
 
@@ -1583,7 +1627,7 @@ def update_task(
             ("system", "task_updated", "task", task_id, f"更新: {', '.join(updates)}", task["business_unit"]),
         )
         db.commit()
-        return f"✅ 任務 #{task_id} 已更新"
+        return f"任務 #{task_id} 已更新"
     finally:
         db.close()
 
@@ -1626,15 +1670,15 @@ def list_tasks(status: str = "", assignee: str = "", category: str = "", busines
         if not tasks:
             return "沒有符合條件的任務。"
 
-        lines = [f"## 📝 任務列表（{len(tasks)} 項）"]
+        lines = [f"## 任務列表（{len(tasks)} 項）"]
         for t in tasks:
-            status_icon = {"pending": "⏳", "in_progress": "🔄", "done": "✅", "cancelled": "❌"}.get(t["status"], "")
-            pri = {"urgent": "🔴", "normal": "", "low": "🟢"}.get(t["priority"], "")
+            status_icon = {"pending": "[待處理]", "in_progress": "[進行中]", "done": "[已完成]", "cancelled": "[已取消]"}.get(t["status"], "")
+            pri = {"urgent": "[急]", "normal": "[普通]", "low": "[低]"}.get(t["priority"], "")
             due = f" 截止:{t['due_date']}" if t["due_date"] else ""
             parent = f" (子任務 of #{t['parent_task_id']})" if t["parent_task_id"] else ""
             # 查子任務數量
             sub_count = db.execute("SELECT COUNT(*) as c FROM tasks WHERE parent_task_id = ?", (t["id"],)).fetchone()["c"]
-            subs = f" 📂{sub_count}子任務" if sub_count > 0 else ""
+            subs = f"{sub_count}子任務" if sub_count > 0 else ""
             lines.append(f"- {status_icon}{pri} [#{t['id']}] {t['title']} → {t['assignee'] or '未指派'}{due}{parent}{subs}")
         return "\n".join(lines)
     finally:
@@ -1658,11 +1702,63 @@ def search_tasks(query: str) -> str:
         ).fetchall()
         if not tasks:
             return f"找不到與「{query}」相關的任務。"
-        lines = [f"## 🔍 搜尋結果：「{query}」"]
+        lines = [f"## 搜尋結果：「{query}」"]
         for t in tasks:
-            status_icon = {"pending": "⏳", "in_progress": "🔄", "done": "✅", "cancelled": "❌"}.get(t["status"], "")
+            status_icon = {"pending": "[待處理]", "in_progress": "[進行中]", "done": "[已完成]", "cancelled": "[已取消]"}.get(t["status"], "")
             lines.append(f"- {status_icon} [#{t['id']}] {t['title']} → {t['assignee'] or '未指派'}")
         return "\n".join(lines)
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def get_task(task_id: int) -> str:
+    """查看單筆任務完整資訊（含 description 全文、父子任務）。
+
+    Args:
+        task_id: 任務 ID
+    """
+    db = get_db()
+    try:
+        t = db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if not t:
+            return f"ERROR: 找不到任務 #{task_id}"
+
+        status_zh = {"pending": "待處理", "in_progress": "進行中", "done": "已完成", "cancelled": "已取消"}.get(t["status"], t["status"])
+        priority_zh = {"urgent": "急", "normal": "普通", "low": "低"}.get(t["priority"], t["priority"] or "普通")
+
+        parent_str = ""
+        if t["parent_task_id"]:
+            parent = db.execute("SELECT title FROM tasks WHERE id = ?", (t["parent_task_id"],)).fetchone()
+            parent_str = f"\n- 父任務：[#{t['parent_task_id']}] {parent['title'] if parent else '（已刪除）'}"
+
+        subs = db.execute(
+            "SELECT id, title, status FROM tasks WHERE parent_task_id = ? ORDER BY id",
+            (task_id,),
+        ).fetchall()
+        subs_str = ""
+        if subs:
+            sub_lines = []
+            for s in subs:
+                sub_status_zh = {"pending": "待處理", "in_progress": "進行中", "done": "已完成", "cancelled": "已取消"}.get(s["status"], s["status"])
+                sub_lines.append(f"  - [{sub_status_zh}] [#{s['id']}] {s['title']}")
+            subs_str = f"\n- 子任務（{len(subs)} 項）：\n" + "\n".join(sub_lines)
+
+        return (
+            f"## 任務 #{task_id}：{t['title']}\n"
+            f"- 狀態：{status_zh}（{t['status']}）\n"
+            f"- 優先級：{priority_zh}\n"
+            f"- 指派：{t['assignee'] or '未指派'}\n"
+            f"- 截止：{t['due_date'] or '未設定'}\n"
+            f"- 分類：{t['category'] or '無'}\n"
+            f"- 標籤：{t['tags'] or '無'}\n"
+            f"- 事業體：{t['business_unit'] or '全域'}\n"
+            f"- 建立者：{t['created_by'] or '未知'} @ {t['created_at']}\n"
+            f"- 完成時間：{t['completed_at'] or '未完成'}"
+            f"{parent_str}"
+            f"{subs_str}\n"
+            f"\n### 描述\n{t['description'] or '（無）'}"
+        )
     finally:
         db.close()
 
@@ -1705,7 +1801,7 @@ def register_employee(
         )
         db.commit()
         bu_label = f" 事業體:{business_units}" if business_units else ""
-        return f"✅ 員工 #{emp_id} {name} 已註冊（{role}/{permissions}）{bu_label}" + (f" LINE已綁定" if line_user_id else "")
+        return f"員工 #{emp_id} {name} 已註冊（{role}/{permissions}）{bu_label}" + (f" LINE已綁定" if line_user_id else "")
     except sqlite3.IntegrityError as e:
         if "line_user_id" in str(e):
             return f"ERROR: 此 LINE 帳號已被其他員工綁定"
@@ -1787,7 +1883,7 @@ def update_employee(
             ("system", "employee_updated", "employee", employee_id, f"更新：{changed}", None),
         )
         db.commit()
-        return f"✅ 員工 #{employee_id} 已更新（{changed}）"
+        return f"員工 #{employee_id} 已更新（{changed}）"
     except sqlite3.IntegrityError as e:
         return f"ERROR: {e}"
     finally:
@@ -1811,7 +1907,7 @@ def lookup_employee(name_or_line_id: str) -> str:
             return f"找不到員工：{name_or_line_id}"
         bu = emp['business_units'] if emp['business_units'] else '全部'
         return (
-            f"## 👤 {emp['name']}\n"
+            f"## {emp['name']}\n"
             f"- 角色：{emp['role']} | 權限：{emp['permissions']}\n"
             f"- 部門：{emp['department'] or '未設定'}\n"
             f"- 事業體：{bu}\n"
@@ -1839,9 +1935,9 @@ def list_employees(active_only: bool = True) -> str:
         emps = db.execute(query).fetchall()
         if not emps:
             return "目前沒有員工資料。"
-        lines = [f"## 👥 員工名冊（{len(emps)} 人）"]
+        lines = [f"## 員工名冊（{len(emps)} 人）"]
         for e in emps:
-            line_status = "📱" if e["line_user_id"] else "❌"
+            line_status = "[已綁定]" if e["line_user_id"] else "[未綁定]"
             bu = f" [{e['business_units']}]" if e["business_units"] else ""
             lines.append(f"- [#{e['id']}] **{e['name']}** ({e['role']}/{e['permissions']}) {e['department'] or ''}{bu} {line_status}")
         return "\n".join(lines)
@@ -1970,7 +2066,7 @@ def register_line_group(
             )
             db.commit()
             purpose_label = f" — {purpose}" if purpose else ""
-            return f"✅ 群組已更新：{group_name or group_id}（{group_type}）{purpose_label}"
+            return f"群組已更新：{group_name or group_id}（{group_type}）{purpose_label}"
         else:
             db.execute(
                 "INSERT INTO line_groups (group_id, group_name, group_type, channel_id, purpose, notes) "
@@ -1979,7 +2075,7 @@ def register_line_group(
             )
             db.commit()
             purpose_label = f" — {purpose}" if purpose else ""
-            return f"✅ 群組已註冊：{group_name or group_id}（{group_type}）{purpose_label}"
+            return f"群組已註冊：{group_name or group_id}（{group_type}）{purpose_label}"
     finally:
         db.close()
 
@@ -2011,16 +2107,16 @@ def list_line_groups(group_type: str = "", channel_id: str = "") -> str:
         if not rows:
             return "目前沒有已註冊的 LINE 群組。"
 
-        type_icon = {"work": "💼", "customer": "👤", "supplier": "🏭", "marketing": "📢", "other": "💬"}
+        type_icon = {"work": "[工作]", "customer": "[客戶]", "supplier": "[供應商]", "marketing": "[行銷]", "other": "[其他]"}
         lines = [f"## LINE 群組（{len(rows)} 個）\n"]
         for g in rows:
-            icon = type_icon.get(g["group_type"], "💬")
+            icon = type_icon.get(g["group_type"], "[其他]")
             name = g["group_name"] or g["group_id"][:12]
             lines.append(f"- {icon} **{name}** ({g['group_type']}) — chat_id={g['group_id']}")
             if g["purpose"]:
-                lines.append(f"  🎯 功能：{g['purpose']}")
+                lines.append(f"  功能：{g['purpose']}")
             if g["notes"]:
-                lines.append(f"  📝 備註：{g['notes']}")
+                lines.append(f"  備註：{g['notes']}")
         return "\n".join(lines)
     finally:
         db.close()
@@ -2078,7 +2174,7 @@ def add_customer(
         )
         db.commit()
         bu_label = f" [{primary_business_unit}]" if primary_business_unit else ""
-        return f"✅ 客戶 #{cust_id} {name}{bu_label} 已建立（{payment_terms}）" + (f" LINE已綁定" if line_user_id else "") + bu_warn
+        return f"客戶 #{cust_id} {name}{bu_label} 已建立（{payment_terms}）" + (f" LINE已綁定" if line_user_id else "") + bu_warn
     finally:
         db.close()
 
@@ -2115,32 +2211,83 @@ def find_customer(query: str, type: str = "") -> str:
             ).fetchall()
         if not customers:
             return f"找不到與「{query}」相關的{'客戶' if not type else type}。"
-        type_icon = {"customer": "👤", "supplier": "🏭", "distributor": "🚚"}
-        stage_icon = {"prospect": "🔵", "contacted": "🟡", "negotiating": "🟠", "closed_won": "🟢", "closed_lost": "🔴"}
+        type_icon = {"customer": "[客戶]", "supplier": "[供應商]", "distributor": "[經銷商]"}
+        stage_icon = {"prospect": "[潛在]", "contacted": "[已接觸]", "negotiating": "[談判中]", "closed_won": "[已成交]", "closed_lost": "[已流失]"}
         lines = [f"## 搜尋結果：「{query}」"]
         for c in customers:
-            icon = type_icon.get(c['type'], '👤')
+            icon = type_icon.get(c['type'], '[客戶]')
             stage = ""
             if c['pipeline_stage'] and c['pipeline_stage'] != 'none':
-                s_icon = stage_icon.get(c['pipeline_stage'], '')
-                stage = f" {s_icon}{c['pipeline_stage']}"
-            terms_str = f" 📄{c['payment_terms']}" if c['payment_terms'] and c['payment_terms'] != 'net30' else ""
-            discount_str = f" 🏷️{c['discount_rate']*100:.0f}%off" if c['discount_rate'] and c['discount_rate'] > 0 else ""
+                stage = f" {stage_icon.get(c['pipeline_stage'], c['pipeline_stage'])}"
+            terms_str = f"{c['payment_terms']}" if c['payment_terms'] and c['payment_terms'] != 'net30' else ""
+            discount_str = f"{c['discount_rate']*100:.0f}%off" if c['discount_rate'] and c['discount_rate'] > 0 else ""
             # v4: primary_business_unit 顯示
             bu_label = f" [{c['primary_business_unit']}]" if c['primary_business_unit'] else ""
             # v4: 優先顯示 total_fulfilled（已認列營收），fallback 到舊欄位 total_purchases
             sales_fig = c['total_fulfilled'] or c['total_purchases'] or 0
-            sales_label = f" 💰{sales_fig:,.0f}" if sales_fig else ""
+            sales_label = f"{sales_fig:,.0f}" if sales_fig else ""
             # 顯示最近日期（出貨日優先）
             last_date = c['last_fulfilled_date'] or c['last_purchase_date']
-            date_label = f" 📅{last_date}" if last_date else ""
+            date_label = f"{last_date}" if last_date else ""
             lines.append(
-                f"- {icon} [#{c['id']}] **{c['name']}**{bu_label} ({c['type']}){stage} {c['phone'] or ''}"
+                f"- {icon} [#{c['id']}] **{c['name']}**{bu_label}{stage} {c['phone'] or ''}"
                 f"{sales_label}{date_label}"
                 f"{terms_str}{discount_str} "
                 f"{c['tags'] or ''}"
             )
         return "\n".join(lines)
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def get_customer(customer_id: int) -> str:
+    """查看單筆客戶／供應商／經銷商完整資訊（含各事業體條件、累計銷售）。
+
+    Args:
+        customer_id: 客戶 ID
+    """
+    db = get_db()
+    try:
+        c = db.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+        if not c:
+            return f"ERROR: 找不到客戶 #{customer_id}"
+
+        type_zh = {"customer": "客戶", "supplier": "供應商", "distributor": "經銷商"}.get(c["type"], "客戶")
+        stage_zh = {"prospect": "潛在", "contacted": "已接觸", "negotiating": "談判中", "closed_won": "已成交", "closed_lost": "已流失", "none": "未設定"}.get(c["pipeline_stage"], c["pipeline_stage"] or "未設定")
+        bu_label = f"（{c['primary_business_unit']}）" if c["primary_business_unit"] else ""
+
+        terms = db.execute(
+            "SELECT business_unit, discount_rate, payment_terms FROM customer_entity_terms WHERE customer_id = ?",
+            (customer_id,),
+        ).fetchall()
+        terms_str = ""
+        if terms:
+            term_lines = [
+                f"  - {t['business_unit']}：折扣 {(t['discount_rate'] or 0)*100:.0f}% / 付款條件 {t['payment_terms'] or '預設'}"
+                for t in terms
+            ]
+            terms_str = "\n- 各事業體條件：\n" + "\n".join(term_lines)
+
+        payment_str = f" / 付款條件 {c['payment_terms']}" if c["payment_terms"] else ""
+
+        return (
+            f"## {type_zh} #{customer_id}：{c['name']}{bu_label}\n"
+            f"- 類型：{type_zh}（{c['type']}）\n"
+            f"- 階段：{stage_zh}\n"
+            f"- 電話：{c['phone'] or '無'}\n"
+            f"- Email：{c['email'] or '無'}\n"
+            f"- LINE：{c['line_user_id'] or '未綁定'}\n"
+            f"- 標籤：{c['tags'] or '無'}\n"
+            f"- 預設條件：折扣 {(c['discount_rate'] or 0)*100:.0f}%{payment_str}"
+            f"{terms_str}\n"
+            f"- 累計購買：NT${c['total_purchases'] or 0:,.0f} / 訂購 NT${c['total_ordered'] or 0:,.0f} / 已付 NT${c['total_paid'] or 0:,.0f}\n"
+            f"- 最後購買：{c['last_purchase_date'] or '無'}\n"
+            f"- 最後訂單：{c['last_order_date'] or '無'}\n"
+            f"- 最後付款：{c['last_payment_date'] or '無'}\n"
+            f"- 建立：{c['created_at']}\n"
+            f"\n### 備註\n{c['notes'] or '（無）'}"
+        )
     finally:
         db.close()
 
@@ -2230,7 +2377,7 @@ def update_customer(
             ("system", "customer_updated", "customer", customer_id, f"更新 {cust['name']}：{changed}", None),
         )
         db.commit()
-        return f"✅ 客戶 #{customer_id} 已更新"
+        return f"客戶 #{customer_id} 已更新"
     finally:
         db.close()
 
@@ -2280,7 +2427,7 @@ def set_customer_entity_terms(
                 ("system", "customer_terms_updated", "customer", customer_id, detail, business_unit),
             )
             db.commit()
-            return f"✅ 已更新 {cust['name']} 在 {business_unit} 的條件"
+            return f"已更新 {cust['name']} 在 {business_unit} 的條件"
         else:
             dr = discount_rate if discount_rate >= 0 else 0
             pt = payment_terms or "net30"
@@ -2294,7 +2441,7 @@ def set_customer_entity_terms(
                  f"設定 {cust['name']} 在 {business_unit} 條件：折扣 {dr*100:.0f}%，付款 {pt}", business_unit),
             )
             db.commit()
-            return f"✅ 已設定 {cust['name']} 在 {business_unit} 的條件：折扣 {dr*100:.0f}%，付款 {pt}"
+            return f"已設定 {cust['name']} 在 {business_unit} 的條件：折扣 {dr*100:.0f}%，付款 {pt}"
     finally:
         db.close()
 
@@ -2342,8 +2489,8 @@ def register_partner(
         )
         db.commit()
         bu_label = f" [BU: {business_units}]" if business_units else ""
-        line_label = " 📱" if line_user_id else ""
-        return f"✅ 外包夥伴 #{pid} {name}{bu_label}{line_label} 已註冊（{role or '未指定職責'}）"
+        line_label = "" if line_user_id else ""
+        return f"外包夥伴 #{pid} {name}{bu_label}{line_label} 已註冊（{role or '未指定職責'}）"
     finally:
         db.close()
 
@@ -2409,7 +2556,7 @@ def update_partner(
              f"更新 {p['name']}：{changed}", None),
         )
         db.commit()
-        return f"✅ 外包夥伴 #{partner_id} 已更新（{changed}）"
+        return f"外包夥伴 #{partner_id} 已更新（{changed}）"
     finally:
         db.close()
 
@@ -2441,10 +2588,10 @@ def list_partners(active_only: bool = True, role: str = "", business_unit: str =
         ).fetchall()
         if not rows:
             return "目前沒有符合條件的外包夥伴。"
-        lines = [f"## 🤝 外包夥伴（{len(rows)} 位）"]
+        lines = [f"## 外包夥伴（{len(rows)} 位）"]
         for p in rows:
-            status = "" if p["active"] else " ⚠️ 停用"
-            line_label = " 📱" if p["line_user_id"] else " ❌"
+            status = "" if p["active"] else " 注意：停用"
+            line_label = "" if p["line_user_id"] else " [未綁定]"
             bu_label = f" [{p['business_units']}]" if p["business_units"] else ""
             terms_label = f" | {p['payment_terms']}" if p["payment_terms"] else ""
             lines.append(
@@ -2474,9 +2621,9 @@ def find_partner(query: str) -> str:
         ).fetchall()
         if not rows:
             return f"找不到符合「{query}」的外包夥伴。"
-        lines = [f"## 🔍 外包夥伴搜尋：「{query}」"]
+        lines = [f"## 外包夥伴搜尋：「{query}」"]
         for p in rows:
-            status = "" if p["active"] else " ⚠️ 停用"
+            status = "" if p["active"] else " 注意：停用"
             line_label = f" LINE:{p['line_user_id'][:8]}..." if p["line_user_id"] else ""
             bu_label = f" [{p['business_units']}]" if p["business_units"] else ""
             lines.append(
@@ -2486,6 +2633,35 @@ def find_partner(query: str) -> str:
             if p["notes"]:
                 lines.append(f"  備註：{p['notes'][:100]}")
         return "\n".join(lines)
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def get_partner(partner_id: int) -> str:
+    """查看單筆外部夥伴（員工以外、配送／倉管／合作方等）完整資訊。
+
+    Args:
+        partner_id: 夥伴 ID
+    """
+    db = get_db()
+    try:
+        p = db.execute("SELECT * FROM external_partners WHERE id = ?", (partner_id,)).fetchone()
+        if not p:
+            return f"ERROR: 找不到夥伴 #{partner_id}"
+        active_str = "啟用" if p["active"] else "停用"
+        return (
+            f"## 夥伴 #{partner_id}：{p['name']}\n"
+            f"- 角色：{p['role'] or '未設定'}\n"
+            f"- 狀態：{active_str}\n"
+            f"- 電話：{p['phone'] or '無'}\n"
+            f"- Email：{p['email'] or '無'}\n"
+            f"- LINE：{p['line_user_id'] or '未綁定'}\n"
+            f"- 服務事業體：{p['business_units'] or '全部'}\n"
+            f"- 付款條件：{p['payment_terms'] or '無'}\n"
+            f"- 建立：{p['created_at']}\n"
+            f"\n### 備註\n{p['notes'] or '（無）'}"
+        )
     finally:
         db.close()
 
@@ -2517,14 +2693,14 @@ def check_stock(sku_or_name: str, business_unit: str = "") -> str:
             available = item["current_stock"] - reserved
             alert = ""
             if item["current_stock"] <= item["min_stock"] and item["min_stock"] > 0:
-                alert = " ⚠️ 實體庫存低於安全庫存！"
+                alert = " 注意：實體庫存低於安全庫存！"
             elif available <= item["min_stock"] and item["min_stock"] > 0:
-                alert = " ⚠️ 可用量低於安全庫存（已有預留佔用）"
+                alert = " 注意：可用量低於安全庫存（已有預留佔用）"
             cross_bu = ""
             if business_unit and item["business_unit"] and item["business_unit"] != business_unit:
-                cross_bu = f"\n- ⚠️ 注意：此品項屬於事業體 {item['business_unit']}，非 {business_unit}"
+                cross_bu = f"\n- 注意：注意：此品項屬於事業體 {item['business_unit']}，非 {business_unit}"
             return (
-                f"## 📦 {item['name']} [{item['sku']}]{bu_label}\n"
+                f"## {item['name']} [{item['sku']}]{bu_label}\n"
                 f"- 庫存：{item['current_stock']}{item['unit']}（預留 {reserved}，可用 {available}）{alert}\n"
                 f"- 安全庫存：{item['min_stock']}{item['unit']}\n"
                 f"- 成本：{item['unit_cost'] or '?'} | 售價：{item['sell_price'] or '?'}\n"
@@ -2547,12 +2723,12 @@ def check_stock(sku_or_name: str, business_unit: str = "") -> str:
             ).fetchall()
         if not items:
             return f"找不到庫存品項：{sku_or_name}" + (f"（事業體：{business_unit}）" if business_unit else "")
-        lines = [f"## 🔍 庫存搜尋：「{sku_or_name}」" + (f"（{business_unit}）" if business_unit else "")]
+        lines = [f"## 庫存搜尋：「{sku_or_name}」" + (f"（{business_unit}）" if business_unit else "")]
         for i in items:
             bu_label = f" [{i['business_unit']}]" if i["business_unit"] else ""
             reserved = i["reserved"] or 0
             available = i["current_stock"] - reserved
-            alert = " ⚠️" if i["current_stock"] <= i["min_stock"] and i["min_stock"] > 0 else ""
+            alert = "" if i["current_stock"] <= i["min_stock"] and i["min_stock"] > 0 else ""
             reserved_label = f"（預留 {reserved}，可用 {available}）" if reserved else ""
             lines.append(f"- [{i['sku']}] {i['name']}{bu_label}: {i['current_stock']}{i['unit']}{reserved_label}{alert}")
         return "\n".join(lines)
@@ -2641,7 +2817,7 @@ def update_stock(
                     f"description='進貨 {item_name} {quantity_change}{item_unit}') — 需確認進貨金額",
                 ])
             bu_warn = _validate_business_unit(db, business_unit)
-            return f"✅ 新建品項 [{sku}] {name or sku}，初始庫存 {quantity_change}{unit or '個'}" + new_item_guidance + bu_warn
+            return f"新建品項 [{sku}] {name or sku}，初始庫存 {quantity_change}{unit or '個'}" + new_item_guidance + bu_warn
 
         new_stock = item["current_stock"] + quantity_change
         if new_stock < 0:
@@ -2679,7 +2855,7 @@ def update_stock(
 
         alert = ""
         if new_stock <= item["min_stock"] and item["min_stock"] > 0:
-            alert = f"\n⚠️ 庫存警報：{item['name']} 剩 {new_stock}{item['unit']}，低於安全庫存 {item['min_stock']}"
+            alert = f"\n注意：庫存警報：{item['name']} 剩 {new_stock}{item['unit']}，低於安全庫存 {item['min_stock']}"
 
         guidance = ""
         if quantity_change > 0:
@@ -2696,7 +2872,7 @@ def update_stock(
                     f"description='進貨 {item['name']} {quantity_change}{item['unit']}') — 需確認進貨金額",
                 ])
 
-        return f"✅ [{sku}] {item['name']}: {item['current_stock']} → {new_stock}{item['unit']}" + alert + guidance
+        return f"[{sku}] {item['name']}: {item['current_stock']} → {new_stock}{item['unit']}" + alert + guidance
     finally:
         db.close()
 
@@ -2720,13 +2896,13 @@ def low_stock_alerts(business_unit: str = "") -> str:
                 "SELECT sku, name, current_stock, min_stock, unit, location, business_unit FROM inventory WHERE current_stock <= min_stock AND min_stock > 0 ORDER BY (current_stock * 1.0 / min_stock)",
             ).fetchall()
         if not items:
-            return "✅ 所有品項庫存正常，無警報。" + (f"（{business_unit}）" if business_unit else "")
-        header = f"## ⚠️ 庫存警報（{len(items)} 項）" + (f"（{business_unit}）" if business_unit else "")
+            return "所有品項庫存正常，無警報。" + (f"（{business_unit}）" if business_unit else "")
+        header = f"## 庫存警報（{len(items)} 項）" + (f"（{business_unit}）" if business_unit else "")
         lines = [header]
         for i in items:
             pct = round(i["current_stock"] / i["min_stock"] * 100) if i["min_stock"] else 0
             bu_label = f" [{i['business_unit']}]" if i["business_unit"] and not business_unit else ""
-            lines.append(f"- 🔴 [{i['sku']}] {i['name']}{bu_label}: {i['current_stock']}/{i['min_stock']}{i['unit']} ({pct}%) {i['location'] or ''}")
+            lines.append(f"- [{i['sku']}] {i['name']}{bu_label}: {i['current_stock']}/{i['min_stock']}{i['unit']} ({pct}%) {i['location'] or ''}")
         return "\n".join(lines)
     finally:
         db.close()
@@ -2766,7 +2942,7 @@ def create_approval(
         db.commit()
         bu_label = f"\n事業體：{business_unit}" if business_unit else ""
         bu_warn = _validate_business_unit(db, business_unit)
-        return f"✅ 審核請求 #{approval_id} 已建立\n類型：{type}{bu_label}\n摘要：{summary}\n等待審核中（72 小時內有效）。請透過 LINE 通知主管。" + bu_warn
+        return f"審核請求 #{approval_id} 已建立\n類型：{type}{bu_label}\n摘要：{summary}\n等待審核中（72 小時內有效）。請透過 LINE 通知主管。" + bu_warn
     finally:
         db.close()
 
@@ -2814,7 +2990,7 @@ def resolve_approval(approval_id: int, decision: str, decided_by: str) -> str:
              approval["business_unit"]),
         )
         db.commit()
-        icon = "✅" if decision == "approved" else "❌"
+        icon = "[核准]" if decision == "approved" else "[駁回]"
         decision_label = "核准" if decision == "approved" else "駁回"
         msg = f"{icon} 審核 #{approval_id} 已{decision_label}（{decided_by}）"
         msg += f"\n類型：{approval['type']}\n摘要：{approval['summary']}"
@@ -2915,7 +3091,7 @@ def record_transaction(
             }, ensure_ascii=False)
             bu_param = f", business_unit={business_unit!r}" if business_unit else ""
             return (
-                f"⚠️ 金額 NT${amount:,.0f} 超過審核門檻 NT${threshold:,.0f}。"
+                f"注意：金額 NT${amount:,.0f} 超過審核門檻 NT${threshold:,.0f}。"
                 + _build_guidance(next_steps=[
                     f"create_approval(type={type!r}, summary='{type} NT${amount:,.0f} [{category}]', detail='{detail_json}'{bu_param})",
                     "LINE 通知主管審核",
@@ -2943,9 +3119,9 @@ def record_transaction(
         )
         db.commit()
 
-        icon = "💰" if type == "income" else "💸"
+        icon = "[收入]" if type == "income" else "[支出]"
         status_label = {"paid": "已付", "pending": "待收付", "overdue": "逾期"}.get(payment_status, "")
-        base_msg = f"✅ {icon} 帳目 #{txn_id}：{type} NT${amount:,.0f} [{category}] {status_label} {transaction_date}"
+        base_msg = f"{icon} 帳目 #{txn_id}：{type} NT${amount:,.0f} [{category}] {status_label} {transaction_date}"
 
         guidance = ""
         if related_order_id and type == "income" and payment_status == "paid":
@@ -3039,16 +3215,16 @@ def list_transactions(
         total_expense = sum(r["amount"] for r in rows if r["type"] == "expense")
 
         date_label = f"{start_date} ~ {end_date}" if has_date_filter else "全部"
-        lines = [f"## 💹 收支記錄（{date_label}，共 {len(rows)} 筆）"]
+        lines = [f"## 收支記錄（{date_label}，共 {len(rows)} 筆）"]
         lines.append(f"收入合計: NT${total_income:,.0f} | 支出合計: NT${total_expense:,.0f} | 淨額: NT${total_income - total_expense:,.0f}\n")
 
         for r in rows:
-            icon = "💰" if r["type"] == "income" else "💸"
+            icon = "[收入]" if r["type"] == "income" else "[支出]"
             status_tag = ""
             if r["payment_status"] == "pending":
-                status_tag = f" ⏳待收付(已收{r['paid_amount']:,.0f})"
+                status_tag = f" [待收付](已收{r['paid_amount']:,.0f})"
             elif r["payment_status"] == "overdue":
-                status_tag = f" 🔴逾期(已收{r['paid_amount']:,.0f})"
+                status_tag = f" [逾期](已收{r['paid_amount']:,.0f})"
             order_tag = f" 訂單#{r['related_order_id']}" if r["related_order_id"] else ""
             bu_tag = f" [{r['business_unit']}]" if r["business_unit"] and not business_unit else ""
             lines.append(f"- {icon} [#{r['id']}] {r['transaction_date']} NT${r['amount']:,.0f} [{r['category'] or '?'}]{bu_tag}{status_tag}{order_tag} {r['description'] or ''}")
@@ -3095,16 +3271,16 @@ def monthly_summary(year_month: str = "", business_unit: str = "") -> str:
         total_expense = sum(r["total"] for r in expense_rows)
 
         bu_label = f"（{business_unit}）" if business_unit else ""
-        lines = [f"## 📊 {year_month} 月度收支彙總{bu_label}"]
+        lines = [f"## {year_month} 月度收支彙總{bu_label}"]
         lines.append(f"**收入**: NT${total_income:,.0f} | **支出**: NT${total_expense:,.0f} | **淨額**: NT${total_income - total_expense:,.0f}\n")
 
         if income_rows:
-            lines.append("### 💰 收入明細")
+            lines.append("### 收入明細")
             for r in income_rows:
                 lines.append(f"- [{r['category'] or '未分類'}] NT${r['total']:,.0f}（{r['count']} 筆）")
 
         if expense_rows:
-            lines.append("\n### 💸 支出明細")
+            lines.append("\n### 支出明細")
             for r in expense_rows:
                 lines.append(f"- [{r['category'] or '未分類'}] NT${r['total']:,.0f}（{r['count']} 筆）")
 
@@ -3119,7 +3295,7 @@ def monthly_summary(year_month: str = "", business_unit: str = "") -> str:
                 (f"{year_month}%",),
             ).fetchall()
             if bu_rows:
-                lines.append("\n### 📂 事業體分類")
+                lines.append("\n### 事業體分類")
                 bus = {}
                 for r in bu_rows:
                     bu = r["business_unit"]
@@ -3141,6 +3317,63 @@ def monthly_summary(year_month: str = "", business_unit: str = "") -> str:
                     lines.append(f"- **未歸類**: 收入 NT${ua_income:,.0f} / 支出 NT${ua_expense:,.0f} / 淨額 NT${ua_income - ua_expense:,.0f}")
 
         return "\n".join(lines)
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def get_transaction(transaction_id: int) -> str:
+    """查看單筆帳目完整資訊（含關聯客戶／訂單／發票、付款狀態）。
+
+    Args:
+        transaction_id: 帳目 ID
+    """
+    db = get_db()
+    try:
+        t = db.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
+        if not t:
+            return f"ERROR: 找不到帳目 #{transaction_id}"
+
+        type_zh = {"income": "收入", "expense": "支出"}.get(t["type"], "帳目")
+        # H2 標題用 description 摘要當 title；無 description 則 fallback 成 "{類型} NT${金額} [{分類}]"
+        if t["description"]:
+            summary = t["description"][:30] + ("…" if len(t["description"]) > 30 else "")
+        else:
+            summary = f"{type_zh} NT${t['amount'] or 0:,.0f} [{t['category'] or '未分類'}]"
+
+        related_customer = ""
+        if t["related_customer_id"]:
+            cust = db.execute("SELECT name FROM customers WHERE id = ?", (t["related_customer_id"],)).fetchone()
+            related_customer = f"\n- 關聯客戶：[#{t['related_customer_id']}] {cust['name'] if cust else '（已刪除）'}"
+
+        related_order = f"\n- 關聯訂單：#{t['related_order_id']}" if t["related_order_id"] else ""
+        related_invoice = f"\n- 關聯發票：{t['related_invoice']}" if t["related_invoice"] else ""
+
+        outstanding = (t["amount"] or 0) - (t["paid_amount"] or 0)
+        payment_str = ""
+        if t["payment_status"]:
+            status_zh = {"paid": "已付清", "pending": "待付", "overdue": "逾期"}.get(t["payment_status"], t["payment_status"])
+            due_str = f" / 到期：{t['due_date']}" if t["due_date"] else ""
+            payment_str = (
+                f"\n- 付款狀態：{status_zh}（{t['payment_status']}）"
+                f"\n- 已付：NT${t['paid_amount'] or 0:,.0f} / 未付：NT${outstanding:,.0f}{due_str}"
+            )
+
+        return (
+            f"## 帳目 #{transaction_id}：{summary}\n"
+            f"- 類型：{type_zh}（{t['type']}）\n"
+            f"- 金額：NT${t['amount'] or 0:,.0f}\n"
+            f"- 分類：{t['category'] or '未分類'}\n"
+            f"- 事業體：{t['business_unit'] or '全域'}\n"
+            f"- 交易日：{t['transaction_date'] or '未設定'}"
+            f"{payment_str}"
+            f"{related_customer}"
+            f"{related_order}"
+            f"{related_invoice}\n"
+            f"- 記錄人：{t['recorded_by'] or '未知'}\n"
+            f"- 建立：{t['created_at']}\n"
+            f"\n### 描述\n{t['description'] or '（無）'}"
+        )
     finally:
         db.close()
 
@@ -3173,7 +3406,7 @@ def delete_transaction(transaction_id: int, reason: str, actor_user_id: str = ""
              f"刪除 {txn['type']} NT${txn['amount']:,.0f} [{txn['category']}]，原因：{reason}", txn["business_unit"]),
         )
         db.commit()
-        return f"✅ 帳目 #{transaction_id} 已刪除（原因：{reason}）"
+        return f"帳目 #{transaction_id} 已刪除（原因：{reason}）"
     finally:
         db.close()
 
@@ -3255,7 +3488,7 @@ def update_transaction(
             ("system", "transaction_updated", "transaction", transaction_id, " | ".join(detail_parts), txn["business_unit"]),
         )
         db.commit()
-        return f"✅ 帳目 #{transaction_id} 已更新（{', '.join(detail_parts)}）"
+        return f"帳目 #{transaction_id} 已更新（{', '.join(detail_parts)}）"
     finally:
         db.close()
 
@@ -3304,7 +3537,7 @@ def add_attachment(
             (target_type, target_id, file_path, file_type, file_name, description or None, uploaded_by or None),
         )
         db.commit()
-        return f"✅ 附件 #{cursor.lastrowid} 已新增 → {target_type} #{target_id}（{file_name}）"
+        return f"附件 #{cursor.lastrowid} 已新增 → {target_type} #{target_id}（{file_name}）"
     finally:
         db.close()
 
@@ -3327,10 +3560,10 @@ def list_attachments(target_type: str, target_id: int) -> str:
         if not attachments:
             return f"{target_type} #{target_id} 沒有附件。"
 
-        type_icon = {"image": "🖼️", "pdf": "📄", "document": "📝", "spreadsheet": "📊", "video": "🎬", "audio": "🎵", "other": "📎"}
-        lines = [f"## 📎 {target_type} #{target_id} 的附件（{len(attachments)} 個）"]
+        type_icon = {"image": "[圖]", "pdf": "[PDF]", "document": "[文件]", "spreadsheet": "[試算]", "video": "[影片]", "audio": "[音訊]", "other": "[其他]"}
+        lines = [f"## {target_type} #{target_id} 的附件（{len(attachments)} 個）"]
         for a in attachments:
-            icon = type_icon.get(a["file_type"], "📎")
+            icon = type_icon.get(a["file_type"], "[其他]")
             lines.append(f"- {icon} [#{a['id']}] {a['file_name']} — {a['description'] or '無說明'}")
             lines.append(f"  路徑：{a['file_path']}")
         return "\n".join(lines)
@@ -3372,12 +3605,12 @@ def check_overdue(business_unit: str = "") -> str:
             ).fetchall()
 
         if not overdue:
-            return "✅ 目前沒有逾期帳款。" + (f"（{business_unit}）" if business_unit else "")
+            return "目前沒有逾期帳款。" + (f"（{business_unit}）" if business_unit else "")
 
         total_receivable = sum(r["amount"] - r["paid_amount"] for r in overdue if r["type"] == "income")
         total_payable = sum(r["amount"] - r["paid_amount"] for r in overdue if r["type"] == "expense")
 
-        header = f"## 🔴 逾期帳款（{len(overdue)} 筆）" + (f"（{business_unit}）" if business_unit else "")
+        header = f"## 逾期帳款（{len(overdue)} 筆）" + (f"（{business_unit}）" if business_unit else "")
         lines = [header]
         if total_receivable > 0:
             lines.append(f"\n### 應收未收：NT${total_receivable:,.0f}")
@@ -3475,9 +3708,9 @@ def record_payment(transaction_id: int, amount: float, notes: str = "", actor_us
             ])
 
         if new_status == "paid":
-            return f"✅ 帳目 #{transaction_id} 已全額付清（NT${txn['amount']:,.0f}）" + guidance
+            return f"帳目 #{transaction_id} 已全額付清（NT${txn['amount']:,.0f}）" + guidance
         else:
-            return f"✅ 帳目 #{transaction_id} 已收到 NT${amount:,.0f}，剩餘 NT${remaining:,.0f}" + guidance
+            return f"帳目 #{transaction_id} 已收到 NT${amount:,.0f}，剩餘 NT${remaining:,.0f}" + guidance
     finally:
         db.close()
 
@@ -3542,7 +3775,7 @@ def create_order(customer_id: int, items_json: str, notes: str = "", business_un
             }, ensure_ascii=False)
             discount_note = f"（已含折扣 {discount*100:.0f}%）" if discount > 0 else ""
             return (
-                f"⚠️ 訂單金額 NT${total:,.0f}{discount_note} 超過審核門檻 NT${threshold:,.0f}，需先核准。\n"
+                f"注意：訂單金額 NT${total:,.0f}{discount_note} 超過審核門檻 NT${threshold:,.0f}，需先核准。\n"
                 f"客戶：{customer['name']}\n品項：\n{items_str}"
                 + _build_guidance(next_steps=[
                     f"create_approval(type='purchase', summary='建立訂單：{customer['name']} NT${total:,.0f}', detail='{detail_json}')",
@@ -3596,7 +3829,7 @@ def create_order(customer_id: int, items_json: str, notes: str = "", business_un
         db.commit()
 
         items_str = "\n".join(f"  - {i.get('name', i.get('sku', '?'))} × {i.get('qty', 0)} @ NT${i.get('price', 0):,.0f}" for i in items)
-        base_msg = f"✅ 訂單 #{order_id} 已建立\n客戶：{customer['name']}\n金額：NT${total:,.0f}\n品項：\n{items_str}"
+        base_msg = f"訂單 #{order_id} 已建立\n客戶：{customer['name']}\n金額：NT${total:,.0f}\n品項：\n{items_str}"
 
         # 建構下一步指引
         terms = terms_info["payment_terms"]
@@ -3663,16 +3896,16 @@ def get_order(order_id: int) -> str:
         customer = db.execute("SELECT name FROM customers WHERE id = ?", (order["customer_id"],)).fetchone()
         customer_name = customer["name"] if customer else "未知"
 
-        status_icon = {"pending": "⏳", "confirmed": "✅", "shipped": "🚚", "delivered": "📦", "paid": "💰", "cancelled": "❌", "returned": "↩️"}.get(order["status"], "")
+        status_icon = {"pending": "[待處理]", "confirmed": "[已確認]", "shipped": "[已出貨]", "delivered": "[已送達]", "paid": "[已付清]", "cancelled": "[已取消]", "returned": "[已退貨]"}.get(order["status"], "")
 
         items = _parse_items_json(order["items"])
         items_str = "\n".join(f"  - {i.get('name', i.get('sku', '?'))} × {i.get('qty', 0)} @ NT${i.get('price', 0):,.0f}" for i in items)
 
         qc_info = ""
         if order["qc_status"] != "pending":
-            qc_icon = {"passed": "✅", "failed": "❌", "partial": "⚠️"}.get(order["qc_status"], "")
+            qc_icon = {"passed": "[合格]", "failed": "[不合格]", "partial": "[部分合格]"}.get(order["qc_status"], "")
             qc_info = (
-                f"\n- 🔍 QC：{qc_icon} {order['qc_status']}"
+                f"\n- QC：{qc_icon} {order['qc_status']}"
                 f"{' — ' + order['qc_notes'] if order['qc_notes'] else ''}"
                 f"{' by ' + order['qc_checked_by'] if order['qc_checked_by'] else ''}"
             )
@@ -3680,7 +3913,7 @@ def get_order(order_id: int) -> str:
         logistics = ""
         if order["driver"] or order["estimated_delivery"] or order["delivered_at"]:
             logistics = (
-                f"\n- 🚛 物流：\n"
+                f"\n- 物流：\n"
                 f"  - 司機：{order['driver'] or '未指派'}\n"
                 f"  - 預計送達：{order['estimated_delivery'] or '未設定'}\n"
                 f"  - 實際送達：{order['delivered_at'] or '尚未送達'}"
@@ -3775,7 +4008,7 @@ def update_order(order_id: int, status: str = "", notes: str = "", driver: str =
             ("system", "order_updated", "order", order_id, " | ".join(detail_parts) or "備註更新", order["business_unit"]),
         )
         db.commit()
-        return f"✅ 訂單 #{order_id} 已更新" + (f"（{', '.join(detail_parts)}）" if detail_parts else "")
+        return f"訂單 #{order_id} 已更新" + (f"（{', '.join(detail_parts)}）" if detail_parts else "")
     finally:
         db.close()
 
@@ -3810,8 +4043,8 @@ def list_orders(customer_id: int = 0, status: str = "", business_unit: str = "",
         if not orders:
             return "沒有符合條件的訂單。"
 
-        status_icon = {"pending": "⏳", "confirmed": "✅", "shipped": "🚚", "delivered": "📦", "paid": "💰", "cancelled": "❌", "returned": "↩️"}
-        lines = [f"## 📋 訂單列表（{len(orders)} 筆）"]
+        status_icon = {"pending": "[待處理]", "confirmed": "[已確認]", "shipped": "[已出貨]", "delivered": "[已送達]", "paid": "[已付清]", "cancelled": "[已取消]", "returned": "[已退貨]"}
+        lines = [f"## 訂單列表（{len(orders)} 筆）"]
         for o in orders:
             icon = status_icon.get(o["status"], "")
             lines.append(f"- {icon} [#{o['id']}] {o['customer_name'] or '?'} | NT${o['total_amount']:,.0f} | {o['status']} | {o['created_at'][:10]}")
@@ -3853,12 +4086,12 @@ def qc_order(order_id: int, result: str, notes: str = "", checked_by: str = "") 
         )
         db.commit()
 
-        icon = {"passed": "✅", "failed": "❌", "partial": "⚠️"}[result]
+        icon = {"passed": "[合格]", "failed": "[不合格]", "partial": "[部分合格]"}[result]
         # 顯示前次 QC 紀錄（如有）
         prev_qc = ""
         if order["qc_status"] != "pending":
-            prev_icon = {"passed": "✅", "failed": "❌", "partial": "⚠️"}.get(order["qc_status"], "")
-            prev_qc = f"\n📋 前次 QC：{prev_icon} {order['qc_status']}"
+            prev_icon = {"passed": "[合格]", "failed": "[不合格]", "partial": "[部分合格]"}.get(order["qc_status"], "")
+            prev_qc = f"\n前次 QC：{prev_icon} {order['qc_status']}"
             if order["qc_notes"]:
                 prev_qc += f"（{order['qc_notes']}）"
             if order["qc_checked_by"]:
@@ -3912,7 +4145,7 @@ def fulfill_order(order_id: int, partial_items_json: str = "") -> str:
                     return f"ERROR: 訂單 #{order_id} 所有品項都已出貨完畢。"
                 items_hint = json.dumps(unshipped, ensure_ascii=False)
                 return (
-                    f"⚠️ 訂單 #{order_id} 已部分出貨，需指定本次要補出的品項。\n"
+                    f"注意：訂單 #{order_id} 已部分出貨，需指定本次要補出的品項。\n"
                     f"fulfill_order(order_id={order_id}, partial_items_json='...')\n"
                     f"未出貨品項：{items_hint}"
                 )
@@ -3922,7 +4155,7 @@ def fulfill_order(order_id: int, partial_items_json: str = "") -> str:
                 items_list = _parse_items_json(order["items"])
                 items_hint = json.dumps([{"sku": i.get("sku", ""), "qty": i.get("qty", 0)} for i in items_list], ensure_ascii=False)
                 return (
-                    f"⚠️ 訂單 #{order_id} QC 狀態為 partial（部分合格）。\n"
+                    f"注意：訂單 #{order_id} QC 狀態為部分合格（partial）。\n"
                     f"請指定要出貨的品項：fulfill_order(order_id={order_id}, partial_items_json='[{{\"sku\":\"...\",\"qty\":...}}, ...]')\n"
                     f"原始品項參考：{items_hint}\n"
                     f"QC 備註：{order['qc_notes'] or '無'}"
@@ -4007,7 +4240,7 @@ def fulfill_order(order_id: int, partial_items_json: str = "") -> str:
                 deductions.append((inv["id"], sku, qty, inv["name"]))
 
         if errors:
-            return "❌ 無法出貨，庫存不足：\n" + "\n".join(f"- {e}" for e in errors)
+            return "無法出貨，庫存不足：\n" + "\n".join(f"- {e}" for e in errors)
 
         # 扣庫存（用 inventory.id 精確扣減，避免跨事業體誤扣）
         # v4: Bug #4 — 同步扣減 reserved（釋放在 create_order 時做的預留）
@@ -4124,7 +4357,7 @@ def fulfill_order(order_id: int, partial_items_json: str = "") -> str:
         guidance = _build_guidance(auto_done=auto_done, next_steps=next_steps, warnings=warnings)
 
         return (
-            f"✅ 訂單 #{order_id} 已出貨{partial_label}\n"
+            f"訂單 #{order_id} 已出貨{partial_label}\n"
             f"庫存扣減：\n{deduct_str}\n"
             f"應收帳款：NT${receivable:,.0f}（{terms}）"
             + guidance
@@ -4265,7 +4498,7 @@ def cancel_order(order_id: int, reason: str, cancel_type: str = "cancelled", act
 
         guidance = _build_guidance(auto_done=auto_done, next_steps=next_steps, warnings=warnings or None)
         label = "退貨" if cancel_type == "returned" else "取消"
-        return f"✅ 訂單 #{order_id} 已{label}\n原因：{reason}" + guidance
+        return f"訂單 #{order_id} 已{label}\n原因：{reason}" + guidance
     finally:
         db.close()
 
@@ -4355,7 +4588,7 @@ def save_daily_snapshot() -> str:
         db.commit()
         if not saved:
             return f"今天（{today}）的快照已全部存在，跳過。"
-        msg = f"✅ {today} 快照已儲存（{', '.join(saved)}）"
+        msg = f"{today} 快照已儲存（{', '.join(saved)}）"
         if skipped:
             msg += f"，已存在跳過（{', '.join(skipped)}）"
         return msg
@@ -4417,7 +4650,7 @@ def update_company(
                  approval_threshold if approval_threshold >= 0 else 5000),
             )
             db.commit()
-            return f"✅ 公司資訊已建立：{name or '未設定'}"
+            return f"公司資訊已建立：{name or '未設定'}"
 
         updates = []
         params = []
@@ -4448,7 +4681,7 @@ def update_company(
                      updates, params, "id = 1", [])
         db.commit()
         changed = ", ".join(u.split(" = ")[0] for u in updates)
-        return f"✅ 公司資訊已更新（{changed}）"
+        return f"公司資訊已更新（{changed}）"
     finally:
         db.close()
 
@@ -4489,7 +4722,7 @@ def register_business_entity(
                          {"name", "channel_id", "approval_threshold", "notes"},
                          updates, params, "id = ?", [entity_id])
             db.commit()
-            return f"✅ 事業體 {entity_id} ({name}) 已更新"
+            return f"事業體 {entity_id} ({name}) 已更新"
         else:
             db.execute(
                 "INSERT INTO business_entities (id, name, channel_id, approval_threshold, notes) VALUES (?,?,?,?,?)",
@@ -4498,7 +4731,7 @@ def register_business_entity(
                  notes or None),
             )
             db.commit()
-            return f"✅ 事業體 {entity_id} ({name}) 已登錄"
+            return f"事業體 {entity_id} ({name}) 已登錄"
     finally:
         db.close()
 
@@ -4541,7 +4774,7 @@ def save_session_handoff(session_id: str, summary: str, pending_items: str = "[]
             (session_id, summary, pending_items),
         )
         db.commit()
-        return f"✅ Session 交接已儲存（{session_id[:8]}...）"
+        return f"Session 交接已儲存（{session_id[:8]}...）"
     finally:
         db.close()
 
