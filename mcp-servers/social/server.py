@@ -264,10 +264,13 @@ def ig_get_insights() -> dict:
 
 @mcp.tool()
 def ig_get_post_insights(media_id: str) -> dict:
-    """取得 Instagram 單篇貼文的洞察數據。"""
-    return _ig_request("GET", f"{media_id}/insights", {
-        "metric": "reach,likes,comments,shares,saved"
-    })
+    """取得 Instagram 單篇貼文的洞察數據。自動偵測 reel 並加撈觀看/留存指標。"""
+    info = _ig_request("GET", media_id, {"fields": "media_product_type"})
+    if info.get("media_product_type") == "REELS":
+        metrics = "reach,ig_reels_avg_watch_time,ig_reels_video_view_total_time,likes,comments,shares,saved,total_interactions"
+    else:
+        metrics = "reach,likes,comments,shares,saved"
+    return _ig_request("GET", f"{media_id}/insights", {"metric": metrics})
 
 # --- 發文類（暫時停用）---
 
