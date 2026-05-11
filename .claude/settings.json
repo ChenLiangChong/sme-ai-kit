@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"⚠️ DB 寫入檢查（每則訊息必過一次）：\\n• 規則/SOP/政策/限制 → mcp__business-db__store_fact (必帶 source_quote=老闆原話；可選 related_rule_ids 關聯既有規則)\\n• 設定值（顏色/字體/URL/文案）→ mcp__business-db__store_fact (category='settings', title=key)；查用 get_setting(key)\\n• 交辦/承諾/截止日/「明天」「下週」「記得做」→ mcp__business-db__create_task\\n• 為什麼這樣做的決策 → mcp__business-db__log_decision (附 reason；可選 supersedes_rule_ids / related_rule_ids)\\n• 客戶聯絡/偏好/特殊條件 → mcp__business-db__update_customer 或 set_customer_entity_terms\\n• 庫存異動 → mcp__business-db__update_stock\\n• 收支金額 → mcp__business-db__record_transaction\\n回「好的我會記住」「我知道了」不算寫入。必須真的呼叫對應 tool。不確定要不要存就主動問使用者，不要私下省略。\"}}'"
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"⚠️ DB 寫入檢查（每則訊息必過一次）：\\n• 寫前必查：query_knowledge(關鍵字) / get_rule(id) 找同主題；命中 → 跟使用者討論 → 補充走 update_rule、不要 silently 再開新規則\\n• 規則/SOP/政策/限制 → mcp__business-db__store_fact (必帶 source_quote=老闆原話；可選 related_rule_ids 關聯既有規則)\\n• 設定值（顏色/字體/URL/文案）→ mcp__business-db__store_fact (category='settings', title=key)；查用 get_setting(key)\\n• 交辦/承諾/截止日/「明天」「下週」「記得做」→ mcp__business-db__create_task\\n• 為什麼這樣做的決策 → mcp__business-db__log_decision (附 reason；可選 supersedes_rule_ids / related_rule_ids)\\n• 客戶聯絡/偏好/特殊條件 → mcp__business-db__update_customer 或 set_customer_entity_terms\\n• 庫存異動 → mcp__business-db__update_stock\\n• 收支金額 → mcp__business-db__record_transaction\\n回「好的我會記住」「我知道了」不算寫入。必須真的呼叫對應 tool。不確定要不要存就主動問使用者，不要私下省略。\"}}'"
           }
         ]
       },

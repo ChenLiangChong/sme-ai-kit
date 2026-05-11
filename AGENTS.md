@@ -69,6 +69,16 @@
 - 你推斷的規則標記為 `source_type='inferred'`
 - **絕對不可把推斷偽裝成老闆的指示**
 
+## 知識庫寫入規則
+
+寫入規則 / SOP / 設定前 agent 必須走這個 flow（**不靠 tool enforce、靠 agent 自律**）：
+
+1. **先查** — 用 `query_knowledge(主題關鍵字)` 看 active rules 有沒有同主題的
+2. **跟使用者討論** — 找到候選就列出來、問是「補充既有 rule #X」還是「真的另開新條」
+3. **才動作** — 補充走 `update_rule(rule_id, 新內容, reason)` / 確認是新主題才 `store_fact`
+
+**不要 silently 直接 `store_fact`**、之後產生重複規則靠人工合併。如果只憑一句指令不確定該補哪條既有的、主動問使用者。
+
 ## HITL 審核
 
 以下操作必須先 `create_approval` 再執行：
