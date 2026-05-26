@@ -28,6 +28,20 @@
 register_employee(name, role, department, permissions, phone)
 ```
 
+### 假期配額分配（選用 — 公司有正式請假制度時）
+
+`register_employee` 成功後、若 `leave_types` 表已有資料（公司有登記假別）：
+
+1. 詢問老闆：「{員工} 到職日是 {日期}，要怎麼配年度配額？」
+2. 常用算法：
+   - 1/1 到職 → 給全年配額（如特休 14 天）
+   - 年中到職 → 按比例（剩餘月數 / 12 × 全年配額）四捨五入
+3. 逐一 `set_leave_balance(employee_id, leave_type_code, year, allocated_days)` 配每一種假別
+
+若 `leave_types` 表是空的（公司還沒走 knowledge-capture Step 2a），跳過此步、提示老闆「之後若要管請假、可走 leave-ops 設定」。
+
+> 詳細請假流程見 **`leave-ops.md`**。
+
 ---
 
 ## 二、LINE 綁定
@@ -99,6 +113,7 @@ create_task(
 ### Day 1：基礎
 
 - [x] 帳號建立 + LINE 綁定
+- [ ] （選用）分配年度假期配額（`leave_types` 已登記時）
 - [ ] 發送歡迎訊息
 - [ ] 建立訓練任務
 - [ ] 介紹基本 LINE 指令
@@ -142,7 +157,8 @@ create_task(
    )
    ```
 6. **記錄** → `store_fact(category='hr', title='離職記錄-{姓名}', content='離職日期：{日期}，原因：{原因}，已轉移任務、解綁LINE、停用帳號')`
-7. **回報完成**
+7. **leave_balances 保留**：不要刪該員工的 `leave_balances` row（用於離職結算 / 補薪計算）。`leave_requests` 在員工被刪時透過 `ON DELETE SET NULL` 保留紀錄，所以離職用 `active=0` 而非 DELETE 就足夠
+8. **回報完成**
 
 ### 知識轉移
 

@@ -28,10 +28,11 @@ if '<channel source="line"' in prompt:
                 '🚨 LINE 訊息進來、回覆前必走完整路由（不准跳）：\n'
                 '1. lookup_employee(user_id) — 是員工嗎？\n'
                 '2. find_customer(user_id) — 是客戶 / 供應商 / 經銷商嗎？\n'
-                '3. 都不是 → 暱稱比對；仍沒命中 = 陌生人\n'
-                '4. 陌生人原則：不直接回覆、依意圖路由通知對應負責人\n'
-                '5. 對外行銷訊息 → 必先 create_approval HITL 審核\n'
-                '6. 每則訊息必有結局：reply / reply_flex / mark_read\n'
+                '3. find_partner(user_id) — 是外包夥伴嗎？\n'
+                '4. 都不是 → 暱稱比對 lookup_employee / find_partner；仍沒命中 = 陌生人\n'
+                '5. 陌生人原則：不直接回覆、依意圖路由通知對應負責人\n'
+                '6. 對外行銷訊息 → 必先 create_approval HITL 審核\n'
+                '7. 每則訊息必有結局：reply / reply_flex / mark_read\n'
                 '完整流程：.claude/skills/company-ops/references/line-comms.md'
             )
         }

@@ -75,7 +75,7 @@ parent_id = extract_id(server.create_task(
     priority="urgent",
     category="meeting",
     tags="ig-launch,test",
-    business_unit="dreamwalkr",
+    business_unit="brand_x",
     due_date="2026-06-01",
     created_by="charlie",
 ))
@@ -91,7 +91,7 @@ out = server.get_task(parent_id)
 check("description 全文出現", "這是父任務的完整描述" in out and "第二行內容" in out, out)
 check("title 在 H2", f"任務 #{parent_id}" in out and "父任務 A" in out)
 check("tags 顯示", "ig-launch,test" in out)
-check("business_unit 顯示", "dreamwalkr" in out)
+check("business_unit 顯示", "brand_x" in out)
 check("子任務區塊出現", f"#{child_id}" in out and "子任務 B" in out, out)
 check("priority=urgent 顯示『急』", "急" in out, out[:300])
 check("status 顯示中文+英文", "待處理" in out and "pending" in out, out[:300])
@@ -119,7 +119,7 @@ cust_id = extract_id(server.add_customer(
     notes="這是備註全文、要被 get_customer 完整撈出",
     discount_rate=0.1,
     payment_terms="net30",
-    primary_business_unit="dreamwalkr",
+    primary_business_unit="brand_x",
 ))
 
 # 加一筆 entity_terms
@@ -132,7 +132,7 @@ server.set_customer_entity_terms(
 
 out = server.get_customer(cust_id)
 check("notes 全文出現", "這是備註全文" in out, out)
-check("name + 主事業體", "測試客戶 Alpha" in out and "dreamwalkr" in out)
+check("name + 主事業體", "測試客戶 Alpha" in out and "brand_x" in out)
 check("customer H2 顯示『客戶』", f"客戶 #{cust_id}" in out, out[:200])
 check("預設折扣 10%", "折扣 10%" in out, out)
 check("entity_terms brand_d 折扣 15%", "brand_d" in out and "15%" in out, out)
@@ -175,7 +175,7 @@ partner_id = extract_id(server.register_partner(
     role="影片後製",
     phone="0911000888",
     notes="長期合作、固定報酬",
-    business_units="dreamwalkr",
+    business_units="brand_x",
 ))
 
 out = server.get_partner(partner_id)
@@ -200,7 +200,7 @@ txn_id = extract_id(server.record_transaction(
     category="sales_revenue",
     description="客戶 Alpha 訂金、含特殊條款",
     related_customer_id=cust_id,
-    business_unit="dreamwalkr",
+    business_unit="brand_x",
     payment_status="pending",
     due_date="2026-06-30",
     recorded_by="charlie",

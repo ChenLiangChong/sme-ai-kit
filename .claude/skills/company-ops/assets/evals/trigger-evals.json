@@ -1,0 +1,143 @@
+[
+  {
+    "id": "trigger-01-stock",
+    "query": "倉庫的 A 商品還剩幾個？",
+    "should_trigger": true,
+    "category": "inventory"
+  },
+  {
+    "id": "trigger-02-record",
+    "query": "今天買咖啡花 350 元、幫我記一下帳",
+    "should_trigger": true,
+    "category": "accounting"
+  },
+  {
+    "id": "trigger-03-leave",
+    "query": "員工小李想請下週三的特休、可以嗎？",
+    "should_trigger": true,
+    "category": "leave"
+  },
+  {
+    "id": "trigger-04-approve",
+    "query": "核准 #42",
+    "should_trigger": true,
+    "category": "hitl"
+  },
+  {
+    "id": "trigger-05-dashboard",
+    "query": "今天有什麼事？",
+    "should_trigger": true,
+    "category": "dashboard"
+  },
+  {
+    "id": "trigger-06-order",
+    "query": "下週三 KFC 客戶下單 100 個 B 產品、麻煩開單",
+    "should_trigger": true,
+    "category": "order"
+  },
+  {
+    "id": "trigger-07-rule",
+    "query": "幫我記一下：以後超過 5 萬的單一定要先簽核",
+    "should_trigger": true,
+    "category": "knowledge"
+  },
+  {
+    "id": "trigger-08-onboarding",
+    "query": "新員工 Sam 今天到職、要綁 LINE",
+    "should_trigger": true,
+    "category": "onboarding"
+  },
+  {
+    "id": "trigger-09-overdue",
+    "query": "張董那邊的尾款還沒收吧？逾期多久？",
+    "should_trigger": true,
+    "category": "accounting-ar"
+  },
+  {
+    "id": "trigger-10-line-line",
+    "query": "<channel source=\"line\" chat_id=\"Uxxx\" user=\"客戶\" channel_id=\"brand_a\" business_unit=\"brand_a\">想下單 50 個</channel>",
+    "should_trigger": true,
+    "category": "line-channel"
+  },
+  {
+    "id": "trigger-11-monthly",
+    "query": "這個月收支多少？brand_a 業績呢？",
+    "should_trigger": true,
+    "category": "monthly-summary"
+  },
+  {
+    "id": "trigger-12-broadcast",
+    "query": "幫我寫一封給所有客戶的中秋節祝福訊息、要走 LINE 廣播",
+    "should_trigger": true,
+    "category": "broadcast"
+  },
+
+  {
+    "id": "non-01-code",
+    "query": "幫我寫一段 Python 把 csv 排序",
+    "should_trigger": false,
+    "category": "pure-coding"
+  },
+  {
+    "id": "non-02-design",
+    "query": "做一份 competitive battlecard 給老闆看",
+    "should_trigger": false,
+    "category": "should-be-sme-design",
+    "expected_skill": "sme-design"
+  },
+  {
+    "id": "non-03-social",
+    "query": "我 IG 上週貼文觸及怎樣？",
+    "should_trigger": false,
+    "category": "should-be-social-media",
+    "expected_skill": "social-media"
+  },
+  {
+    "id": "non-04-skill-edit",
+    "query": "幫我改一下 SKILL.md 的 description",
+    "should_trigger": false,
+    "category": "should-be-skill-creator-advanced",
+    "expected_skill": "skill-creator-advanced"
+  },
+  {
+    "id": "non-05-prototype",
+    "query": "做一個 iOS app prototype HTML",
+    "should_trigger": false,
+    "category": "should-be-huashu-design",
+    "expected_skill": "huashu-design"
+  },
+  {
+    "id": "non-06-ui-component",
+    "query": "design a glassmorphism modal in React",
+    "should_trigger": false,
+    "category": "should-be-ui-ux-pro-max",
+    "expected_skill": "ui-ux-pro-max"
+  },
+  {
+    "id": "non-07-pdf",
+    "query": "把這份 PDF 拆成 5 個檔",
+    "should_trigger": false,
+    "category": "should-be-pdf",
+    "expected_skill": "pdf"
+  },
+  {
+    "id": "non-08-excel",
+    "query": "Excel VLOOKUP 怎麼寫",
+    "should_trigger": false,
+    "category": "should-be-xlsx",
+    "expected_skill": "xlsx"
+  },
+  {
+    "id": "non-09-conversation",
+    "query": "你是誰？",
+    "should_trigger": false,
+    "category": "meta"
+  },
+  {
+    "id": "non-10-yt",
+    "query": "幫我把這 YT 影片轉逐字稿",
+    "should_trigger": false,
+    "category": "should-be-yt-transcribe",
+    "expected_skill": "yt-transcribe"
+  }
+]

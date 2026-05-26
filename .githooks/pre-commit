@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# pre-commit hook: 確保 CLAUDE.md 與 AGENTS.md 永遠同步。
+# 安裝方式（在 repo root 跑一次）：
+#   git config core.hooksPath .githooks
+#
+# 設計重點（codex audit 修法）：
+# - 用 staged index（git diff --cached / git show :PATH）判斷，不依賴 working tree
+# - 處理 add / modify / delete / rename 全情境
+# - AGENTS.md 不存在時 `git show :CLAUDE.md > AGENTS.md` 會自動建立
+
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+CLAUDE_FILE="$ROOT/CLAUDE.md"
+AGENTS_FILE="$ROOT/AGENTS.md"
+
+# 取得指定檔在 staged index 中的狀態（A/M/D/R/RENAMED_AWAY/空）
+# A=新增 M=修改 D=刪除 R=被 rename 進來（新名）RENAMED_AWAY=被 rename 出去（舊名）
+get_staged_status() {
+    local file="$1"
+    git diff --cached --name-status 2>/dev/null | awk -v f="$file" '
+        $1 ~ /^[AMD]$/ && $2 == f { print $1; exit }
+        $1 ~ /^R/ && $3 == f { print "R"; exit }
+        $1 ~ /^R/ && $2 == f { print "RENAMED_AWAY"; exit }
+        $1 ~ /^C/ && $3 == f { print "A"; exit }
+    '
+}
+
+abort() {
+    echo "[錯誤] $1" >&2
+    exit 1
+}
+
+CLAUDE_STATUS=$(get_staged_status "CLAUDE.md")
+AGENTS_STATUS=$(get_staged_status "AGENTS.md")
+
+# 情境 A：兩檔都沒進這次 commit
+# → 提醒目前本地是否漂移、但不擋
+if [ -z "$CLAUDE_STATUS" ] && [ -z "$AGENTS_STATUS" ]; then
+    if [ -f "$CLAUDE_FILE" ] && [ -f "$AGENTS_FILE" ] \
+       && ! diff -q "$CLAUDE_FILE" "$AGENTS_FILE" >/dev/null 2>&1; then
+        echo "[警告] CLAUDE.md 與 AGENTS.md 內容不一致（非本次 commit 範圍）" >&2
+        echo "       下次改 CLAUDE.md 並 commit 時會自動修正。" >&2
+    fi
+    exit 0
+fi
+
+# 情境 B：兩檔同時刪除 → 放行（整個指令文件解散）
+if [ "$CLAUDE_STATUS" = "D" ] && [ "$AGENTS_STATUS" = "D" ]; then
+    exit 0
+fi
+
+# 情境 C：單檔刪除（其中一個 D、另一個沒動或修改）→ 擋
+if [ "$CLAUDE_STATUS" = "D" ] && [ "$AGENTS_STATUS" != "D" ]; then
+    abort "CLAUDE.md 被刪除但 AGENTS.md 沒刪。要刪一起刪、要留一起留。"
+fi
+if [ "$AGENTS_STATUS" = "D" ] && [ "$CLAUDE_STATUS" != "D" ]; then
+    abort "AGENTS.md 被刪除但 CLAUDE.md 沒刪。要刪一起刪、要留一起留。"
+fi
+
+# 情境 D：CLAUDE.md 被 rename 走（不再叫 CLAUDE.md）→ 擋
+if [ "$CLAUDE_STATUS" = "RENAMED_AWAY" ]; then
+    abort "CLAUDE.md 被 rename 成別的檔名。請保留 CLAUDE.md 不要改名、否則跨工具兼容失效。"
+fi
+
+# 情境 D'：AGENTS.md 被 rename 走 → 擋（不管 CLAUDE.md 同時是否有變動）
+if [ "$AGENTS_STATUS" = "RENAMED_AWAY" ]; then
+    abort "AGENTS.md 被 rename 成別的檔名。AGENTS.md 是 CLAUDE.md 的鏡像、檔名固定、不可 rename。"
+fi
+
+# 情境 E：只 staged AGENTS.md 但 CLAUDE.md 沒進這次 commit
+# → 擋（AGENTS.md 是鏡像、必須透過 CLAUDE.md 修改）
+if [ -z "$CLAUDE_STATUS" ] && [ -n "$AGENTS_STATUS" ]; then
+    abort "AGENTS.md 是 CLAUDE.md 的鏡像、不該獨立修改。請改 CLAUDE.md 並 commit、hook 會自動同步。"
+fi
+
+# 情境 F：CLAUDE.md 是 A / M / R（rename 進來）→ 用 staged 版本鏡像到 AGENTS.md
+case "$CLAUDE_STATUS" in
+    A|M|R)
+        # 從 git index 取 staged 版本內容、寫到 working tree、再 stage
+        # AGENTS.md 不存在時 redirect 會自動建檔
+        if ! git show ":CLAUDE.md" > "$AGENTS_FILE" 2>/dev/null; then
+            abort "無法從 staged index 讀取 CLAUDE.md 內容"
+        fi
+        git add "$AGENTS_FILE"
+        echo "[同步] AGENTS.md 已自動同步自 staged CLAUDE.md"
+        ;;
+esac
+
+exit 0

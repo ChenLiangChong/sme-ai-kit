@@ -126,7 +126,7 @@
 
 1. 選定目標客群
 2. 草擬訊息 → 參考 brand-voice 模組
-3. **必須送審**：`create_approval(type='announcement', summary=訊息摘要)`
+3. **必須送審**：`create_approval(type='announcement', summary=訊息摘要, detail='{"resume_action": "manual_broadcast", "resume_params": {"audience": "客群描述", "channel": "line", "text": "完整訊息內容"}, "note": "核准後人工執行：先撈客群 LINE user_id 清單、逐一 reply、最後 log_interaction（非單一 tool call）", "then": "發送後逐一 log_interaction"}')`
 4. 主管核准後發送
 5. 記錄發送時間，更新客戶的最後聯繫日
 
@@ -245,7 +245,7 @@ NPS = 推薦者% - 批評者%
 ### Do
 - 客戶資料異動都 `log_interaction`
 - 行銷訊息先過 brand-voice 再發
-- 群發前 `create_approval(type='announcement', summary=訊息摘要)` 送審
+- 群發前 `create_approval(type='announcement', summary=訊息摘要, detail='{"resume_action": "manual_broadcast", "resume_params": {"audience": "...", "channel": "line", "text": "..."}, "note": "核准後人工執行：先撈客群 LINE user_id 清單、逐一 reply、最後 log_interaction（非單一 tool call）", "then": "..."}')` 送審
 - 遵守頻率限制：同一客戶每月推送不超過 2 次
 - 客訴立即回覆（5 分鐘內），先同理再處理
 
@@ -270,7 +270,7 @@ NPS = 推薦者% - 批評者%
 1. `reply(channel_id='default', chat_id=客戶chat_id, text='收到您的反映，我們非常重視，正在處理中。')`
 2. `log_interaction(actor='AI助理', action='complaint', detail=客訴內容)`
 3. `query_knowledge(question=問題描述, category='customer_service')` — 查處理規則
-4. 依規則處理或 `create_approval(type='refund', summary=退款摘要)` — 超出權限建審核
+4. 依規則處理或 `create_approval(type='refund', summary=退款摘要, detail='{"resume_action": "record_transaction", "resume_params": {"type": "expense", "amount": 退款金額, "category": "refund", "description": "退款給{客戶}"}, "then": "退款後 LINE 通知客戶"}')` — 超出權限建審核
 
 ## 中斷恢復
 

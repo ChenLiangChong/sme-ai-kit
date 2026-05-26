@@ -16,11 +16,23 @@
 1. 查審核門檻：`record_transaction` 內建門檻攔截（讀 `company` 表的 `approval_threshold`），超過會自動拒絕記帳
 2. AI 應**主動先判斷**，超過門檻先 `create_approval`，不要等 record_transaction 擋
 3. 門檻設定：`update_company(approval_threshold=金額)`
-4. 超過門檻 → `create_approval(type='purchase', summary='...', business_unit=事業體)` → 等核准 → `record_transaction`
+4. 超過門檻 → 建審核時 `detail` **必須**含完整 `resume_params` 給核准後執行用：
+   ```
+   create_approval(
+     type='purchase',
+     summary='採購碳粉匣 12,000 元',
+     detail='{"resume_action": "record_transaction", "resume_params": {"type": "expense", "amount": 12000, "category": "supplies", "description": "碳粉匣"}, "then": "記帳完成後通知採購人員"}',
+     business_unit=事業體,
+   )
+   ```
+   → 等核准 → 從 approval 取 `resume_params` 呼叫 `record_transaction(...)`
 5. 門檻內 → 直接 `record_transaction`
 6. 回報：「已記錄 {類型} NT${金額} [{分類}]」
 
 ⚠️ record_transaction 有內建安全網（超過 company.approval_threshold 會自動拒絕），但 AI 應主動先建審核，提供更好的使用體驗。
+
+> 詳細的 HITL gate 行為（`resume_params` 一字不差驗證、`consumed_at` 單次消費、過期保護、ERROR 判讀）統一寫在 **CLAUDE.md HITL 章節**。本檔只列「記帳場景什麼時候要走 HITL」。
+> 重點：核准後**必須**從 approval 取出原始 `resume_params` 再呼叫 `record_transaction`，不要從對話脈絡重新推導金額或事業體，否則會被 gate 擋下。
 
 缺少資訊時：
 - 沒說金額 → 必問

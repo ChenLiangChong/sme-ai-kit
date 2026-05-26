@@ -1,6 +1,6 @@
 ---
 name: sme-design
-description: 中小企業報告與簡報設計技能包。當使用者要求產出**看起來像顧問公司做的**一頁式或多頁報告（competitive battlecard、競品分析、客戶 brief、客戶研究報告、月報、成果簡報、提案用的一頁式）時載入。用 HTML 當設計工具、embody 資深視覺設計師角色，**依案例從零設計**，輸出網頁 + 可下載 PPT（screenshot 截圖版）。**本 skill 無固定模板**——每份報告都依使用者的產業、品牌、受眾、內容客製。專治中小企業老闆想要「拿得出手、可列印、可丟 LINE 群組、合夥人看得懂」的文件。觸發詞：做一份 battlecard、做競品分析報告、產 PPT、做月報、做一頁式、專業感報告、設計一份 hi-fi、HTML 報告、匯出 PPT、轉投影片、一鍵產簡報、給老闆看的、像顧問做的、客戶 brief、客戶研究報告、成果簡報、一頁式提案、提案用的。
+description: "中小企業報告 / 簡報設計技能包。適用於：做 battlecard、競品分析報告、客戶 brief、客戶研究報告、月報、季報、成果簡報、一頁式提案、做 PPT、轉投影片、匯出 PPT、產 hi-fi 報告、HTML 報告、「給老闆看的」、「像顧問公司做的」、「拿得出手」、「可列印」、「可丟 LINE 群組」的文件。用 HTML 當設計工具、依案例從零設計、無固定模板、產出網頁 + screenshot 版 PPT 下載檔。不適用於：日常營運操作（用 company-ops）、純社群內容（用 social-media）、純寫程式、UI / UX app 介面設計（用 ui-ux-pro-max 或 huashu-design）。"
 ---
 
 # sme-design 中小企業報告設計

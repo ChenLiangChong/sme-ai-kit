@@ -1,6 +1,6 @@
 ---
 name: social-media
-description: "社群媒體與行銷管理技能包（特化模組）。當使用者要求查看社群數據、分析貼文成效、蒐集留言、規劃內容策略、草擬行銷文案、分析市場競品、規劃產品上市、定位品牌、或管理 IG/FB/Threads 帳號時載入。"
+description: "社群媒體 + 行銷管理技能包。適用於：查 IG / FB / Threads 數據、貼文成效分析、追蹤粉絲互動、蒐集留言、規劃內容策略、排程貼文、草擬行銷文案、轉換文案、寫廣告、發想 hook、Email 觸及、競品分析、市場研究、TAM / SAM、人物誌、品牌定位、產品上市規劃、GTM、battlecard、定價策略、ICP、社群成長、付費投放、Reels / Threads / Posts 內容生產、留客防流失；產出透過 social MCP 工具讀取數據 + 文案 draft（不直接發、需走 HITL 審核）。不適用於：日常營運（用 company-ops）、純報告排版設計（用 sme-design）、純寫程式。"
 ---
 
 # 社群媒體與行銷管理技能包

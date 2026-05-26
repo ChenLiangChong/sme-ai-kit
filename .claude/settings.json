@@ -10,7 +10,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"SESSION START: 請立即執行 CLAUDE.md 中的啟動流程。先呼叫 mcp__business-db__get_context_summary、mcp__business-db__low_stock_alerts、mcp__business-db__check_overdue 再回答使用者。\"}}'"
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"SESSION START / COMPACT 恢復：請立即跑啟動流程。\\n1. mcp__business-db__get_context_summary(scope=full) — 若回傳含「上次 Session 交接 #N」：\\n   • 24h 內 → 按 handoff 下一步繼續、不要重新規劃\\n   • 標 ⚠️ 過時 → 顯示給使用者並問「這個交接還有效嗎？」確認後再動\\n   • 接手完成後務必跑 mcp__business-db__resolve_handoff(handoff_id, note) 標記，否則下次又會撈到\\n2. mcp__business-db__low_stock_alerts、mcp__business-db__check_overdue、mcp__business-db__list_pending_leave_requests 補充狀態（請假表為空時自然回 empty、不影響流程）\\n3. 再回答使用者的問題\"}}'"
           }
         ]
       }

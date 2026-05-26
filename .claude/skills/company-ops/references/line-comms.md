@@ -223,7 +223,7 @@ LINE MCP 發 `event.type='join'` → AI 應：
 
 ### 群組欄位語意
 - `group_type` — 分類（work/customer/supplier/marketing/other）決定 AI 行為策略
-- **`purpose`** — 一句話功能描述（例：「品牌 C內勤訂單協調」「鼎新供應商交期追蹤」）
+- **`purpose`** — 一句話功能描述（例：「品牌 X 內勤訂單協調」「ERP 系統供應商交期追蹤」）
 - `notes` — 成員列表、特殊規則、備註等自由文字
 - AI 處理群組訊息時應**讀 purpose + notes** 做為上下文補充
 
@@ -269,7 +269,9 @@ LINE MCP 發 `event.type='join'` → AI 應：
 
 Phase 1 用文字回覆（不用 Postback 按鈕）：
 - 主管收到審核通知 → 回覆「核准 #123」或「駁回 #123」
-- Claude 解析 → `resolve_approval(123, 'approved', 主管名)`
+- Claude 解析 → `resolve_approval(approval_id=123, decision='approved', decided_by='主管')`
+- **接續執行真正的 action**：從 approval.detail 取出 `resume_action` 與 `resume_params`，呼叫對應 tool（gate-backed：`approve_leave` / `record_transaction` / `create_order`；或 manual_ prefix 走人工多步驟），完成後 approval 才會被 consume（HITL gate 強制）
+- 詳細的 gate 行為、`resume_params` 一致性驗證、單次消費規則見 **CLAUDE.md HITL 章節**
 
 ---
 

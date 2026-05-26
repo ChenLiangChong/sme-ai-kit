@@ -198,7 +198,7 @@ store_fact(
 1. `query_knowledge(question='品牌語氣', category='brand')` — 讀取語氣設定和禁用詞
 2. 根據場景選框架（AIDA/PAS/BAB）+ 語氣矩陣
 3. 產出文案 → 逐項檢查品質清單
-4. `create_approval(type='announcement', summary='行銷文案：{摘要}')` — 送審
+4. `create_approval(type='announcement', summary='行銷文案：{摘要}', detail='{"resume_action": "manual_broadcast", "resume_params": {"audience": "客群描述", "channel": "line/email", "content": "完整文案"}, "note": "核准後人工執行：撈客群 → 逐一發送 → log_interaction（非單一 tool call）", "then": "發送後 log_interaction"}')` — 送審
 
 ### 存入品牌語氣設定
 1. 分析老闆提供的範例文案（詞彙/句構/稱呼/情感/慣例）
