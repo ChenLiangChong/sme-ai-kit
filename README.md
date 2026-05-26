@@ -14,10 +14,10 @@
 │   (多 OA 單 port)│                          │
 ├──────────────────┴──────────────────────────┤
 │              共用 SQLite DB                  │
-│     business-db MCP (51 tools)              │
+│     business-db MCP (73 tools)              │
 │   + 多事業體（business_entities）支援        │
 ├─────────────────────────────────────────────┤
-│   Skills: company-ops (12) + social-media   │
+│   Skills: company-ops (13) + social-media   │
 └─────────────────────────────────────────────┘
 ```
 
@@ -127,12 +127,12 @@ sme-ai-kit/
 ├── start.sh                # daemon 啟動（expect 自動確認）
 ├── CLAUDE.md               # AI 助理操作手冊
 ├── mcp-servers/
-│   ├── business-db/        # 企業資料庫 MCP (51 tools)
-│   ├── line-channel/       # LINE Channel MCP (7 tools, 支援多 OA)
+│   ├── business-db/        # 企業資料庫 MCP (73 tools)
+│   ├── line-channel/       # LINE Channel MCP (4 tools, 支援多 OA)
 │   └── social/             # 社群媒體 MCP (19 tools)
 ├── .claude/
 │   ├── skills/
-│   │   ├── company-ops/    # 公司營運（12 模組）
+│   │   ├── company-ops/    # 公司營運（13 模組）
 │   │   └── social-media/   # 社群行銷（22 模組）
 │   └── settings.local.json
 ├── data/                   # DB + 媒體（gitignored）

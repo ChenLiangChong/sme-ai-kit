@@ -72,17 +72,17 @@ fi
 
 for req in "$ROOT"/mcp-servers/*/requirements.txt; do
     "$VENV/bin/pip" install -q -r "$req"
-    ok "已安��� $(basename "$(dirname "$req")")/requirements.txt"
+    ok "已安裝 $(basename "$(dirname "$req")")/requirements.txt"
 done
 
 # ── 3. Bun 依賴 ──────────────────────────────────────
 
-step "安裝 LINE Channel ���賴"
+step "安裝 LINE Channel 依賴"
 
 (cd "$ROOT/mcp-servers/line-channel" && bun install --no-summary)
 ok "line-channel 依賴已安裝"
 
-# ── 4. 初始化資料庫 ─────────────��────────────────────
+# ── 4. 初始化資料庫 ──────────────────────────────────
 
 step "初始化資料庫"
 
@@ -107,7 +107,7 @@ print('OK')
     ok "空白資料庫已建立"
 fi
 
-# ── 5. 生成最小 .mcp.json ───────────��────────────────
+# ── 5. 生成最小 .mcp.json ────────────────────────────
 
 step "生成 MCP 設定"
 
@@ -164,6 +164,17 @@ LOCALJSON
     ok "settings.local.json 已建立（基本權限白名單）"
 else
     ok "settings.local.json 已存在"
+fi
+
+# ── 7. Git hooks ─────────────────────────────────────
+
+step "啟用 Git hooks"
+
+if [[ -d "$ROOT/.git" && -d "$ROOT/.githooks" ]]; then
+    git -C "$ROOT" config core.hooksPath .githooks
+    ok "core.hooksPath = .githooks（CLAUDE.md ↔ AGENTS.md 自動同步啟用）"
+else
+    ok "非 git repo 或 .githooks 目錄不存在、跳過"
 fi
 
 # ── 完成 ──────────────────────────────────────────────
