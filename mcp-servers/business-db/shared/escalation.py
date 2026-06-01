@@ -80,6 +80,47 @@ def _looks_like_line_user_id(value: str) -> bool:
         return False
 
 
+def _floor_display(source_floor) -> str:
+    """來源層人話（系統蓋章用；source_floor 由 enqueue 當下讀 SME_FLOOR 寫死、非 LLM 措辭）。"""
+    f = (source_floor or "").strip()
+    if not f:
+        return "全權限層（operator/cowork）"
+    if f == "__unexpanded__":
+        # CC 沒展開 ${...}（fail-closed 受限未知層）；不把內部 sentinel 漏給主管（codex#4）。
+        return "未知受限層（SME_FLOOR 未展開）"
+    if f == "confidential":
+        return "機密層"
+    return f"{f} 層"
+
+
+def _actor_text(actor, source_floor) -> str:
+    """操作者人話（系統蓋章、非 LLM）。actor = enqueue 當下 _resolve_trusted_actor 的結果
+    （verified 員工名 / '__unverified__' / None）。永不回「未具名」、三類分明（決策 #27 + 連帶 #10
+    不可逆動作的稽核絕不匿名；且與 _NOTIFIER_PROMPT 的措辭一致——codex#2 不可把「系統操作」誤記成
+    「未驗證的人」）：
+      - verified 員工名 → 名 +（來源層）
+      - '__unverified__'（floored 但無 active-request、是「未驗證的人」）→ 未驗證身份（來源層）
+      - 空 / None（無個別登入身份、系統 / operator 操作、非人）→ 來源層系統操作"""
+    fd = _floor_display(source_floor)
+    if actor == "__unverified__":
+        return f"未驗證身份（{fd}）"
+    if actor:
+        sf = (source_floor or "").strip()
+        return f"{actor}（{fd}）" if sf else str(actor)
+    # 空 / None：系統 / operator 操作、非「未驗證的人」
+    if not (source_floor or "").strip():
+        return "全權限層 operator/cowork（系統操作、無個別登入身份）"
+    return f"{fd}系統操作（無個別登入身份）"
+
+
+def _row_get(row, key, default=None):
+    """安全讀 sqlite3.Row 欄位（缺欄回 default，相容尚未跑 migration 009 的舊 row）。"""
+    try:
+        return row[key]
+    except (IndexError, KeyError):
+        return default
+
+
 def resolve_escalation_target(db, business_unit: str = "", triggering_floor=None):
     """解析（收件人 line_user_id, 用哪個 OA channel_id, 儲存的目標層）。直接 SQL、不走工具。
 
@@ -175,6 +216,14 @@ def enqueue_escalation(
     tgt_uid, resolved_channel, tfloor = resolve_escalation_target(db, business_unit)
     channel_id = channel_id or resolved_channel
 
+    # 來源層蓋章（#27）：系統在 enqueue 當下讀 SME_FLOOR 寫死「觸發層」進 row，非靠 claude -p notifier
+    # 措辭。''＝全權限層 operator/cowork；'confidential'/'accounting'/… ＝該部門層。
+    try:
+        from shared.floor_policy import get_floor
+        source_floor = get_floor()
+    except Exception:
+        source_floor = ""
+
     # 在 detail json.dumps 成字串「之前」留一份 dict 版（給 in-session 注入內容解析 approval_id / type）。
     detail_dict = detail if isinstance(detail, dict) else None
     if detail_dict is None and isinstance(detail, str):
@@ -191,10 +240,10 @@ def enqueue_escalation(
     cur = db.execute(
         "INSERT INTO pending_escalations "
         "(event_type, summary, detail, actor, business_unit, target_floor, "
-        " target_line_user_id, channel_id, status) "
-        "VALUES (?,?,?,?,?,?,?,?,'pending')",
+        " target_line_user_id, channel_id, source_floor, status) "
+        "VALUES (?,?,?,?,?,?,?,?,?,'pending')",
         (event_type, summary, detail, actor or None, business_unit or None,
-         tfloor, tgt_uid, channel_id),
+         tfloor, tgt_uid, channel_id, source_floor or None),
     )
     esc_id = cur.lastrowid
 
@@ -213,12 +262,15 @@ def enqueue_escalation(
     # B in-session push（#25）：排一筆 channel notification，commit 成功後經 line-channel owner
     # IPC socket 注入正在跑的全權限層 session（即時推進 boss session、與 claude -p / cron 並行、
     # 後兩者仍是送達保證）。actor_text 把 __unverified__ 顯示成人話、與 LINE 通報措辭一致。
-    actor_text = "未驗證身份" if actor in (None, "", "__unverified__") else actor
+    # 來源層 + 操作者人話皆由 (source_floor, actor) 確定性推導（系統蓋章、非 LLM、永不匿名）。
+    actor_text = _actor_text(actor, source_floor)
+    source_text = _floor_display(source_floor)
     if event_type == "approval_pending":
         aid = (detail_dict or {}).get("approval_id")
         # summary 已含 #id（type）：…（approvals.create_in_tx 傳入時前綴），此處不重複前綴
         content = (
-            f"[待核准·主管上報] {summary}\n"
+            f"【系統通報·待核准】{summary}\n"
+            f"來源層：{source_text}\n"
             f"操作者：{actor_text}\n"
             f"→ 確認後可在本層直接核准：resolve_approval(#{aid}) 後依該 approval 的 "
             f"resume_params 執行（如 record_transaction），或等老闆 LINE 回覆核准。\n"
@@ -226,6 +278,7 @@ def enqueue_escalation(
         )
         meta = {
             "target_floor": tfloor,
+            "source_floor": source_floor or "",
             "event_type": "escalation",
             "escalation_event": event_type,
             "source_type": "system",
@@ -235,13 +288,15 @@ def enqueue_escalation(
     else:
         label = ESCALATION_LABELS.get(event_type, event_type)
         content = (
-            f"[主管上報] {label}\n"
+            f"【系統通報】{label}\n"
             f"{summary}\n"
+            f"來源層：{source_text}\n"
             f"操作者：{actor_text}\n"
             f"（上報 #{esc_id}）"
         )
         meta = {
             "target_floor": tfloor,
+            "source_floor": source_floor or "",
             "event_type": "escalation",
             "escalation_event": event_type,
             "source_type": "system",
@@ -335,6 +390,32 @@ def inject_to_sessions(payload: dict) -> bool:
 
 FLUSH_MAX_RETRY = 5          # LINE push 假成功（未加好友回 200 但不達）→ 重試上限後標 failed 終態
 FLUSH_BACKOFF_BASE_MIN = 3   # 線性 backoff：第 n 次重試需距上次 >= n*base 分鐘
+# 投遞租約（codex#1）：cron 與 claude -p notifier 併發時，送前先原子 claim（寫 claimed_at），只有搶到的
+# 那一路可送 + 落 log → 杜絕雙送 + 稽核必完整。claimed 但未完成（crash / 慢網路）的 row 經此 TTL 後可被
+# 另一路 reclaim。
+# 不變量（codex r2#1）：TTL 必須 > 任一路「單次投遞批次」最長持租時間，否則慢批次會被另一路提前 reclaim 重送。
+#   - cron：每 row claim→send→mark 一個迴圈（單筆、秒級）。
+#   - notifier：claim-on-read 一次 lease 整批、逐筆送完才 mark → 持租 ≈ 整批時間。故 notifier 批量設上限
+#     _NOTIFIER_CLAIM_BATCH，使「批量 × 單筆最壞 push」<< TTL（10 分）；剩餘 row 留給 cron / 下次 notifier。
+#   「單筆最壞 push」上限不是註解假設、而是兩處逾時綁死（codex r3）：cron＝flush_escalations.py urllib timeout=10s；
+#   notifier(mcp__line__reply)＝line-channel/server.ts LINE_PUSH_TIMEOUT_MS=10s。test_smoke_all 有 cross-file
+#   guard 驗「_NOTIFIER_CLAIM_BATCH × (LINE_PUSH_TIMEOUT_MS/1000) << _CLAIM_TTL_MIN×60」、改任一常數破不變量就紅。
+_ASSUMED_MAX_PUSH_SEC = 10   # 與 LINE_PUSH_TIMEOUT_MS(server.ts) / urllib timeout(flush_escalations.py) 對齊
+_CLAIM_TTL_MIN = 10
+_NOTIFIER_CLAIM_BATCH = 8
+
+# 共用「可投遞候選」條件（codex r2#2：notifier 與 cron 必須套同一 backoff，否則 flush 失敗後 notifier 立刻
+# 繞過 backoff 重送）。兩個 datetime 子句各吃一個參數，順序固定 (claim_ttl_min, backoff_base_min)。
+_CLAIMABLE_WHERE = (
+    "status='pending' AND target_line_user_id IS NOT NULL "
+    "AND (claimed_at IS NULL OR claimed_at <= datetime('now','localtime','-'||?||' minutes')) "
+    "AND (last_attempt_at IS NULL OR "
+    "     last_attempt_at <= datetime('now','localtime','-'||(retry_count*?)||' minutes'))"
+)
+# 原子 claim（同候選條件 + 指定 id）。params 順序：(now, id, claim_ttl_min, backoff_base_min)。
+_CLAIM_UPDATE = (
+    "UPDATE pending_escalations SET claimed_at=? WHERE id=? AND " + _CLAIMABLE_WHERE
+)
 
 ESCALATION_LABELS = {
     "approval_pending": "待核准審核",
@@ -348,15 +429,17 @@ ESCALATION_LABELS = {
 
 
 def format_escalation_message(row) -> str:
-    """推給主管的精簡訊息：摘要 + 事件類型 + 操作者（不送全 detail，降部門機密破牆面 + 省 LINE 額度；
-    完整 detail 留 DB 供事後查）。"""
+    """推給主管的精簡訊息（cron 保證層、確定性）：系統通報抬頭 + 摘要 + 來源層 + 操作者 + 事業體。
+    來源層 / 操作者由 row 的 source_floor + actor 確定性推導（系統蓋章、非 LLM、永不匿名）；不送全
+    detail（降部門機密破牆面 + 省 LINE 額度，完整 detail 留 DB 供事後查）。"""
     label = ESCALATION_LABELS.get(row["event_type"], row["event_type"])
-    lines = [f"[主管上報] {label}", row["summary"]]
-    actor = row["actor"]
-    if actor and actor != "__unverified__":
-        lines.append(f"操作者：{actor}")
-    elif actor == "__unverified__":
-        lines.append("操作者：（未驗證身份）")
+    sf = _row_get(row, "source_floor")
+    lines = [
+        f"【系統通報】{label}",
+        row["summary"],
+        f"來源層：{_floor_display(sf)}",
+        f"操作者：{_actor_text(row['actor'], sf)}",
+    ]
     if row["business_unit"]:
         lines.append(f"事業體：{row['business_unit']}")
     lines.append(f"（上報 #{row['id']} · {row['created_at']}）")
@@ -369,29 +452,37 @@ def flush_pending_escalations(push_fn, *, max_retry=FLUSH_MAX_RETRY,
 
     - 只撈 status='pending' 且 target_line_user_id 非 NULL（無收件人的留 pending、由 #9e readout 提醒）。
     - 線性 backoff 寫進 SELECT：retry_count 次的 row 需距上次 last_attempt_at >= retry_count*base 分鐘。
-    - push 成功 → UPDATE status='sent'（WHERE ... status='pending' rowcount guard 防雙投）。
-    - push 失敗 → retry_count+1；達 max_retry → status='failed' 終態（全權限層開機 readout 會提醒）。
-    - 不在 push（網路 I/O）期間持有 write lock：先讀清單、逐筆 push 後各開短 tx 更新。
+    - 送前先原子 claim（claimed_at CAS）：只有搶到的那路可送 + 落 log → 杜絕 cron↔notifier 併發雙送
+      與稽核漏記（codex#1）。claim 與 send 分開 tx：claim 先 commit（讓併發路徑立刻看見租約），再送
+      （不持 write lock 過網路 I/O）。
+    - push 成功 → status='sent' + interaction_log（escalation_sent，實際送出內容）。
+    - push 失敗 → 釋放租約（claimed_at=NULL）+ retry_count+1；達 max_retry → status='failed' 終態。
+    - claimed 但本進程 crash 未完成的 row：_CLAIM_TTL_MIN 後 SELECT 條件視為可 reclaim。
 
-    回 {'sent','failed','retried','candidates'}。
+    回 {'sent','failed','retried','skipped','candidates'}。
     """
     from shared.db import _now, get_db, transaction
 
     db = get_db()
     try:
         rows = db.execute(
-            "SELECT * FROM pending_escalations "
-            "WHERE status='pending' AND target_line_user_id IS NOT NULL "
-            "AND (last_attempt_at IS NULL OR "
-            "     last_attempt_at <= datetime('now','localtime','-'||(retry_count*?)||' minutes')) "
-            "ORDER BY id LIMIT ?",
-            (backoff_base_min, limit),
+            "SELECT * FROM pending_escalations WHERE " + _CLAIMABLE_WHERE + " ORDER BY id LIMIT ?",
+            (_CLAIM_TTL_MIN, backoff_base_min, limit),
         ).fetchall()
     finally:
         db.close()
 
-    stats = {"sent": 0, "failed": 0, "retried": 0, "candidates": len(rows)}
+    stats = {"sent": 0, "failed": 0, "retried": 0, "skipped": 0, "candidates": len(rows)}
     for row in rows:
+        # 原子 claim：搶到 claimed_at 才送（codex#1）。輸的那路 rowcount=0 → skip、不重送不重 log。
+        # claim 條件含 backoff（codex r2#2）：與 SELECT 一致、防 SELECT→claim 窗內 backoff 狀態變動。
+        with transaction() as cdb:
+            claimed = cdb.execute(
+                _CLAIM_UPDATE, (_now(), row["id"], _CLAIM_TTL_MIN, backoff_base_min),
+            ).rowcount
+        if claimed != 1:
+            stats["skipped"] += 1
+            continue
         text = format_escalation_message(row)
         try:
             ok = bool(push_fn(row["channel_id"], row["target_line_user_id"], text))
@@ -399,26 +490,33 @@ def flush_pending_escalations(push_fn, *, max_retry=FLUSH_MAX_RETRY,
             ok = False
         with transaction() as wdb:
             if ok:
-                rc = wdb.execute(
-                    "UPDATE pending_escalations SET status='sent', sent_at=? "
-                    "WHERE id=? AND status='pending'",
+                wdb.execute(
+                    "UPDATE pending_escalations SET status='sent', sent_at=? WHERE id=?",
                     (_now(), row["id"]),
-                ).rowcount
-                if rc == 1:
-                    stats["sent"] += 1
+                )
+                stats["sent"] += 1
+                # 稽核（#27）：claim 成功者才送才落 log → 唯一一筆、不重不漏（確定性 format 產）。
+                wdb.execute(
+                    "INSERT INTO interaction_log "
+                    "(actor, action, target_type, target_id, detail, business_unit) "
+                    "VALUES (?,?,?,?,?,?)",
+                    ("system", "escalation_sent", "pending_escalation", row["id"],
+                     f"[cron→{row['target_line_user_id']}] {text}", row["business_unit"]),
+                )
             else:
                 new_count = row["retry_count"] + 1
                 if new_count >= max_retry:
                     wdb.execute(
                         "UPDATE pending_escalations SET status='failed', retry_count=?, "
-                        "last_attempt_at=? WHERE id=? AND status='pending'",
+                        "last_attempt_at=?, claimed_at=NULL WHERE id=?",
                         (new_count, _now(), row["id"]),
                     )
                     stats["failed"] += 1
                 else:
+                    # 釋放租約讓下輪 backoff 後可重試（claimed_at=NULL）
                     wdb.execute(
-                        "UPDATE pending_escalations SET retry_count=?, last_attempt_at=? "
-                        "WHERE id=? AND status='pending'",
+                        "UPDATE pending_escalations SET retry_count=?, last_attempt_at=?, "
+                        "claimed_at=NULL WHERE id=?",
                         (new_count, _now(), row["id"]),
                     )
                     stats["retried"] += 1
@@ -441,14 +539,41 @@ def count_stuck_escalations(db) -> dict:
 #    收件人在 enqueue 當下已寫死 target_line_user_id；notifier 一律照 row 推、不自決收件人。──
 
 def list_pending_for_notifier(limit: int = 50) -> str:
-    """回 JSON 字串：待投遞上報（status=pending、已解析收件人）。給 claude -p 通報投遞器讀。"""
-    from shared.db import get_db
+    """回 JSON 字串：待投遞上報（status=pending、已解析收件人）。給 claude -p 通報投遞器讀。
+
+    claim-on-read（codex#1）：讀到就原子 lease 該批（寫 claimed_at），同時段 cron / 另一支 notifier
+    claim 失敗就跳過 → 不對同筆雙送。notifier 沒送完就 crash 的 row 留 claimed、_CLAIM_TTL_MIN 後由
+    cron 自動接手（status 仍 'pending'、未真送）。送達後呼叫 mark_escalation_sent 才標 sent。"""
+    from shared.db import _now, get_db, transaction
+    # 批量上限（codex r2#1）：一次最多 lease _NOTIFIER_CLAIM_BATCH 筆，使整批持租時間 << _CLAIM_TTL_MIN、
+    # 不會被 cron 提前 reclaim 重送；剩餘 row 留給 cron / 下次 notifier。候選條件含 backoff（codex r2#2）、
+    # 與 flush 共用 _CLAIMABLE_WHERE，flush 失敗釋租後仍受 backoff 約束、notifier 不會立刻重送。
+    batch = min(limit, _NOTIFIER_CLAIM_BATCH)
     db = get_db()
     try:
+        cand = db.execute(
+            "SELECT id FROM pending_escalations WHERE " + _CLAIMABLE_WHERE + " ORDER BY id LIMIT ?",
+            (_CLAIM_TTL_MIN, FLUSH_BACKOFF_BASE_MIN, batch),
+        ).fetchall()
+    finally:
+        db.close()
+    claimed_ids = []
+    for r in cand:
+        with transaction() as cdb:
+            rc = cdb.execute(
+                _CLAIM_UPDATE, (_now(), r["id"], _CLAIM_TTL_MIN, FLUSH_BACKOFF_BASE_MIN),
+            ).rowcount
+        if rc == 1:
+            claimed_ids.append(r["id"])
+    if not claimed_ids:
+        return json.dumps({"pending": [], "count": 0}, ensure_ascii=False)
+    db = get_db()
+    try:
+        placeholders = ",".join("?" * len(claimed_ids))
         rows = db.execute(
-            "SELECT id, event_type, summary, actor, business_unit, target_line_user_id, channel_id "
-            "FROM pending_escalations WHERE status='pending' AND target_line_user_id IS NOT NULL "
-            "ORDER BY id LIMIT ?", (limit,),
+            "SELECT id, event_type, summary, actor, business_unit, source_floor, "
+            "target_line_user_id, channel_id FROM pending_escalations "
+            f"WHERE id IN ({placeholders}) ORDER BY id", claimed_ids,
         ).fetchall()
     finally:
         db.close()
@@ -456,14 +581,31 @@ def list_pending_for_notifier(limit: int = 50) -> str:
     return json.dumps({"pending": items, "count": len(items)}, ensure_ascii=False)
 
 
-def mark_sent_tool(escalation_id: int) -> str:
-    """標記上報已送達（pending→sent、rowcount guard 防重複）。投遞器推送成功後呼叫。"""
+def mark_sent_tool(escalation_id: int, sent_text: str = "") -> str:
+    """標記上報已送達（pending→sent、rowcount guard 防重複）+ 落 notifier 實際送出內容供稽核（#27）。
+
+    sent_text = claude -p notifier 回報它真正推給主管的文字（品質層自報、與 cron 確定性 log 互補）；
+    投遞器推送成功後呼叫。rowcount guard 內才落 log → 不會對非 pending 的 row 留假紀錄。"""
     from shared.db import _now, transaction
     with transaction() as db:
         rc = db.execute(
             "UPDATE pending_escalations SET status='sent', sent_at=? "
             "WHERE id=? AND status='pending'", (_now(), escalation_id),
         ).rowcount
+        if rc == 1:
+            r = db.execute(
+                "SELECT target_line_user_id, business_unit FROM pending_escalations WHERE id=?",
+                (escalation_id,),
+            ).fetchone()
+            to = (r["target_line_user_id"] if r else "") or ""
+            bu = r["business_unit"] if r else None
+            db.execute(
+                "INSERT INTO interaction_log "
+                "(actor, action, target_type, target_id, detail, business_unit) "
+                "VALUES (?,?,?,?,?,?)",
+                ("system", "escalation_sent", "pending_escalation", escalation_id,
+                 f"[notifier→{to}] {sent_text or '（notifier 未回報送出內容）'}", bu),
+            )
     return (f"上報 #{escalation_id} 已標記 sent" if rc == 1
             else f"上報 #{escalation_id} 無法標記（已送/不存在/非 pending）")
 
@@ -475,15 +617,21 @@ def mark_sent_tool(escalation_id: int) -> str:
 _NOTIFIER_PROMPT = (
     "你是 SME-AI-Kit 的「主管上報投遞器」。只做這件事、做完即結束：\n"
     "1. 呼叫 list_pending_escalations 取得待投遞上報（回 JSON：pending[] 各含 "
-    "id / event_type / summary / actor / business_unit / target_line_user_id / channel_id）。\n"
+    "id / event_type / summary / actor / business_unit / source_floor / target_line_user_id / channel_id）。\n"
     "2. 若 count=0，直接結束、什麼都不做。\n"
     "3. 對每一筆，用 mcp__line__reply 推送：chat_id 一律用「該筆的 target_line_user_id」"
     "（絕不自行更改或猜測收件人）、channel_id 用該筆的 channel_id（空字串就省略走 default）、"
-    "text 用該筆 summary 寫成一句給老闆的人話通報（標明事件、金額/單號、操作者 actor；"
-    "actor 是 __unverified__ 時寫「未驗證身份」）。若多筆的 target_line_user_id 相同、可合併成一則"
-    "精簡摘要推給該收件人；target_line_user_id 不同的【絕對不可合併】、各自一則、每則只含自己那筆內容"
-    "（嚴防把 A 的金額/單號寫進給 B 的通報＝跨收件人洩密）。\n"
-    "4. 每成功推一筆就呼叫 mark_escalation_sent(該筆 id)。\n"
+    "text 寫成一句給老闆的人話通報，且【必須】照 row 欄位如實標註、不得自行改寫或臆測：\n"
+    "   - 抬頭一律標明這是「系統自動通報」（此上報由系統硬接線產生、非任何 agent 自行決定發的）。\n"
+    "   - 內容用該筆 summary（事件、金額/單號）。\n"
+    "   - 來源層：照 source_floor 標——空字串＝『全權限層（operator/cowork）』、'confidential'＝『機密層』、"
+    "其餘值＝『該值 + 層』。\n"
+    "   - 操作者：actor 有員工名就寫該名 +（來源層）；actor 是 __unverified__ 寫『未驗證身份（來源層）』；"
+    "actor 空/null【不可寫「未具名」】、改寫『來源層 + 系統操作』（如 source_floor 空＝『全權限層 operator/cowork 系統操作』）。\n"
+    "   若多筆的 target_line_user_id 相同、可合併成一則精簡摘要推給該收件人；target_line_user_id 不同的"
+    "【絕對不可合併】、各自一則、每則只含自己那筆內容（嚴防把 A 的金額/單號寫進給 B 的通報＝跨收件人洩密）。\n"
+    "4. 每成功推一筆就呼叫 mark_escalation_sent(該筆 id, sent_text=你剛推給該收件人的完整文字)"
+    "——sent_text 讓系統留底稽核「實際送出了什麼」，務必帶上你真正送出的那段文字。\n"
     "限制：只用 list_pending_escalations / mcp__line__reply / mark_escalation_sent；"
     "不讀檔、不執行指令、不做別的事。"
 )
@@ -558,17 +706,28 @@ def spawn_notifier() -> None:
 
     # 極簡 mcp-config：只 business-db + line。寫到受保護 state dir（非 floor-writable /tmp）、0600：
     # 此檔餵給全權限的 claude -p notifier，放 /tmp 則低權限員工可搶改、注入惡意 MCP server 劫持 notifier。
-    # PID 命名 → 兩個 spawn 不互相覆寫（race）。
+    # 每次 spawn 用 mkstemp 產生唯一檔名（非 os.getpid()——那是 business-db 父進程 PID、同 server 多次 spawn
+    # 會重用同路徑、配 GC 可覆寫/刪到仍在啟動的 notifier config，codex#3）。mkstemp 預設 0600。
     mcp_cfg = None
     try:
         with open(os.path.join(project_root, ".mcp.json"), encoding="utf-8") as f:
             servers = (_json.load(f) or {}).get("mcpServers", {})
         minimal = {"mcpServers": {k: servers[k] for k in ("business-db", "line") if k in servers}}
         if minimal["mcpServers"]:
+            import glob
+            import tempfile
             cfg_dir = _notifier_state_dir()
             os.makedirs(cfg_dir, exist_ok=True)
-            mcp_cfg = os.path.join(cfg_dir, f"sme-notifier-mcp-{os.getpid()}.json")
-            fd = os.open(mcp_cfg, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            # GC（#27）：清掉先前 notifier 殘留的舊 mcp-config（single-shot、>120s 必已結束、且只在啟動數秒
+            # 內被讀）。這些檔含 .mcp.json 的 line server 設定（CHANNEL_ACCESS_TOKEN）、不清會無限累積；
+            # 舊碼曾誤寫 0644 /tmp（world-readable 密鑰外洩）、新碼 0600 + state_dir + 唯一檔名 + 此 GC 收斂。
+            for _old in glob.glob(os.path.join(cfg_dir, "sme-notifier-mcp-*.json")):
+                try:
+                    if time.time() - os.path.getmtime(_old) > 120:
+                        os.remove(_old)
+                except OSError:
+                    pass
+            fd, mcp_cfg = tempfile.mkstemp(dir=cfg_dir, prefix="sme-notifier-mcp-", suffix=".json")
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 _json.dump(minimal, f)
     except Exception:

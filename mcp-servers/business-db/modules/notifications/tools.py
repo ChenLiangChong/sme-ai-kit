@@ -95,12 +95,13 @@ def list_pending_escalations(limit: int = 50) -> str:
 
 
 @mcp.tool()
-def mark_escalation_sent(escalation_id: int) -> str:
-    """標記某筆主管上報已送達（status pending→sent）。通報投遞器推送成功後呼叫。
+def mark_escalation_sent(escalation_id: int, sent_text: str = "") -> str:
+    """標記某筆主管上報已送達（status pending→sent）+ 落實際送出內容供稽核。投遞器推送成功後呼叫。
 
     rowcount guard 防重複送（已 sent / 不存在 → 回無法標記、不報錯）。
 
     Args:
         escalation_id: pending_escalations 的 id
+        sent_text: 投遞器真正推給主管的完整文字（系統落 interaction_log 留底「實際送出了什麼」）
     """
-    return _escalation.mark_sent_tool(escalation_id)
+    return _escalation.mark_sent_tool(escalation_id, sent_text=sent_text)

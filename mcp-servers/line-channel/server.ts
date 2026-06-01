@@ -206,12 +206,19 @@ async function downloadLineContent(channelId: string, messageId: string, type: s
 
 // === LINE API（所有函式帶 channelId）===
 
+// push 顯式逾時（決策 #27 / codex r3）：notifier 的 mcp__line__reply 走 linePush/linePushFlex；
+// escalation 投遞租約的安全不變量是「notifier 批量(_NOTIFIER_CLAIM_BATCH) × 單筆最壞 push << _CLAIM_TTL_MIN」。
+// 若 push 無逾時、單筆卡死可超過 TTL → cron 把同筆當 stale reclaim 重送（雙送）。故與 cron flush
+// 的 urllib timeout=10s 對齊、把單筆 push 上限綁死。business-db/tests 有 cross-file guard 驗此常數 vs TTL/批量。
+const LINE_PUSH_TIMEOUT_MS = 10_000
+
 async function linePush(channelId: string, to: string, text: string): Promise<void> {
   const token = getChannel(channelId).access_token
   const res = await fetch('https://api.line.me/v2/bot/message/push', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ to, messages: [{ type: 'text', text }] }),
+    signal: AbortSignal.timeout(LINE_PUSH_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`LINE push failed: ${res.status} ${await res.text()}`)
 }
@@ -222,6 +229,7 @@ async function linePushFlex(channelId: string, to: string, altText: string, cont
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ to, messages: [{ type: 'flex', altText, contents }] }),
+    signal: AbortSignal.timeout(LINE_PUSH_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`LINE push flex failed: ${res.status} ${await res.text()}`)
 }

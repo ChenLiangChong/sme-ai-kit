@@ -2299,6 +2299,239 @@ finally:
         _os_ni.environ["LINE_STATE_DIR"] = _old_lsd
 
 
+# === #27 escalation 稽核硬化：來源層蓋章（系統讀 SME_FLOOR、非 LLM）+ 通報落 log + 永不匿名 ===
+
+_section("#27 escalation 來源層蓋章 + 落 log")
+from shared.escalation import (
+    enqueue_escalation as _enq27, format_escalation_message as _fmt27,
+    _floor_display as _fd27, _actor_text as _at27,
+    flush_pending_escalations as _flush27, mark_sent_tool as _mark27,
+)
+from shared.db import transaction as _tx27, get_db as _getdb27
+import os as _os27
+
+# helper 單元（確定性人話、皆由 (source_floor, actor) 推導）
+_assert("#27: _floor_display 空=全權限層（operator/cowork）",
+        _fd27("") == "全權限層（operator/cowork）")
+_assert("#27: _floor_display confidential=機密層", _fd27("confidential") == "機密層")
+_assert("#27: _floor_display accounting=accounting 層", _fd27("accounting") == "accounting 層")
+_assert("#27: _actor_text 空 actor 永不匿名（改標來源層、非「未具名」）",
+        "全權限層" in _at27(None, "") and "未具名" not in _at27(None, ""))
+_assert("#27: _actor_text __unverified__ 標未驗證+來源層",
+        _at27("__unverified__", "accounting") == "未驗證身份（accounting 層）")
+_assert("#27: _actor_text 具名+來源層", _at27("王小明", "accounting") == "王小明（accounting 層）")
+
+# 來源層蓋章：operator 路徑（無 SME_FLOOR）→ source_floor 空/NULL，訊息標「全權限層」、不匿名
+_saved_floor_27 = _os27.environ.pop("SME_FLOOR", None)
+try:
+    with _tx27() as _d27:
+        _eid_op = _enq27(_d27, event_type="transaction_deleted",
+                         summary="測試刪帳 #999（operator）", detail={"txn_id": 999},
+                         actor_user_id="", business_unit="")
+    _db_op = _getdb27()
+    _row_op = _db_op.execute("SELECT * FROM pending_escalations WHERE id=?", (_eid_op,)).fetchone()
+    _db_op.close()
+    _assert("#27: enqueue 寫入 source_floor 欄（operator→空/NULL）",
+            "source_floor" in _row_op.keys() and _row_op["source_floor"] in (None, ""))
+    _msg_op = _fmt27(_row_op)
+    _assert("#27: cron 訊息含【系統通報】抬頭", "【系統通報】" in _msg_op)
+    _assert("#27: cron 訊息含來源層（operator→全權限層）",
+            "來源層：" in _msg_op and "全權限層" in _msg_op)
+    _assert("#27: operator 空 actor 訊息不出現「未具名」", "未具名" not in _msg_op)
+
+    # 落 log（notifier 路徑）：mark_sent_tool(sent_text=...) 落「實際送出內容」到 interaction_log
+    _res_mark = _mark27(_eid_op, sent_text="【系統通報】帳目被刪除 #999（這是我送出的文字）")
+    _db_m = _getdb27()
+    _log_m = _db_m.execute(
+        "SELECT detail FROM interaction_log WHERE action='escalation_sent' AND target_id=?",
+        (_eid_op,)).fetchone()
+    _db_m.close()
+    _assert("#27(a): mark_sent_tool 落 notifier 送出內容到 interaction_log",
+            _log_m is not None and "我送出的文字" in _log_m["detail"]
+            and "[notifier→" in _log_m["detail"])
+finally:
+    if _saved_floor_27 is not None:
+        _os27.environ["SME_FLOOR"] = _saved_floor_27
+
+# 來源層蓋章：floored 路徑（SME_FLOOR=accounting）→ source_floor=accounting，訊息標「accounting 層」
+_os27.environ["SME_FLOOR"] = "accounting"
+try:
+    with _tx27() as _d27b:
+        _eid_fl = _enq27(_d27b, event_type="transaction_deleted",
+                         summary="測試刪帳 #998（accounting 層）", actor_user_id="", business_unit="")
+    _db_fl = _getdb27()
+    _row_fl = _db_fl.execute("SELECT * FROM pending_escalations WHERE id=?", (_eid_fl,)).fetchone()
+    _db_fl.close()
+    _assert("#27: floored enqueue 蓋章 source_floor=accounting（系統讀 SME_FLOOR）",
+            _row_fl["source_floor"] == "accounting")
+    _assert("#27: floored 訊息來源層=accounting 層", "accounting 層" in _fmt27(_row_fl))
+finally:
+    _os27.environ.pop("SME_FLOOR", None)
+
+# 落 log（cron 保證層）：flush 成功 → status=sent + 確定性送出內容入 interaction_log
+with _tx27() as _d27c:
+    _d27c.execute(
+        "INSERT INTO pending_escalations (event_type, summary, actor, status, "
+        "target_line_user_id, source_floor) "
+        "VALUES ('transaction_deleted','測試刪帳 #996（cron）','王小明','pending','Ucron27','accounting')")
+    _eid_cron = _d27c.execute("SELECT last_insert_rowid()").fetchone()[0]
+_sent_27 = []
+def _fake_push_27(ch, to, text):
+    _sent_27.append((to, text)); return True
+_flush27(_fake_push_27)
+_db_c = _getdb27()
+_log_c = _db_c.execute(
+    "SELECT detail FROM interaction_log WHERE action='escalation_sent' AND target_id=?",
+    (_eid_cron,)).fetchone()
+_row_c = _db_c.execute("SELECT status FROM pending_escalations WHERE id=?", (_eid_cron,)).fetchone()
+_db_c.close()
+_assert("#27(a): cron flush 成功 → status=sent", _row_c["status"] == "sent")
+_assert("#27(a): cron flush 落確定性送出內容到 interaction_log（含收件人 + 系統通報抬頭）",
+        _log_c is not None and "[cron→Ucron27]" in _log_c["detail"]
+        and "【系統通報】" in _log_c["detail"])
+_assert("#27(a): cron 實際送出文字含來源層 accounting",
+        any(_to == "Ucron27" and "accounting 層" in _t for _to, _t in _sent_27))
+
+# --- codex#2：_actor_text 三類分明（空 actor=系統操作、非「未驗證的人」）---
+_assert("#27(codex2): 空 actor + floored → 來源層系統操作（非未驗證身份）",
+        _at27("", "accounting") == "accounting 層系統操作（無個別登入身份）"
+        and "未驗證" not in _at27("", "accounting"))
+_assert("#27(codex2): None actor + operator → 全權限層系統操作",
+        _at27(None, "").startswith("全權限層 operator/cowork") and "系統操作" in _at27(None, ""))
+_assert("#27(codex2): __unverified__ + floored → 未驗證身份（層）",
+        _at27("__unverified__", "accounting") == "未驗證身份（accounting 層）")
+
+# --- codex#4：__unexpanded__ sentinel 不漏給主管 ---
+_assert("#27(codex4): _floor_display 特判 __unexpanded__（不漏 sentinel）",
+        _fd27("__unexpanded__") == "未知受限層（SME_FLOOR 未展開）")
+
+# --- codex#1：投遞租約 claim — fresh-claimed 不重送、stale-claimed reclaim、notifier lease 後 cron 不重送 ---
+from shared.escalation import list_pending_for_notifier as _lst27
+import json as _json27
+
+# (1) fresh-claimed（剛被別路徑 claim）→ cron SELECT 排除、不重送
+with _tx27() as _d27d:
+    _d27d.execute(
+        "INSERT INTO pending_escalations (event_type, summary, actor, status, "
+        "target_line_user_id, source_floor, claimed_at) "
+        "VALUES ('transaction_deleted','claim·fresh','王小明','pending','Ufresh27','accounting',"
+        "datetime('now','localtime'))")
+    _eid_fresh = _d27d.execute("SELECT last_insert_rowid()").fetchone()[0]
+_sent_fresh = []
+_flush27(lambda ch, to, t: (_sent_fresh.append(to) or True))
+_db_f = _getdb27()
+_st_fresh = _db_f.execute("SELECT status FROM pending_escalations WHERE id=?", (_eid_fresh,)).fetchone()["status"]
+_db_f.close()
+_assert("#27(codex1): fresh-claimed row 不被 cron 重送（仍 pending）",
+        _st_fresh == "pending" and "Ufresh27" not in _sent_fresh)
+
+# (1b) claimed 5 分前（< TTL 10 分）→ 即使比舊 3 分 TTL 久，仍不被 cron 提前 reclaim 重送（codex r2#1）
+with _tx27() as _d27g:
+    _d27g.execute(
+        "INSERT INTO pending_escalations (event_type, summary, actor, status, "
+        "target_line_user_id, source_floor, claimed_at) "
+        "VALUES ('transaction_deleted','claim·within-ttl','王小明','pending','Uwithin27','accounting',"
+        "datetime('now','localtime','-5 minutes'))")
+    _eid_within = _d27g.execute("SELECT last_insert_rowid()").fetchone()[0]
+_sent_within = []
+_flush27(lambda ch, to, t: (_sent_within.append(to) or True))
+_db_w = _getdb27()
+_st_within = _db_w.execute("SELECT status FROM pending_escalations WHERE id=?", (_eid_within,)).fetchone()["status"]
+_db_w.close()
+_assert("#27(codex1·r2): claimed 5 分前（<TTL）不被 cron 提前 reclaim（慢 notifier 不重送）",
+        _st_within == "pending" and "Uwithin27" not in _sent_within)
+
+# (2) stale-claimed（>TTL 未完成）→ cron reclaim 並送出
+with _tx27() as _d27e:
+    _d27e.execute(
+        "INSERT INTO pending_escalations (event_type, summary, actor, status, "
+        "target_line_user_id, source_floor, claimed_at) "
+        "VALUES ('transaction_deleted','claim·stale','王小明','pending','Ustale27','accounting',"
+        "datetime('now','localtime','-15 minutes'))")
+    _eid_stale = _d27e.execute("SELECT last_insert_rowid()").fetchone()[0]
+_sent_stale = []
+_flush27(lambda ch, to, t: (_sent_stale.append(to) or True))
+_db_s = _getdb27()
+_st_stale = _db_s.execute("SELECT status FROM pending_escalations WHERE id=?", (_eid_stale,)).fetchone()["status"]
+_db_s.close()
+_assert("#27(codex1): stale-claimed row（>TTL）被 cron reclaim 並送出",
+        _st_stale == "sent" and "Ustale27" in _sent_stale)
+
+# (3) notifier claim-on-read lease 後、同窗 cron flush 不重送；mark_sent 才標 sent + 落 log
+with _tx27() as _d27f:
+    _d27f.execute(
+        "INSERT INTO pending_escalations (event_type, summary, actor, status, "
+        "target_line_user_id, source_floor) "
+        "VALUES ('transaction_deleted','claim·lease','王小明','pending','Ulease27','accounting')")
+    _eid_lease = _d27f.execute("SELECT last_insert_rowid()").fetchone()[0]
+_listed = _json27.loads(_lst27(limit=50))
+_leased = any(_it["id"] == _eid_lease for _it in _listed["pending"])
+_sent_lease = []
+_flush27(lambda ch, to, t: (_sent_lease.append(to) or True))
+_db_l = _getdb27()
+_row_l = _db_l.execute("SELECT status, claimed_at FROM pending_escalations WHERE id=?", (_eid_lease,)).fetchone()
+_db_l.close()
+_assert("#27(codex1): list_pending_for_notifier claim-on-read（lease 該筆）",
+        _leased and _row_l["claimed_at"] is not None)
+_assert("#27(codex1): notifier 已 lease 的 row、同窗 cron flush 不重送（仍 pending）",
+        "Ulease27" not in _sent_lease and _row_l["status"] == "pending")
+_mark27(_eid_lease, sent_text="【系統通報】帳目被刪除（notifier lease 後送出）")
+_db_l2 = _getdb27()
+_st_lease2 = _db_l2.execute("SELECT status FROM pending_escalations WHERE id=?", (_eid_lease,)).fetchone()["status"]
+_log_lease = _db_l2.execute(
+    "SELECT detail FROM interaction_log WHERE action='escalation_sent' AND target_id=?",
+    (_eid_lease,)).fetchone()
+_db_l2.close()
+_assert("#27(codex1): lease 後 mark_escalation_sent → sent + 落 notifier log",
+        _st_lease2 == "sent" and _log_lease is not None and "lease 後送出" in _log_lease["detail"])
+
+# (4) flush 失敗釋租後 backoff 未到：notifier list 與 cron flush 都看不到該 row（codex r2#2）
+with _tx27() as _d27h:
+    # retry_count=1 + last_attempt_at=now → backoff = 1*3 = 3 分未到；claimed_at=NULL（已釋租）
+    _d27h.execute(
+        "INSERT INTO pending_escalations (event_type, summary, actor, status, "
+        "target_line_user_id, source_floor, retry_count, last_attempt_at, claimed_at) "
+        "VALUES ('transaction_deleted','claim·backoff','王小明','pending','Ubackoff27','accounting',"
+        "1, datetime('now','localtime'), NULL)")
+    _eid_bo = _d27h.execute("SELECT last_insert_rowid()").fetchone()[0]
+_listed_bo = _json27.loads(_lst27(limit=50))
+_in_list_bo = any(_it["id"] == _eid_bo for _it in _listed_bo["pending"])
+_sent_bo = []
+_flush27(lambda ch, to, t: (_sent_bo.append(to) or True))
+_db_bo = _getdb27()
+_st_bo = _db_bo.execute("SELECT status, claimed_at FROM pending_escalations WHERE id=?", (_eid_bo,)).fetchone()
+_db_bo.close()
+_assert("#27(codex2·r2): backoff 未到 → notifier list 不 claim 該 row",
+        not _in_list_bo and _st_bo["claimed_at"] is None)
+_assert("#27(codex2·r2): backoff 未到 → cron flush 也不送該 row（仍 pending）",
+        "Ubackoff27" not in _sent_bo and _st_bo["status"] == "pending")
+
+# (5) cross-file 不變量 guard（codex r3）：把「投遞租約安全」綁到實際逾時常數、非註解假設。
+#     notifier 單筆 push 上限由 line-channel/server.ts 的 LINE_PUSH_TIMEOUT_MS 綁死；
+#     必須滿足 _NOTIFIER_CLAIM_BATCH × push 上限 << _CLAIM_TTL_MIN，否則慢批次會被 cron 提前 reclaim 重送。
+import re as _re27
+from shared.escalation import (
+    _CLAIM_TTL_MIN as _ttl27, _NOTIFIER_CLAIM_BATCH as _batch27,
+    _ASSUMED_MAX_PUSH_SEC as _push27,
+)
+_server_ts = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", "..", "line-channel", "server.ts"))
+try:
+    with open(_server_ts, encoding="utf-8") as _f27:
+        _ts_src = _f27.read()
+except OSError:
+    _ts_src = ""
+_m27 = _re27.search(r"LINE_PUSH_TIMEOUT_MS\s*=\s*([0-9_]+)", _ts_src)
+_ts_timeout_sec = int(_m27.group(1).replace("_", "")) / 1000 if _m27 else None
+_assert("#27(codex3): server.ts 有 LINE_PUSH_TIMEOUT_MS 且與 _ASSUMED_MAX_PUSH_SEC 對齊",
+        _ts_timeout_sec is not None and _ts_timeout_sec == _push27)
+_assert("#27(codex3): linePush + linePushFlex 都套 AbortSignal.timeout（單筆 push 有界）",
+        _ts_src.count("AbortSignal.timeout(LINE_PUSH_TIMEOUT_MS)") >= 2)
+# 安全餘裕：批量×單筆上限 < TTL 的一半（留 LLM 逐筆思考時間）
+_assert("#27(codex3): 租約不變量 batch×push << TTL（含 LLM 思考餘裕）",
+        _batch27 * _push27 < _ttl27 * 60 * 0.5)
+
+
 # === Schema version check ===
 
 _section("Migration runner")
