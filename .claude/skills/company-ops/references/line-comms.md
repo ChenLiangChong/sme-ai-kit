@@ -77,9 +77,9 @@
 | 推銷/廣告/垃圾 | 不通知任何人 | 直接 `mark_read`，不浪費老闆時間 |
 | 無法判斷 | 老闆 | fallback，永遠通知老闆 |
 
-通知格式：
+通知格式（多 OA 一定要帶 `channel_id`＝陌生人來訊的同一個 OA，否則會用錯 OA 推播給負責人）：
 ```
-reply(chat_id=負責人的LINE_user_id, text="有陌生人傳了訊息：\n暱稱：{user}\n內容：{content}\n判斷意圖：{意圖}\nUser ID: {user_id}")
+reply(chat_id=負責人的LINE_user_id, channel_id=收到訊息的channel_id, text="有陌生人傳了訊息：\n暱稱：{user}\n內容：{content}\n判斷意圖：{意圖}\nUser ID: {user_id}")
 ```
 
 ### Step 3：標記已處理
@@ -271,7 +271,62 @@ Phase 1 用文字回覆（不用 Postback 按鈕）：
 - 主管收到審核通知 → 回覆「核准 #123」或「駁回 #123」
 - Claude 解析 → `resolve_approval(approval_id=123, decision='approved', decided_by='主管')`
 - **接續執行真正的 action**：從 approval.detail 取出 `resume_action` 與 `resume_params`，呼叫對應 tool（gate-backed：`approve_leave` / `record_transaction` / `create_order`；或 manual_ prefix 走人工多步驟），完成後 approval 才會被 consume（HITL gate 強制）
+- **裸「核准」沒帶編號**：不要猜、不要隨便撈一筆 pending approval 套上去。先 `get_context_summary` / 查 waiting approvals：剛好一筆 → 回報「您是要核准 #N（內容…）嗎？」確認後再核；多筆 → 列出來問哪一筆；零筆 → 告知沒有待核項目。
+- **簽核身份驗證（#24）**：`resolve_approval` 在非全權限層會驗操作者（須 verified manager 以上、且本人 LINE 操作）。被回「無權簽核」**不是系統錯誤**——是該操作者權限不足或非本人，照實回報、不要繞。
+- **執行接續可能要換層（重要）**：若你這層沒有該 `resume_action` 的工具（如部門層被移除了 `record_transaction` / 財務工具），`resolve_approval` 仍會成功（核准是決策、不需財務工具），但「真正記帳 / 下單」要由**有該工具的層**（會計層 / 全權限層）或**原本建立審核的 session** 接手。此時回報老闆「審核 #N 已核准，記帳將由會計層執行」，不要假裝自己記了。
 - 詳細的 gate 行為、`resume_params` 一致性驗證、單次消費規則見 **CLAUDE.md HITL 章節**
+
+### 執行模型：老闆核准後一條龍（兩 session 拓樸）
+
+上一段講「同一 session 收到回覆怎麼接續」。本段講**跨 session 分工**：部門層建審核、全權限層執行。
+
+#### 1. in-session 上報通知的辨識（不要 reply）
+
+當這個 session 收到的 channel 通知帶 `meta.event_type='escalation'`（`escalation_event='approval_pending'`）＝這是 **DB 主動推進來的「內部主管上報」**，不是 LINE 使用者傳來的訊息：
+
+- 它**沒有要回覆的 `chat_id`**（不是某個聊天視窗）⇒ **不要對它做 `reply` / `reply_flex`**。
+- 把它當成「已知有一筆待核准 #N、等老闆核准」的通知，記在心裡、等老闆下一步指示即可。
+- 對比一般 LINE 訊息（有 `chat_id` / `user_id`、要走第一節辨識身份 + 結局）：上報通知是**系統事件**、不套那套流程。
+
+#### 2. 兩 session 拓樸
+
+- **發起/建審核的 session**：記帳一律直接 `record_transaction`——超門檻時它**在同一 tx 內自建審核並上報簽核人**（決策 #183、勿自行 `create_approval`）。大額 `create_order` 目前仍由 agent 先 `create_approval`（待後續比照 #183 收斂）。
+- **執行的 session（必須有財務工具）**：真正 `record_transaction` / `create_order` 的地方。一個 floor 有沒有財務工具**取決於 floor-map 的 `financial_visibility`**：`confidential`（全權限）一定有；設成 `financial_visibility='all'` 的部門層（如專責記帳的會計層）也有；預設的 `general` 層**沒有**（能 `resolve_approval` 但記不了帳）。
+- ⇒ 核准後的記帳要落在「有財務工具」的 session。最穩的是 `confidential` 全權限層（老闆所在、見第 4 點路由）；若部署把會計層設成 `financial_visibility='all'`，該層在審核核准後也能自行執行。
+
+#### 3. 老闆 LINE 回「核准 #N」→ 全權限 session 一條龍
+
+老闆在 LINE 回「核准 #N」會被路由進**全權限 session**（因 sender 是全權限主體、見第 4 點）。全權限 session 收到後依序執行：
+
+1. `resolve_approval(approval_id=N, decision='approved', decided_by='老闆')` — 先把審核設成核准。
+2. `get_approval(approval_id=N)` — 從輸出的 `detail` 取出 `resume_params`（**照抄原始值、不要重打**）。
+3. 呼叫對應 gate-backed 工具，**帶 approval 的原始 `resume_params` + `approved_id=N`**。
+   以記帳為例（`resume_action='record_transaction'`）：
+   ```
+   record_transaction(
+     type=<resume_params.type>, amount=<resume_params.amount>,
+     category=<resume_params.category>, description=<resume_params.description>,
+     transaction_date=<resume_params.transaction_date>,
+     related_customer_id=<resume_params.related_customer_id>,
+     related_order_id=<resume_params.related_order_id>,
+     related_invoice=<resume_params.related_invoice>,
+     business_unit=<resume_params.business_unit>,
+     payment_status=<resume_params.payment_status>, due_date=<resume_params.due_date>,
+     approved_id=N            # ← 綁定 approval 的參數名就是 approved_id（不是 approval_id）
+   )
+   ```
+   - **approval 綁定參數名 = `approved_id`**（整數、就是 N）。
+   - `record_transaction` 的 `resume_params` 欄位 = `type` / `amount` / `category` / `description` / `transaction_date` / `related_customer_id` / `related_order_id` / `related_invoice` / `business_unit` / `payment_status` / `due_date`（照 `get_approval` 取出的值原樣帶）。
+   - `recorded_by` **不在** `resume_params`（它不是要重播的原始值）：由執行的 session 自行帶入（記帳者 = 執行核准的人 / 該 session 操作者），留空亦可。
+4. 成功後 `reply` 老闆 LINE：「已核准 #N 並完成記帳（帳目 #txn_id）」。
+
+**先後順序（必守）**：一定要**先 `resolve_approval(approved)`、後帶 `approved_id` 呼叫工具**。gate 只認「已核准且未使用」的 approval；順序顛倒或漏 resolve 會被回 `ERROR: 審核 #N 不存在、未核准或已使用`。
+
+**務必用原始 `resume_params`**：執行時欄位值照 `get_approval` 取出的填，**不可從對話脈絡重新推導金額 / ID**——HITL gate 會一字不差比對關鍵欄位（型別敏感），對不上直接擋下。此為交叉引用，演算法細節見 **CLAUDE.md「HITL gate 行為」**。
+
+#### 4. 身份路由：老闆訊息落進全權限 session
+
+老闆 / admin 的 LINE 訊息會落進**全權限 session**——line-channel 依 sender 身份把 `target_floor` 設為 `confidential`。因此要讓老闆收到 in-session 上報推送、並完成「核准 → 執行 → 回覆」閉環，**必須有一個 `SME_FLOOR=confidential` 的 session 在跑**；沒有這層，老闆的核准訊息無處落地、閉環斷裂。
 
 ---
 

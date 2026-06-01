@@ -40,6 +40,30 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+# ── escalation 投遞觸發（#9g）：enqueue_escalation 寫入上報後設旗標，transaction() commit
+#    成功後 fire-and-forget 起 claude -p 通報投遞器（直接觸發、非 cron 輪詢）。module-global
+#    安全：MCP stdio 單請求序列、無並發 transaction()。rollback 會清旗標（上報沒 commit 不投遞）。──
+_escalation_flush_pending = False
+
+# B in-session push（#25）：enqueue_escalation 排一筆 channel notification payload，
+# 業務 transaction commit 成功後經 line-channel owner IPC socket 注入正在跑的全權限層 session
+# （即時推進 boss session）。rollback 會 clear（沒 commit → 不注入）。全 best-effort、
+# 注入失敗（沒 owner / 沒 confidential session 連著）不影響業務寫入；LINE claude -p + cron 仍是送達保證。
+_pending_injections = []
+
+
+def request_escalation_flush() -> None:
+    """enqueue_escalation 寫入上報後呼叫；下一個 commit 成功的 transaction() 觸發投遞。"""
+    global _escalation_flush_pending
+    _escalation_flush_pending = True
+
+
+def queue_session_injection(payload: dict) -> None:
+    """enqueue_escalation 呼叫：排一筆 in-session 注入 payload（notification dict）。
+    與 _escalation_flush_pending 同模式——下一個 commit 成功的 transaction() drain 並注入。"""
+    _pending_injections.append(payload)
+
+
 @contextmanager
 def transaction(mode: str = "deferred"):
     """Service-layer transaction helper for write flows.
@@ -69,9 +93,11 @@ def transaction(mode: str = "deferred"):
       （MCP server 場景罕見到、不額外處理）
     - 若 rollback 或 close 自己拋例外，可能遮蓋原始例外（罕見、SQLite 一般不會）
     """
+    global _escalation_flush_pending
     if mode not in ("deferred", "immediate"):
         raise ValueError(f"transaction mode 必須是 'deferred' 或 'immediate'，got {mode!r}")
     db = get_db()
+    committed = False
     try:
         # SQLite Python driver 預設會在第一個寫入前 implicit BEGIN DEFERRED；要 IMMEDIATE
         # 必須先關 driver autocommit、自己下 BEGIN IMMEDIATE。
@@ -85,7 +111,10 @@ def transaction(mode: str = "deferred"):
             db.execute("COMMIT")
         else:
             db.commit()
+        committed = True
     except Exception:
+        _escalation_flush_pending = False  # rollback → 上報沒 commit、不投遞
+        _pending_injections.clear()        # rollback → 業務沒 commit、不注入 session
         if mode == "immediate":
             try:
                 db.execute("ROLLBACK")
@@ -96,3 +125,23 @@ def transaction(mode: str = "deferred"):
         raise
     finally:
         db.close()
+    # commit 成功且本 tx 寫過 escalation（連線已關、不持鎖）→ fire-and-forget 起 claude -p 通報投遞器。
+    # 直接觸發（#9g）；best-effort——失敗不影響業務（上報已在佇列、cron flush_escalations.py 兜底）。
+    if committed and _escalation_flush_pending:
+        _escalation_flush_pending = False
+        try:
+            from shared.escalation import spawn_notifier
+            spawn_notifier()
+        except Exception:
+            pass
+    # B in-session push（#25）：commit 成功且本 tx 排了注入 → drain 並經 IPC socket 注入正在跑的
+    # 全權限層 session。late import 避免 cycle（與 spawn_notifier 同理）；全 best-effort、吞例外。
+    if committed and _pending_injections:
+        drained = list(_pending_injections)
+        _pending_injections.clear()
+        try:
+            from shared.escalation import inject_to_sessions
+            for _p in drained:
+                inject_to_sessions(_p)
+        except Exception:
+            pass

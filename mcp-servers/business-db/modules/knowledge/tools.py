@@ -21,6 +21,7 @@ def store_fact(
     source_quote: str = "",
     set_by: str = "",
     business_unit: str = "",
+    confidential: bool = False,
     related_rule_ids: list[int] = [],
 ) -> str:
     """儲存企業規則或知識。反捏造機制：source_type='explicit' 時必須附上 source_quote（老闆原話）。
@@ -33,6 +34,7 @@ def store_fact(
         source_quote: 老闆原話引用（source_type=explicit 時必填）
         set_by: 誰設定的（如老闆姓名）
         business_unit: 所屬事業體（如 brand_c, brand_d），留空=全域規則
+        confidential: 機密規則（預設 False=全員可見；True=僅機密層/老闆。SOP/規則通常公開、員工要遵守，故預設公開）
         related_rule_ids: 跟此規則相關的既有 rule id（list of int、可空）— 寫進 rule_relations as 'related'
     """
     return service.store_fact(
@@ -43,6 +45,7 @@ def store_fact(
         source_quote=source_quote,
         set_by=set_by,
         business_unit=business_unit,
+        confidential=confidential,
         related_rule_ids=related_rule_ids,
     )
 
@@ -183,6 +186,7 @@ def log_decision(
     source_quote: str = "",
     set_by: str = "",
     business_unit: str = "",
+    confidential: bool = True,
 ) -> str:
     """記錄決策（為什麼這樣決定）。寫進 business_rules with category='decision_record'。
     可選擇同時把舊規則標為 superseded（透過 supersedes_rule_ids）。
@@ -197,6 +201,7 @@ def log_decision(
         source_quote: 老闆原話（recommended）
         set_by: 誰做的決定（如老闆姓名）
         business_unit: 所屬事業體（如 brand_x），留空=全域
+        confidential: 機密決策（預設 True=僅機密層/老闆可見，因決策多含策略/理由屬內部；若是員工需知道的政策決策請設 False）
     """
     return service.log_decision(
         title=title,
@@ -206,4 +211,5 @@ def log_decision(
         source_quote=source_quote,
         set_by=set_by,
         business_unit=business_unit,
+        confidential=confidential,
     )

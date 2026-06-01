@@ -177,6 +177,29 @@ else
     ok "非 git repo 或 .githooks 目錄不存在、跳過"
 fi
 
+# ── 8. 上報投遞保證層（cron flusher、決策 #177）───────────
+# 主管上報「品質層」是 business-db commit 後即時起的 claude -p；此 cron 是「保證層」：
+# 每 2 分確定性掃 pending_escalations 補送 claude -p 漏的/掛的（status 協調、retry/failed 終態）。
+
+step "安裝上報投遞保證層（cron flusher）"
+
+FLUSH_MARKER="SME-AI-Kit escalation flusher"
+FLUSH_LINE="*/2 * * * * SME_DB_PATH=$DB $VENV/bin/python3 $ROOT/mcp-servers/business-db/flush_escalations.py >> $ROOT/data/flush.log 2>&1"
+if command -v crontab >/dev/null 2>&1; then
+    if crontab -l 2>/dev/null | grep -q "$FLUSH_MARKER"; then
+        ok "cron flusher 已存在、不重複加"
+    elif ( crontab -l 2>/dev/null; echo "# === $FLUSH_MARKER（保證層）：每 2 分掃 pending_escalations 確定性投遞 ==="; echo "$FLUSH_LINE" ) | crontab -; then
+        ok "cron flusher 已安裝（每 2 分、log: data/flush.log）"
+    else
+        err "crontab 寫入失敗、請手動加一行：$FLUSH_LINE"
+    fi
+    if [[ "$IS_LINUX" == true ]] && ! pgrep -x cron >/dev/null 2>&1 && ! pgrep -x crond >/dev/null 2>&1; then
+        err "cron daemon 沒在跑 → 保證層不會觸發。啟動：sudo service cron start（WSL 建議 systemctl enable --now cron）"
+    fi
+else
+    err "找不到 crontab → 上報只剩 claude -p 品質層、無確定性保證層；請手動定時跑 mcp-servers/business-db/flush_escalations.py"
+fi
+
 # ── 完成 ──────────────────────────────────────────────
 
 echo ""

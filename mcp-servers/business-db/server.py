@@ -18,6 +18,7 @@ from shared.auth import _check_permission  # noqa: E402,F401
 from shared.business_units import _get_approval_threshold, _validate_business_unit  # noqa: E402,F401
 from shared.db import DB_PATH, _now, get_db, get_db_path  # noqa: E402,F401
 from shared.migrations import run_migrations  # noqa: E402
+from shared.floor_policy import apply_floor_policy  # noqa: E402
 from shared.utils import _build_guidance, _like_param, _safe_update  # noqa: E402,F401
 
 # Pure helpers（無 @mcp.tool）— init_db backfill 跟 orders 等都用到
@@ -621,6 +622,50 @@ from modules.tasks.tools import create_task, get_task, list_tasks, search_tasks,
 # ============================================================
 # 啟動
 # ============================================================
+
+# Floor gate（決策 #159 / #160）：依啟動端(start-line.sh)注入的 SME_FLOOR 移除該層不該有的
+# 機密工具。必須在所有 module tool 註冊完之後、mcp.run() 之前。floor='' / 'confidential' = 全權限。
+_removed_tools = apply_floor_policy(mcp)
+if _removed_tools:
+    print(
+        f"[business-db] SME_FLOOR='{os.environ.get('SME_FLOOR', '')}' → 移除 {len(_removed_tools)} 個機密工具",
+        file=sys.stderr,
+    )
+
+
+@mcp.tool()
+def floor_status() -> str:
+    """回報此 session 的安全層(SME_FLOOR)與被移除的機密工具，供稽核/驗證分層 gate 是否生效。
+    不含任何業務資料、各層皆可呼叫。"""
+    floor = os.environ.get("SME_FLOOR", "").strip()
+    label = floor if floor else "(未設定 = operator/Cowork 全權限)"
+    if _removed_tools:
+        return (
+            f"安全層 floor='{label}'；此 session 已移除 {len(_removed_tools)} 個機密工具："
+            f"{', '.join(_removed_tools)}"
+        )
+    return f"安全層 floor='{label}'；未移除任何工具（全權限層、或 floor 未設定/未生效）"
+
+
+@mcp.tool()
+def floor_config_status() -> str:
+    """回報此 session 的能力設定（floor-map 解析結果，決策 #171）：可碰 BU / 財務可見度 /
+    角色 / 上報對象 / 來源。供驗證 #6 能力設定層是否生效。不含業務資料、各層皆可呼叫。"""
+    from shared.floor_map import get_floor_config
+    from shared.floor_policy import get_floor
+    floor = get_floor()
+    label = floor if floor else "(未設定 = operator 全權限)"
+    cfg = get_floor_config(floor)
+    return (
+        f"floor='{label}' 能力設定（來源：{cfg.source}）：\n"
+        f"- 可碰事業體 business_units：{cfg.business_units or '（未指定）'}\n"
+        f"- 財務可見度 financial_visibility：{cfg.financial_visibility} "
+        f"（all=看全部財務 / own_bu=只看自己BU[待#11] / none=看不到）\n"
+        f"- 角色 role：{cfg.role}\n"
+        f"- 上報對象 escalation_target：{cfg.escalation_target}\n"
+        f"- 部門標籤：{cfg.department or '（無）'}"
+    )
+
 
 if __name__ == "__main__":
     mcp.run()

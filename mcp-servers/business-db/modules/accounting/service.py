@@ -16,6 +16,7 @@ from datetime import datetime
 from shared.auth import _check_permission
 from shared.business_units import _get_approval_threshold, _validate_business_unit
 from shared.db import _now, get_db, transaction
+from shared.escalation import enqueue_escalation
 from shared.utils import _build_guidance
 
 from modules.approvals import service as approvals_service
@@ -73,22 +74,55 @@ def record_transaction(
             threshold=threshold,
             expected_action="record_transaction",
             verify_fields={
+                # codex round-2 MED：綁定完整 resume_params（除 recorded_by），防「同金額同類型、
+                # 改掛別的客戶/訂單/發票/類別」重用已核准 approval。鍵需與 _txn_resume_detail
+                # 的 resume_params 一致（缺鍵會被 verify_resume_params 當「approval 缺此欄位」拒絕）。
                 "type": type_,
                 "amount": amount,
+                "category": category,
+                "description": description,
+                "transaction_date": transaction_date,
+                "related_customer_id": related_customer_id,
+                "related_order_id": related_order_id,
+                "related_invoice": related_invoice,
                 "business_unit": business_unit or "",
+                "payment_status": payment_status,
+                "due_date": due_date,
             },
         )
         if gate.error:
             return gate.error
         if gate.needs_approval:
-            return _build_approval_request(
-                type_=type_, amount=amount, category=category,
-                description=description, transaction_date=transaction_date,
-                related_customer_id=related_customer_id,
-                related_order_id=related_order_id,
+            # 系統自建審核（決策 #183）：超門檻時 record_transaction 自己用完整 11 欄
+            # resume_params 建審核 + 觸發 approval_pending 上報，不靠 agent 手寫 create_approval。
+            # detail 的鍵集合與上方 gate verify_fields 一致 → 核准後 consume 必過。
+            approval_id = approvals_service.create_in_tx(
+                db,
+                type_=type_,
+                summary=(
+                    f"{_TYPE_ZH.get(type_, type_)} NT${amount:,.0f}（{category}）"
+                    f"{description or ''}"
+                ).rstrip(),
+                detail=_txn_resume_detail(
+                    type_=type_, amount=amount, category=category,
+                    description=description, transaction_date=transaction_date,
+                    related_customer_id=related_customer_id,
+                    related_order_id=related_order_id,
+                    related_invoice=related_invoice,
+                    business_unit=business_unit,
+                    payment_status=payment_status, due_date=due_date,
+                ),
+                requester=recorded_by or "system",
                 business_unit=business_unit,
-                payment_status=payment_status, due_date=due_date,
-                threshold=threshold,
+                escalate=True,
+            )
+            return (
+                f"金額 NT${amount:,.0f} 超過審核門檻 NT${threshold:,.0f}，"
+                f"已自動建立審核 #{approval_id} 並上報簽核人。"
+                + _build_guidance(next_steps=[
+                    f"等簽核人核准（LINE 回「核准 #{approval_id}」或全權限層 resolve_approval）",
+                    f"核准後由全權限/會計層 session 依審核鎖定的原始參數執行 record_transaction(approved_id={approval_id})、金額/類別一字不差、無需人工重填",
+                ])
             )
 
         txn_id = repository.insert_transaction(
@@ -126,6 +160,23 @@ def record_transaction(
                 consumed_by_type="transaction",
                 consumed_by_id=txn_id,
             )
+            # REPORT 硬接線（#9/#173）：超門檻帳目核准後執行成功 → 無條件上報主管「已記」。
+            # 與 txn 寫入同一 tx＝agent 跳不過；actor/收件人在 enqueue 當下解析寫死、flusher 不重算。
+            enqueue_escalation(
+                db,
+                event_type="transaction_recorded_over_threshold",
+                summary=(
+                    f"已記一筆超門檻{_TYPE_ZH.get(type_, type_)} "
+                    f"NT${amount:,.0f}（{category}）"
+                ),
+                detail={
+                    "txn_id": txn_id, "type": type_, "amount": amount,
+                    "category": category, "business_unit": business_unit or None,
+                    "approval_id": gate.approval_id, "recorded_by": recorded_by or None,
+                },
+                actor_user_id=recorded_by or "",
+                business_unit=business_unit,
+            )
 
         guidance = ""
         if related_order_id and type_ == "income" and payment_status == "paid":
@@ -141,7 +192,8 @@ def record_transaction(
     return base_msg + guidance + bu_warn
 
 
-def _build_approval_request(
+def _txn_resume_detail(
+    *,
     type_: str,
     amount: float,
     category: str,
@@ -149,34 +201,30 @@ def _build_approval_request(
     transaction_date: str,
     related_customer_id: int,
     related_order_id: int,
+    related_invoice: str,
     business_unit: str,
     payment_status: str,
     due_date: str,
-    threshold: float,
 ) -> str:
-    """金額超過門檻時、回傳「請建立 approval」提示給 caller。"""
-    detail_json = json.dumps({
+    """超門檻記帳 approval 的 detail（完整 11 欄 resume_params）。
+
+    單一真相來源：resume_params 的鍵與值需與 record_transaction 內 gate verify_fields
+    完全一致（business_unit 同樣取 `or ""`），核准後 gate_consume 才比對得過。
+    系統自建用（決策 #183）、agent 不再手寫。
+    """
+    return json.dumps({
         "resume_action": "record_transaction",
         "resume_params": {
             "type": type_, "amount": amount, "category": category,
             "description": description, "transaction_date": transaction_date,
             "related_customer_id": related_customer_id,
             "related_order_id": related_order_id,
-            "business_unit": business_unit,
+            "related_invoice": related_invoice,
+            "business_unit": business_unit or "",
             "payment_status": payment_status, "due_date": due_date,
         },
         "then": "記帳完成後通知相關人員",
     }, ensure_ascii=False)
-    bu_param = f", business_unit={business_unit!r}" if business_unit else ""
-    return (
-        f"注意：金額 NT${amount:,.0f} 超過審核門檻 NT${threshold:,.0f}。"
-        + _build_guidance(next_steps=[
-            f"create_approval(type={type_!r}, "
-            f"summary='{type_} NT${amount:,.0f} [{category}]', "
-            f"detail='{detail_json}'{bu_param})",
-            "LINE 通知主管審核",
-        ])
-    )
 
 
 def _order_payment_guidance(db, order_id: int) -> str:
@@ -416,6 +464,22 @@ def delete_transaction(transaction_id: int, reason: str, actor_user_id: str) -> 
                 f"[{txn['category']}]，原因：{reason}"
             ),
             business_unit=txn["business_unit"],
+        )
+        # REPORT 硬接線（#9/#173）：刪財務紀錄不可逆、主管必知。與刪除同一 tx。
+        enqueue_escalation(
+            db,
+            event_type="transaction_deleted",
+            summary=(
+                f"刪除帳目 #{transaction_id}：{_TYPE_ZH.get(txn['type'], txn['type'])} "
+                f"NT${txn['amount']:,.0f}（{txn['category']}），原因：{reason}"
+            ),
+            detail={
+                "txn_id": transaction_id, "type": txn["type"], "amount": txn["amount"],
+                "category": txn["category"], "business_unit": txn["business_unit"],
+                "reason": reason,
+            },
+            actor_user_id=actor_user_id,
+            business_unit=txn["business_unit"] or "",
         )
     return f"帳目 #{transaction_id} 已刪除（原因：{reason}）"
 

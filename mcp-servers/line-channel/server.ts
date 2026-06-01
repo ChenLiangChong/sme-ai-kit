@@ -17,7 +17,8 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { createHmac } from 'crypto'
+import { createHmac, randomBytes } from 'crypto'
+import { homedir } from 'os'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { Database } from 'bun:sqlite'
@@ -43,9 +44,14 @@ interface ChannelsFile {
 }
 
 const WEBHOOK_PORT = Number(process.env.LINE_CHANNEL_PORT ?? 8789)
-const STATE_DIR = process.env.LINE_STATE_DIR ?? join(process.env.HOME ?? '/tmp', '.claude', 'channels', 'line')
-const DB_PATH = process.env.SME_DB_PATH ?? join(process.env.HOME ?? '/tmp', 'data', 'business.db')
+// STATE_DIR fallback 用 homedir()（不用 HOME ?? '/tmp'）：與 business-db 的 os.path.expanduser('~')
+// 對齊（兩端算出同一路徑，注入才送得到），且避免 HOME 缺失時落到 floor 可寫的 /tmp＝fence 破口。
+const STATE_DIR = process.env.LINE_STATE_DIR ?? join(homedir(), '.claude', 'channels', 'line')
 const PROJECT_ROOT = process.env.SME_PROJECT_ROOT ?? join(import.meta.dir, '..', '..')
+// DB_PATH fallback 用 repo 內 data/business.db（與 business-db Python 預設同源），不依賴 HOME：
+// resolveTargetFloor() 會讀此 DB 判 boss/admin 做身份路由；若 fallback 落到 /tmp（HOME 缺失）＝
+// floored 員工可在 attacker-writable 路徑種假 boss、把自己已驗簽訊息路由進 confidential（fence 破口）。
+const DB_PATH = process.env.SME_DB_PATH ?? join(PROJECT_ROOT, 'data', 'business.db')
 const MEDIA_DIR = join(PROJECT_ROOT, 'data', 'media', 'line')
 const NGROK_DOMAIN = process.env.NGROK_DOMAIN ?? ''
 
@@ -365,6 +371,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         } catch (e) {
           process.stderr.write(`line-channel: reply DB status update failed: ${e}\n`)
         }
+        clearActiveRequest()
         return { content: [{ type: 'text' as const, text: `✅ 已送出（${getChannel(chId).name}）` }] }
       }
       case 'reply_flex': {
@@ -392,6 +399,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         } catch (e) {
           process.stderr.write(`line-channel: reply_flex DB status update failed: ${e}\n`)
         }
+        clearActiveRequest()
         return { content: [{ type: 'text' as const, text: `✅ Flex Message 已送出（${getChannel(chId).name}）` }] }
       }
       case 'multicast': {
@@ -428,6 +436,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
             `UPDATE line_messages SET status = 'processed' WHERE ${col} = ? AND channel_id = ? AND direction = 'inbound' AND status = 'queued'`,
             [chatId, chId]
           )
+          clearActiveRequest()
           return { content: [{ type: 'text' as const, text: `✅ 已標記 ${result.changes} 則訊息為已處理` }] }
         } catch (e) {
           return { content: [{ type: 'text' as const, text: `❌ 標記失敗: ${e}` }], isError: true }
@@ -479,6 +488,37 @@ const portAlreadyInUse = await isPortInUse(WEBHOOK_PORT)
 const IPC_SOCKET_PATH = join(STATE_DIR, 'broadcast.sock')
 mkdirSync(STATE_DIR, { recursive: true })
 
+// 注入入口（決策 #25，block 1）：owner 啟動時產生一次性 token 寫到 inject.token（0600），
+// 只有 owner 寫此檔（單一來源、單一 token）。Py 送端（business-db commit-hook）每次送前重讀，
+// 透過既有 IPC broadcast socket 送 token 化的 inject 行進來、owner 比對 token 後轉呼 notifyAll。
+// 走 socket 不走 HTTP port：沙箱不隔離網路（agent 可 curl localhost），但 socket 在 ~/.claude 下、
+// 被 LINE-runtime sandbox 檔案系統 + denyRead 擋住。owner 關閉時連 socket 一起 unlink。
+const INJECT_TOKEN_PATH = join(STATE_DIR, 'inject.token')
+let injectToken = ''
+
+// active-request（決策 #162/#163）：每則驗簽後寫 verified user_id，給 business-db 當「可信操作者」來源。
+// agent 碰不到——檔在 ~/.claude 下、被 LINE-runtime sandbox denyRead；只有非 sandbox 的 MCP 進程讀得到。
+// 回覆 / 標記已讀後清除（single-flight 生命週期）。多 session 定向派送時改為 per-floor（#4c）。
+// active-request per-floor（決策 #164）：寫到「目標層」的檔，各層 session 的 business-db 只讀自己層的，
+// 避免多層同時在線時跨層覆蓋誤歸因。owner 依算出的 target_floor 寫；instance 回覆後清自己層的。
+function activeReqPath(floor: string): string {
+  return join(STATE_DIR, `active-request-${floor || 'none'}.json`)
+}
+function writeActiveRequest(targetFloor: string, meta: Record<string, unknown>): void {
+  try {
+    writeFileSync(activeReqPath(targetFloor), JSON.stringify({ ...meta, target_floor: targetFloor, written_ms: Date.now() }))
+  } catch (e) {
+    process.stderr.write(`line-channel: writeActiveRequest failed: ${e}\n`)
+  }
+}
+function clearActiveRequest(): void {
+  // 在「回覆的那個 instance」執行 → 清自己這層的 active-request
+  try {
+    const p = activeReqPath(myFloor())
+    if (existsSync(p)) unlinkSync(p)
+  } catch {}
+}
+
 // 廣播追蹤：webhook owner 用這個 set 追蹤連線的 IPC clients
 const ipcClients = new Set<ReturnType<typeof Bun.listen> extends { socket: infer S } ? S : any>()
 
@@ -494,9 +534,54 @@ function broadcastNotification(payload: { method: string; params: Record<string,
   }
 }
 
-// 統一通知：自己的 mcp + 廣播給其他 session
+// === 分流派送（決策 #164）===
+// 軸B：這則訊息該去哪一層。MVP：floor-map.json 還沒建（=onboarding #6 產物），
+// 先用 channel.business_unit、否則 DEFAULT_FLOOR。TODO #6：讀 floor-map 做 employees.department→floor 收斂。
+const DEFAULT_FLOOR = process.env.SME_DEFAULT_FLOOR || 'general'
+function lookupFloor(channelBusinessUnit: string): string {
+  return channelBusinessUnit || DEFAULT_FLOOR
+}
+// 身份路由（決策 #25，block 3）：全權限主體（老闆 / admin）的可信 LINE 訊息一律落 confidential 層，
+// 讓「核准 #N」進入「能 resolve + 執行」的全權限 session。與 shared/escalation.py 的 BOSS_TARGET_FLOOR 一致。
+const BOSS_TARGET_FLOOR = 'confidential'
+// sender 經 webhook 簽章驗證故可信：查 employees 是否有 active 全權限列且 line_user_id 相符。
+// 查到 → confidential；查無（非全權限）→ lookupFloor 部門層；DB 例外 → fail-closed 收斂到
+// confidential（不降級送部門層、避免 boss 訊息落員工 session ＝跨硬牆洩漏；寧過度路由、不洩漏）。
+// 只有 owner 跑 webhook、故只有 owner 需要查；用 owner 的 getDb()。
+function resolveTargetFloor(channelBusinessUnit: string, userId: string): string {
+  if (!userId) return lookupFloor(channelBusinessUnit)
+  try {
+    const row = getDb()
+      .query(
+        `SELECT 1 FROM employees WHERE active=1 AND line_user_id=? AND (role='boss' OR permissions='admin') LIMIT 1`,
+      )
+      .get(userId)
+    if (row) return BOSS_TARGET_FLOOR
+  } catch (e) {
+    // fail-closed：查不動 DB 無法判定身份 → 收斂到全權限層（只有老闆看得到）、不降級送部門層。
+    process.stderr.write(`line-channel: resolveTargetFloor DB 查詢失敗、fail-closed 回 confidential: ${e}\n`)
+    return BOSS_TARGET_FLOOR
+  }
+  return lookupFloor(channelBusinessUnit)
+}
+// 本 instance 啟動參數 SME_FLOOR（軸A）。展開失敗的 ${...} 視為受限未知層（matches nothing=fail-closed），
+// 不誤當無參數；真正無參數('')才是 operator/向後相容（收全部）。
+function myFloor(): string {
+  const v = process.env.SME_FLOOR || ''
+  if (v.includes('$') || v.includes('{')) return '__unexpanded__'
+  return v
+}
+// 接收端 self-filter：用本 instance 的 myFloor 決定這則要不要送進自己的 channel。
+function shouldDeliver(targetFloor: unknown): boolean {
+  const my = myFloor()
+  if (my === '') return true // operator / 向後相容單一 session → 收全部
+  return my === targetFloor
+}
+
+// 通知：自己這層才 emit channel；IPC 一律廣播給所有 instance（各自 self-filter）。
 async function notifyAll(notification: { method: string; params: Record<string, unknown> }): Promise<void> {
-  await mcp.notification(notification)
+  const tf = (notification.params?.meta as Record<string, unknown> | undefined)?.target_floor
+  if (shouldDeliver(tf)) await mcp.notification(notification)
   broadcastNotification(notification)
 }
 
@@ -525,8 +610,13 @@ if (portAlreadyInUse) {
             if (!line.trim()) continue
             try {
               const payload = JSON.parse(line)
-              process.stderr.write(`line-channel: IPC 收到廣播，轉送 MCP notification\n`)
-              mcp.notification(payload).catch(() => {})
+              const tf = (payload?.params?.meta as Record<string, unknown> | undefined)?.target_floor
+              if (shouldDeliver(tf)) {
+                process.stderr.write(`line-channel: IPC 廣播→送進 channel (self=${myFloor()})\n`)
+                mcp.notification(payload).catch(() => {})
+              } else {
+                process.stderr.write(`line-channel: IPC 廣播非本層、不送 channel (target=${tf} self=${myFloor()})\n`)
+              }
             } catch (e) {
               process.stderr.write(`line-channel: IPC 訊息解析失敗: ${e}\n`)
             }
@@ -669,6 +759,18 @@ if (portAlreadyInUse) {
               )
 
               process.stderr.write(`line-channel: [${channel.name}] 推送訊息 from=${displayName} content=${content.slice(0, 50)}\n`)
+              // 身份路由（block 3）：全權限主體（老闆 / admin）的可信訊息改解析為 confidential，
+              // 否則維持既有 lookupFloor 行為。writeActiveRequest 與 notifyAll meta.target_floor 同用此變數。
+              const targetFloor = resolveTargetFloor(channel.business_unit || '', String(userId))
+              writeActiveRequest(targetFloor, {
+                channel_id: channelId,
+                business_unit: channel.business_unit || '',
+                chat_id: String(chatId),
+                message_id: String(msg.id ?? ''),
+                user_id: String(userId),
+                user: String(displayName),
+                source_type: String(sourceType),
+              })
               await notifyAll({
                 method: 'notifications/claude/channel',
                 params: {
@@ -682,6 +784,7 @@ if (portAlreadyInUse) {
                     user: String(displayName),
                     user_id: String(userId),
                     source_type: String(sourceType),
+                    target_floor: targetFloor,
                     ts: new Date(event.timestamp ?? Date.now()).toISOString(),
                   },
                 },
@@ -699,6 +802,7 @@ if (portAlreadyInUse) {
                     user: String(displayName),
                     user_id: String(userId),
                     event_type: 'follow',
+                    target_floor: lookupFloor(channel.business_unit || ''),
                   },
                 },
               })
@@ -716,6 +820,7 @@ if (portAlreadyInUse) {
                     chat_id: String(groupId),
                     event_type: 'join',
                     source_type: String(sourceType),
+                    target_floor: lookupFloor(channel.business_unit || ''),
                     ts: new Date(event.timestamp ?? Date.now()).toISOString(),
                   },
                 },
@@ -734,6 +839,16 @@ if (portAlreadyInUse) {
 
     // 啟動 IPC broadcast server，讓其他 session 可以接收 webhook 事件
     try { unlinkSync(IPC_SOCKET_PATH) } catch {}
+    // 注入 token（block 1）：owner 產生一次性 token 並寫出（0600），供 Py 送端讀取後附在 inject 行驗證。
+    // 先刪殘留檔再寫：writeFileSync 的 mode 只對「新建檔」生效，殘留舊檔會沿用舊（可能過寬）權限。
+    try { unlinkSync(INJECT_TOKEN_PATH) } catch {}
+    injectToken = randomBytes(24).toString('hex')
+    try {
+      writeFileSync(INJECT_TOKEN_PATH, injectToken, { mode: 0o600 })
+      process.stderr.write(`line-channel: inject token 已寫出 ${INJECT_TOKEN_PATH}\n`)
+    } catch (e) {
+      process.stderr.write(`line-channel: inject token 寫出失敗: ${e}\n`)
+    }
     try {
       Bun.listen({
         unix: IPC_SOCKET_PATH,
@@ -746,7 +861,50 @@ if (portAlreadyInUse) {
             ipcClients.delete(socket)
             process.stderr.write(`line-channel: IPC client 斷線（剩 ${ipcClients.size} 個 session）\n`)
           },
-          data(socket: any, data: any) { /* clients don't send data */ },
+          data(socket: any, data: any) {
+            // 注入入口（block 1）：clients 平常不送資料，唯一例外是 Py 送端的 token 化 inject 行。
+            // 逐 socket 累積 buffer（暫存在 socket 物件上）、以 \n 切行、每行 JSON.parse。
+            // 整段 try/catch 包住、永不外拋（data handler 非 async；notifyAll 是 async → 用 .catch 不 await）。
+            try {
+              // 防呆上限（先按原始位元組數擋、再解碼拼接）：合法 inject 為單一短行（遠小於 64KB）。
+              // 巨量 frame 或無換行洪流 → 連解都不解、重置並關閉此連線、避免無界字串配置
+              //（合法送端送完即關、關閉無副作用）。
+              const incoming = (data?.byteLength ?? data?.length ?? 0)
+              const buffered = socket._injBuf ? Buffer.byteLength(socket._injBuf, 'utf8') : 0
+              if (incoming + buffered > 65536) {
+                process.stderr.write('line-channel: inject 輸入超過 64KB、重置並關閉連線\n')
+                socket._injBuf = ''
+                try { socket.end() } catch {}
+                return
+              }
+              socket._injBuf = (socket._injBuf ?? '') + Buffer.from(data).toString()
+              const lines = socket._injBuf.split('\n')
+              socket._injBuf = lines.pop() ?? ''
+              for (const line of lines) {
+                if (!line.trim()) continue
+                let obj: any
+                try {
+                  obj = JSON.parse(line)
+                } catch (e) {
+                  process.stderr.write(`line-channel: inject 行解析失敗、忽略: ${e}\n`)
+                  continue
+                }
+                if (
+                  obj?.type === 'inject' &&
+                  typeof obj.token === 'string' &&
+                  obj.token === injectToken &&
+                  obj.notification?.method
+                ) {
+                  // 不 await：data handler 非 async；投遞照既有 notifyAll（owner self-filter + IPC 廣播）。
+                  notifyAll(obj.notification).catch(() => {})
+                } else {
+                  process.stderr.write('line-channel: inject 行 token 不符或格式錯、拒絕\n')
+                }
+              }
+            } catch (e) {
+              process.stderr.write(`line-channel: inject data handler 例外（已吞）: ${e}\n`)
+            }
+          },
           error(socket: any, err: any) { ipcClients.delete(socket) },
         },
       })
@@ -834,6 +992,8 @@ function shutdown(): void {
   process.stderr.write('line-channel: 關閉中\n')
   if (!portAlreadyInUse) {
     try { unlinkSync(IPC_SOCKET_PATH) } catch {}
+    // owner 關閉時連 inject token 一起 unlink（單一來源、避免殘留舊 token）。
+    try { unlinkSync(INJECT_TOKEN_PATH) } catch {}
   }
   setTimeout(() => process.exit(0), 2000)
 }

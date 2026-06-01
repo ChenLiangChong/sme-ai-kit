@@ -36,6 +36,7 @@ def store_fact(
     source_quote: str,
     set_by: str,
     business_unit: str,
+    confidential: bool,
     related_rule_ids: list[int],
 ) -> str:
     if source_type not in ("explicit", "observed", "inferred"):
@@ -74,10 +75,10 @@ def store_fact(
 
         cursor = db.execute(
             "INSERT INTO business_rules "
-            "(category, title, content, source_type, source_quote, set_by, business_unit) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "(category, title, content, source_type, source_quote, set_by, business_unit, confidential) "
+            "VALUES (?,?,?,?,?,?,?,?)",
             (category, title, content, source_type, source_quote.strip() or None,
-             set_by.strip() or None, business_unit or None),
+             set_by.strip() or None, business_unit or None, 1 if confidential else 0),
         )
         rule_id = cursor.lastrowid
 
@@ -140,6 +141,11 @@ def store_fact(
 # ============================================================
 
 def query_knowledge(question: str, category: str, business_unit: str) -> str:
+    # floor-aware（決策 #168）：非全權限層過濾 confidential=1 的規則 + 交叉引用
+    from shared.floor_policy import is_full_access
+    fa = is_full_access()
+    conf_filter = "" if fa else " AND confidential = 0"
+    conf_filter_rel = "" if fa else " AND ba.confidential = 0 AND bb.confidential = 0"
     like = _like_param(question)
     db = get_db()
     try:
@@ -171,7 +177,7 @@ def query_knowledge(question: str, category: str, business_unit: str) -> str:
 
         rules = db.execute(
             f"SELECT id, category, title, content, source_type, set_by, business_unit, created_at "
-            f"FROM business_rules {bu_filter} LIMIT 10",
+            f"FROM business_rules {bu_filter}{conf_filter} LIMIT 10",
             params,
         ).fetchall()
 
@@ -198,6 +204,7 @@ def query_knowledge(question: str, category: str, business_unit: str) -> str:
                 f"JOIN business_rules bb ON rr.rule_id_b = bb.id "
                 f"WHERE (rr.rule_id_a IN ({placeholders}) OR rr.rule_id_b IN ({placeholders})) "
                 f"AND ba.superseded_by IS NULL AND bb.superseded_by IS NULL "
+                f"{conf_filter_rel} "
                 f"LIMIT 10",
                 rule_ids + rule_ids,
             ).fetchall()
@@ -637,6 +644,10 @@ def get_rule(rule_id: int) -> str:
         ).fetchone()
         if not r:
             return f"ERROR: 找不到規則 #{rule_id}"
+        # 機密規則對非全權限層等同不存在（決策 #168、不洩漏存在性）
+        from shared.floor_policy import is_full_access
+        if r["confidential"] and not is_full_access():
+            return f"ERROR: 找不到規則 #{rule_id}"
 
         superseded_str = ""
         if r["superseded_by"]:
@@ -680,9 +691,14 @@ def get_rule_relations(rule_id: int) -> str:
     db = get_db()
     try:
         rule = db.execute(
-            "SELECT id, title, category FROM business_rules WHERE id = ?", (rule_id,)
+            "SELECT id, title, category, confidential FROM business_rules WHERE id = ?", (rule_id,)
         ).fetchone()
         if not rule:
+            return f"ERROR: 找不到規則 #{rule_id}"
+        # 機密規則對非全權限層等同不存在；關聯也濾掉機密的另一端（決策 #168）
+        from shared.floor_policy import is_full_access
+        fa = is_full_access()
+        if rule["confidential"] and not fa:
             return f"ERROR: 找不到規則 #{rule_id}"
 
         relations = db.execute(
@@ -693,7 +709,8 @@ def get_rule_relations(rule_id: int) -> str:
             "JOIN business_rules ba ON rr.rule_id_a = ba.id "
             "JOIN business_rules bb ON rr.rule_id_b = bb.id "
             "WHERE (rr.rule_id_a = ? OR rr.rule_id_b = ?) "
-            "AND ba.superseded_by IS NULL AND bb.superseded_by IS NULL",
+            "AND ba.superseded_by IS NULL AND bb.superseded_by IS NULL"
+            + ("" if fa else " AND ba.confidential = 0 AND bb.confidential = 0"),
             (rule_id, rule_id),
         ).fetchall()
 
@@ -719,7 +736,31 @@ def get_rule_relations(rule_id: int) -> str:
 # get_context_summary — 啟動流程必跑（系統狀態總攬）
 # ============================================================
 
+def _date_reminders() -> list[str]:
+    """月結／發薪／勞健保／報稅等日期提醒（純日曆推導、無 DB 機密）。各 floor 皆可見。"""
+    today = datetime.now()
+    day, month = today.day, today.month
+    reminders: list[str] = []
+    if day <= 5:
+        reminders.append("每月 1-5 日：月結作業，確認上月帳務")
+    if day in (4, 5):
+        reminders.append("5 日前後：提醒發薪水")
+    if 23 <= day <= 25:
+        reminders.append("25 日前後：提醒繳勞健保")
+    if month % 2 == 1 and 10 <= day <= 15:
+        reminders.append(f"{month}/15：營業稅申報截止")
+    if month == 5:
+        reminders.append("5 月：營所稅 + 綜所稅申報")
+    return reminders
+
+
 def get_context_summary(scope: str) -> str:
+    # floor-aware（決策 #166）：非全權限層（部門/受限）只回安全子集，不洩漏跨部門
+    # 營運（訂單金額/客戶名/任務/審核/庫存/帳款）。BU-scoped 的「本層」區段待 #6
+    # floor-map（dept→BU）後加回；在那之前 fail-safe 一律 drop。
+    from shared.floor_policy import get_floor, is_full_access
+    full_access = is_full_access()
+
     # codex P2.15：maintenance write 跟 read 顯式拆兩階段（不再用 hybrid transaction）
     # Phase 1：過期 stale approvals（with transaction）
     with transaction() as db:
@@ -734,6 +775,60 @@ def get_context_summary(scope: str) -> str:
         company = db.execute("SELECT * FROM company WHERE id = 1").fetchone()
         if company:
             sections.append(f"## {company['name']}（{company['industry'] or '未設定'}）")
+
+        # ── floor gate（決策 #166）──────────────────────────────────
+        # 非全權限層（部門/受限/__unexpanded__ fail-closed）：早退安全子集。
+        # 早退在所有營運區段「之前」→ 日後新增區段預設「全權限限定」、不會誤洩漏。
+        if not full_access:
+            floor = get_floor()
+            sections.append(
+                f"\n_部門範圍精簡視圖（floor={floor or '?'}）：營運儀表板"
+                f"（任務／訂單／帳款／庫存／待審／LINE 訊息）僅機密層與老闆可見。"
+                f"需要本部門資料請直接詢問，或用帶 business_unit 的查詢工具。_"
+            )
+            # 全域企業規則（business_unit 為空 = 全公司共用 SOP、無 BU 機密）
+            global_rules = db.execute(
+                "SELECT category, title FROM business_rules "
+                "WHERE superseded_by IS NULL AND (business_unit IS NULL OR business_unit = '') "
+                "AND confidential = 0 "
+                "ORDER BY created_at DESC LIMIT 10"
+            ).fetchall()
+            if global_rules:
+                sections.append("\n## 公司規則（全域）")
+                for r in global_rules:
+                    sections.append(f"- [{r['category']}] {r['title']}")
+            # 日期提醒（純日曆推導、無 DB 機密）
+            reminders = _date_reminders()
+            if reminders:
+                sections.append("\n## 日期提醒")
+                for r in reminders:
+                    sections.append(f"- {r}")
+            return "\n".join(sections)
+
+        # 主管上報（#9/#173）：flusher 把 pending 推給主管；此處是全權限層的「保底拉取 + 卡關提醒」。
+        # 放在全權限段最前（早退之後）＝部門層永遠看不到、老闆開機第一眼看得到。送不出/無收件人需處理。
+        from shared.escalation import count_stuck_escalations
+        stuck = count_stuck_escalations(db)
+        if stuck["failed"] or stuck["no_recipient"]:
+            sections.append("\n## 主管上報異常（需處理）")
+            if stuck["failed"]:
+                sections.append(
+                    f"- {stuck['failed']} 筆送不出：主管可能未加 OA 好友／token 失效"
+                    f"（查 pending_escalations status='failed'）"
+                )
+            if stuck["no_recipient"]:
+                sections.append(
+                    f"- {stuck['no_recipient']} 筆無收件人：請設老闆 LINE id"
+                    f"（update_company(boss_line_id=...) 或建 role='boss' 員工）"
+                )
+        else:
+            esc_pending = db.execute(
+                "SELECT COUNT(*) c FROM pending_escalations WHERE status='pending'"
+            ).fetchone()["c"]
+            if esc_pending:
+                sections.append(
+                    f"\n## 主管上報\n- {esc_pending} 筆待送出（flusher 投遞中）"
+                )
 
         # 待處理任務
         pending = db.execute(
@@ -919,25 +1014,13 @@ def get_context_summary(scope: str) -> str:
                 delta_str = f"+{delta_tasks}" if delta_tasks > 0 else str(delta_tasks)
                 sections.append(f"- 待處理任務：{current_pending}（{delta_str}）")
 
-            today = datetime.now()
-            day, month = today.day, today.month
-            reminders = []
-            if day <= 5:
-                reminders.append("每月 1-5 日：月結作業，確認上月帳務")
-            if day in (4, 5):
-                reminders.append("5 日前後：提醒發薪水")
-            if 23 <= day <= 25:
-                reminders.append("25 日前後：提醒繳勞健保")
-            if month % 2 == 1 and 10 <= day <= 15:
-                reminders.append(f"{month}/15：營業稅申報截止")
-            if month == 5:
-                reminders.append("5 月：營所稅 + 綜所稅申報")
+            reminders = _date_reminders()
             if reminders:
                 sections.append("\n## 日期提醒")
                 for r in reminders:
                     sections.append(f"- {r}")
 
-            month_start = today.strftime("%Y-%m-01")
+            month_start = datetime.now().strftime("%Y-%m-01")
             push_counts = db.execute(
                 "SELECT channel_id, COUNT(*) as cnt FROM line_messages "
                 "WHERE direction IN ('outbound', 'broadcast') AND created_at >= ? "
@@ -985,6 +1068,7 @@ def log_decision(
     source_quote: str,
     set_by: str,
     business_unit: str,
+    confidential: bool,
 ) -> str:
     sq = (source_quote or "").strip()
     src_type = "explicit" if sq else "inferred"
@@ -995,10 +1079,10 @@ def log_decision(
     with transaction() as db:
         cur = db.execute(
             "INSERT INTO business_rules "
-            "(category, title, content, source_type, source_quote, set_by, business_unit) "
-            "VALUES ('decision_record', ?, ?, ?, ?, ?, ?)",
+            "(category, title, content, source_type, source_quote, set_by, business_unit, confidential) "
+            "VALUES ('decision_record', ?, ?, ?, ?, ?, ?, ?)",
             (title, reason, src_type, sq or None,
-             set_by or "system", business_unit or None),
+             set_by or "system", business_unit or None, 1 if confidential else 0),
         )
         new_id = cur.lastrowid
 

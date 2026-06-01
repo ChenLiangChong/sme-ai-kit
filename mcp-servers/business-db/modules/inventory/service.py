@@ -222,6 +222,11 @@ def _build_purchase_guidance(
 
 
 def low_stock_alerts(business_unit: str) -> str:
+    # floor-aware（決策 #166）：庫存警報跨 BU，且開機 hook 會自動呼叫 → 非全權限層
+    # fail-closed 不洩漏。BU-scoped「本層庫存」待 #6 floor-map（dept→BU）後加回。
+    from shared.floor_policy import is_full_access
+    if not is_full_access():
+        return "（部門範圍精簡視圖：庫存警報僅機密層與老闆可見；本部門庫存待 floor-map 設定後開放查詢）"
     db = get_db()
     try:
         items = repository.list_low_stock(db, business_unit)

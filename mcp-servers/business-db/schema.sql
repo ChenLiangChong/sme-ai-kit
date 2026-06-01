@@ -53,6 +53,10 @@ CREATE TABLE IF NOT EXISTS business_rules (
     source_quote TEXT,
     set_by TEXT,
     business_unit TEXT,
+    -- confidential 欄（機密分級，決策 #168）由 migration 006 以 ALTER ADD COLUMN 加入，
+    -- 刻意不寫進此 CREATE TABLE：否則 fresh install 先建含此欄的表、migration 006 再 ALTER 會
+    -- duplicate column 崩（run_migrations 無 per-statement try/except）。慣例：schema.sql=凍結 baseline，
+    -- 新表/新欄一律只走 migrations（leave_* / access_zones / pending_escalations 同理）。
     superseded_by INTEGER REFERENCES business_rules(id) ON DELETE SET NULL,
     created_at DATETIME DEFAULT (datetime('now', 'localtime')),
     CHECK (source_type IN ('explicit', 'observed', 'inferred')),

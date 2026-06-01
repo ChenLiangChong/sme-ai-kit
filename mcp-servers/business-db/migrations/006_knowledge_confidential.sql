@@ -1,0 +1,14 @@
+-- 006: 知識庫機密分級（決策 #168）
+-- business_rules 加敏感度軸 confidential，跟 business_unit（事業體）是兩條獨立的軸：
+--   business_unit 管「哪個部門/事業體」；confidential 管「敏感度（誰能看）」。
+-- 0 = 全員可見（部門層經 BU-scoping 後可見）
+-- 1 = 僅機密層 / 老闆（full-access floor：SME_FLOOR='' 或 'confidential'）
+-- 非全權限層的 get_context_summary / query_knowledge / get_rule / get_rule_relations
+-- 會過濾掉 confidential=1（shared/floor_policy.is_full_access()）。
+--
+-- 純加欄位（通用模組安全、預設 0 不影響既有行為）。工具層預設：
+--   log_decision → confidential=True（老闆決策預設機密）
+--   store_fact   → confidential=False（SOP/規則預設公開、員工要遵守）
+-- 「把現有 decision_record 標機密」是本 instance 的一次性資料整理、不烤進通用 migration；
+-- 真正的機密政策由 onboarding(#6) 依客戶客製決定。
+ALTER TABLE business_rules ADD COLUMN confidential INTEGER NOT NULL DEFAULT 0;

@@ -270,7 +270,7 @@ NPS = 推薦者% - 批評者%
 1. `reply(channel_id='default', chat_id=客戶chat_id, text='收到您的反映，我們非常重視，正在處理中。')`
 2. `log_interaction(actor='AI助理', action='complaint', detail=客訴內容)`
 3. `query_knowledge(question=問題描述, category='customer_service')` — 查處理規則
-4. 依規則處理或 `create_approval(type='refund', summary=退款摘要, detail='{"resume_action": "record_transaction", "resume_params": {"type": "expense", "amount": 退款金額, "category": "refund", "description": "退款給{客戶}"}, "then": "退款後 LINE 通知客戶"}')` — 超出權限建審核
+4. 退款：直接 `record_transaction(type='expense', category='refund', amount=退款金額, description='退款給{客戶}')`——超門檻它會用完整 `resume_params` 自動建審核並上報（決策 #183）、**勿自行 `create_approval`**；記帳完成後 LINE 通知客戶
 
 ## 中斷恢復
 

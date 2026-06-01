@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 
 from shared.business_units import _validate_business_unit
 from shared.db import _now, get_db, transaction
+from shared.escalation import enqueue_escalation
 from shared.utils import _build_guidance
 
 from . import repository
@@ -34,14 +35,20 @@ def create_in_tx(
     approver: str = "",
     business_unit: str = "",
     ttl_hours: int = _APPROVAL_TTL_HOURS,
+    escalate: bool = True,
 ) -> int:
     """Caller-managed-tx 版的 create approval。回傳 approval_id。
 
     供其他 service（如 leave/request_leave）在自己的 with transaction() 內呼叫、
     避免「nested transaction」問題。new connection 版的 create() 是這個的 wrapper。
+
+    escalate=True（預設）：審核請求一建立就走 enqueue_escalation 上報「待核准」給簽核人
+    （老闆 / 主管）。與 approval 寫入同一 caller-managed tx＝agent 跳不過、不靠 agent 再記得
+    「請透過 LINE 通知主管」。actor / 收件人在 enqueue 當下解析寫死（floored 取 verified
+    user_id），event_type='approval_pending' 預設開、onboarding 可在 settings 關。
     """
     expires = (datetime.now() + timedelta(hours=ttl_hours)).strftime("%Y-%m-%d %H:%M:%S")
-    return repository.insert_approval(
+    approval_id = repository.insert_approval(
         db,
         type_=type_,
         summary=summary,
@@ -51,6 +58,20 @@ def create_in_tx(
         business_unit=business_unit or None,
         expires_at=expires,
     )
+    if escalate:
+        enqueue_escalation(
+            db,
+            event_type="approval_pending",
+            summary=f"#{approval_id}（{type_}）：{summary}",
+            detail={
+                "approval_id": approval_id, "type": type_,
+                "requester": requester or "system",
+                "business_unit": business_unit or None,
+            },
+            actor_user_id="",
+            business_unit=business_unit,
+        )
+    return approval_id
 
 
 def create(
@@ -75,7 +96,7 @@ def create(
     bu_label = f"\n事業體：{business_unit}" if business_unit else ""
     return (
         f"審核請求 #{approval_id} 已建立\n類型：{type_}{bu_label}\n摘要：{summary}\n"
-        f"等待審核中（{_APPROVAL_TTL_HOURS} 小時內有效）。請透過 LINE 通知主管。"
+        f"等待審核中（{_APPROVAL_TTL_HOURS} 小時內有效）。系統已自動上報簽核人（老闆/主管）。"
         + bu_warn
     )
 
@@ -89,7 +110,7 @@ class GateResult:
     """HITL approval gate 檢查結果，4 種狀態靠 3 個欄位辨識：
 
     - error 非 None         → caller 應 return error（approval 無效/不符）
-    - needs_approval=True   → caller 應 return _build_approval_request(...)（金額超門檻）
+    - needs_approval=True   → caller 應自建審核（create_in_tx）並回提示（金額超門檻、決策 #183）
     - approval_id 非 None    → caller 通過、寫入後須 gate_consume(approval_id)
     - 三者皆預設值          → caller 通過、無需 consume（amount < threshold）
     """
@@ -115,7 +136,7 @@ def gate_check(
             threshold=..., expected_action='record_transaction',
             verify_fields={...})
         if gate.error: return gate.error
-        if gate.needs_approval: return _build_approval_request(...)
+        if gate.needs_approval: ...自建審核 create_in_tx(db, ...)、回「已建審核 #N」（決策 #183）
         # ... 業務寫入 ...
         if gate.approval_id:
             approvals_service.gate_consume(db, approval_id=gate.approval_id,
@@ -199,6 +220,20 @@ def resolve(approval_id: int, decision: str, decided_by: str) -> str:
         return "ERROR: decision 必須是 approved 或 rejected"
 
     with transaction() as db:
+        # 簽核權限（#24）：非全權限層（部門 session）必須由 line-channel 驗證過的 manager 以上
+        # 操作者執行——防部門基層員工冒名核准財務/敏感審核。actor 走 active-request（agent 不可
+        # 偽造）、查不到當前 LINE 脈絡 → __unverified__ → _check_permission 擋下。全權限層
+        # （confidential / operator＝老闆自己的可信 session）放行、不卡終端機直打的核准。
+        from shared.floor_policy import is_full_access
+        if not is_full_access():
+            from shared.auth import _check_permission
+            perm_err = _check_permission(db, "", "manager")
+            if perm_err:
+                return (
+                    f"ERROR: 無權簽核審核 #{approval_id}"
+                    f"（{perm_err.removeprefix('ERROR: ')}）。"
+                    "簽核需 manager 以上、且須由本人 LINE 操作。"
+                )
         approval = repository.get_waiting(db, approval_id)
         if not approval:
             expired = repository.get_expired(db, approval_id)
@@ -314,6 +349,8 @@ def verify_resume_params(
         detail_obj = json.loads(approval["detail"])
     except (json.JSONDecodeError, TypeError):
         return f"ERROR: 審核 #{approval['id']} detail 格式錯誤（非合法 JSON）"
+    if not isinstance(detail_obj, dict):
+        return f"ERROR: 審核 #{approval['id']} detail 格式錯誤（resume detail 應為物件）"
 
     actual_action = detail_obj.get("resume_action", "")
     if actual_action != expected_action:
@@ -322,7 +359,11 @@ def verify_resume_params(
             f"不能用於 {expected_action!r}（防止 approval 挪作他用）"
         )
 
-    actual_params = detail_obj.get("resume_params", {}) or {}
+    # 不用 `or {}`：falsy 非 dict（[] / "" / 0 / false / null）要走下面「格式錯誤」分支、不可被
+    # 靜默轉成 {}（否則退化成「缺欄位」訊息、型別錯誤被吞）。只有 key 缺失才用預設 {}。
+    actual_params = detail_obj.get("resume_params", {})
+    if not isinstance(actual_params, dict):
+        return f"ERROR: 審核 #{approval['id']} resume_params 格式錯誤（應為物件）"
     mismatches: list[str] = []
     for field, expected_value in fields_to_match.items():
         if field not in actual_params:

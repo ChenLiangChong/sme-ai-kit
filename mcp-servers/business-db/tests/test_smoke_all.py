@@ -26,6 +26,13 @@ DB_PATH = _tmp.name
 _tmp.close()
 os.environ["SME_DB_PATH"] = DB_PATH
 
+# 隔離 in-session push（test hygiene）：把 LINE_STATE_DIR 指向 throwaway 暫存目錄。
+# enqueue_escalation 的 post-commit drain 會呼叫 inject_to_sessions、它讀 <LINE_STATE_DIR>/inject.token；
+# 暫存目錄沒 token → 靜默 no-op，絕不連到 live ~/.claude/channels/line/broadcast.sock 污染真 session。
+_TEST_STATE_DIR = tempfile.mkdtemp(prefix="sme-test-state-")
+os.environ["LINE_STATE_DIR"] = _TEST_STATE_DIR
+atexit.register(lambda: __import__("shutil").rmtree(_TEST_STATE_DIR, ignore_errors=True))
+
 
 @atexit.register
 def _cleanup():
@@ -1733,8 +1740,8 @@ detail_record_txn = json.dumps({
     "resume_action": "record_transaction",
     "resume_params": {
         "type": "expense", "amount": 12000, "category": "設備",
-        "description": "電腦", "transaction_date": "",
-        "related_customer_id": 0, "related_order_id": 0,
+        "description": "電腦", "transaction_date": "2026-01-15",
+        "related_customer_id": 0, "related_order_id": 0, "related_invoice": "",
         "business_unit": "", "payment_status": "paid", "due_date": "",
     },
     "then": "記帳完成後通知主管",
@@ -1754,8 +1761,8 @@ _assert("p2.13: resolve approval to approved", "已" in r or "核准" in r)
 
 # 用 approval 真正記帳 → 應成功
 r = server.record_transaction(type="expense", amount=12000, category="設備",
-                               description="電腦", payment_status="paid",
-                               approved_id=record_appr_id)
+                               description="電腦", transaction_date="2026-01-15",
+                               payment_status="paid", approved_id=record_appr_id)
 _assert("p2.13: first use of approval succeeds",
         "帳目" in r and "#" in r, detail=r[:150])
 
@@ -1785,8 +1792,11 @@ r = server.create_approval(type="expense", summary="購買印表機 NT$8000",
                             detail=json.dumps({
                                 "resume_action": "record_transaction",
                                 "resume_params": {
-                                    "type": "expense", "amount": 8000,
-                                    "category": "設備", "business_unit": "",
+                                    "type": "expense", "amount": 8000, "category": "設備",
+                                    "description": "印表機", "transaction_date": "2026-01-15",
+                                    "related_customer_id": 0, "related_order_id": 0,
+                                    "related_invoice": "", "business_unit": "",
+                                    "payment_status": "paid", "due_date": "",
                                 },
                             }, ensure_ascii=False),
                             approver="老闆", requester="員工A")
@@ -1821,8 +1831,8 @@ _assert("p2.13: MEDIUM — approval type mismatch blocked",
 
 # 用對的 params → 應成功
 r = server.record_transaction(type="expense", amount=8000, category="設備",
-                               description="印表機", payment_status="paid",
-                               approved_id=printer_appr_id)
+                               description="印表機", transaction_date="2026-01-15",
+                               payment_status="paid", approved_id=printer_appr_id)
 _assert("p2.13: matching params succeeds",
         "帳目" in r and "#" in r, detail=r[:150])
 
@@ -1831,6 +1841,83 @@ r = server.record_transaction(type="expense", amount=20000, category="設備",
                                description="ghost approval", approved_id=99999)
 _assert("p2.13: non-existent approval blocked",
         "ERROR" in r and ("不存在" in r or "未核准" in r), detail=r[:150])
+
+# === 決策 #183：record_transaction 超門檻「系統自建審核」+ 自建 approval 可乾淨 consume ===
+# 這是 #25 live 測暴露 bug 的回歸測試：舊流程 agent 手寫 4 欄 approval、被 11 欄 gate 擋。
+# 系統自建必產完整 11 欄 → 核准後原樣 replay → consume 必過（#10 失敗的那一步）。
+r = server.record_transaction(type="expense", amount=18000, category="設備",
+                               description="伺服器", transaction_date="2026-01-20",
+                               business_unit="brand_a", payment_status="paid")
+_assert("p2.13: #183 超門檻無 approved_id → 系統自建審核（非舊字串、不叫 agent create_approval）",
+        "已自動建立審核" in r and "#" in r and "create_approval" not in r, detail=r[:200])
+
+db = server.get_db()
+_auto_row = db.execute(
+    "SELECT id, detail, status FROM approvals WHERE summary LIKE '%伺服器%' "
+    "ORDER BY id DESC LIMIT 1"
+).fetchone()
+db.close()
+auto_appr_id = _auto_row[0]
+_auto_detail = json.loads(_auto_row[1])
+_auto_rp = _auto_detail.get("resume_params", {})
+_REQ_11 = {"type", "amount", "category", "description", "transaction_date",
+           "related_customer_id", "related_order_id", "related_invoice",
+           "business_unit", "payment_status", "due_date"}
+_assert("p2.13: #183 自建審核 status=waiting", _auto_row[2] == "waiting")
+_assert("p2.13: #183 自建 resume_params 完整 11 欄（非 4 欄）",
+        set(_auto_rp.keys()) == _REQ_11, detail=f"keys={sorted(_auto_rp.keys())}")
+_assert("p2.13: #183 resume_action=record_transaction",
+        _auto_detail.get("resume_action") == "record_transaction")
+
+# 自建審核同時觸發 approval_pending 上報（#23、簽核人會被通知）
+db = server.get_db()
+_esc_cnt = db.execute(
+    "SELECT COUNT(*) FROM pending_escalations WHERE event_type='approval_pending' "
+    "AND summary LIKE ?", (f"%#{auto_appr_id}（%",)
+).fetchone()[0]
+db.close()
+_assert("p2.13: #183 自建審核觸發 approval_pending 上報", _esc_cnt >= 1,
+        detail=f"escalations={_esc_cnt}")
+
+# 核准 → 原樣 replay 鎖定的 resume_params → consume 必成功（#10 回歸：4 欄會在這步被擋）
+server.resolve_approval(approval_id=auto_appr_id, decision="approved", decided_by="老闆")
+r = server.record_transaction(approved_id=auto_appr_id, **_auto_rp)
+_assert("p2.13: #183 自建審核 replay resume_params → consume 成功（#10 回歸）",
+        "帳目" in r and "#" in r, detail=r[:200])
+
+# round-2 MED：完整 resume_params 綁定 — 同金額同類型但改 category / related_invoice 也要擋
+# （防「拿同一張已核准 approval 改掛別的發票/類別後執行」）
+_bind_rp = {
+    "type": "expense", "amount": 7700, "category": "設備",
+    "description": "綁定測試", "transaction_date": "2026-01-15",
+    "related_customer_id": 0, "related_order_id": 0, "related_invoice": "INV-AAA",
+    "business_unit": "", "payment_status": "paid", "due_date": "",
+}
+def _mk_bind_appr(summary):
+    server.create_approval(type="expense", summary=summary,
+                           detail=json.dumps({"resume_action": "record_transaction",
+                                              "resume_params": _bind_rp}, ensure_ascii=False),
+                           approver="老闆", requester="員工A")
+    _bdb = server.get_db()
+    _bid = _bdb.execute("SELECT id FROM approvals WHERE summary = ? AND status = 'waiting'",
+                        (summary,)).fetchone()[0]
+    _bdb.close()
+    server.resolve_approval(approval_id=_bid, decision="approved", decided_by="老闆")
+    return _bid
+
+r = server.record_transaction(type="expense", amount=7700, category="餐飲",
+                               description="綁定測試", transaction_date="2026-01-15",
+                               related_invoice="INV-AAA", payment_status="paid",
+                               approved_id=_mk_bind_appr("綁定測試-改類別"))
+_assert("p2.13: full-bind — tampered category blocked",
+        "ERROR" in r and "不符" in r and "category" in r, detail=r[:160])
+
+r = server.record_transaction(type="expense", amount=7700, category="設備",
+                               description="綁定測試", transaction_date="2026-01-15",
+                               related_invoice="INV-EVIL", payment_status="paid",
+                               approved_id=_mk_bind_appr("綁定測試-改發票"))
+_assert("p2.13: full-bind — tampered related_invoice blocked",
+        "ERROR" in r and "不符" in r and "related_invoice" in r, detail=r[:160])
 
 # create_order 也跑 happy path + reuse 擋
 order_items = json.dumps([{"sku": "SKU-001", "name": "香氛蠟燭", "qty": 1, "price": 500}])
@@ -1935,6 +2022,54 @@ r = server.record_transaction(type="expense", amount=7000, category="設備",
 _assert("p2.13: malformed detail JSON blocked",
         "ERROR" in r and "格式錯誤" in r, detail=r[:200])
 
+# round-4 MED：detail 是合法 JSON 但形狀錯（list / resume_params 非 dict）→ 乾淨 ERROR、不可拋例外
+server.create_approval(type="expense", summary="detail 是 list",
+                       detail='["x"]', approver="老闆", requester="test")
+db = server.get_db()
+list_detail_id = db.execute(
+    "SELECT id FROM approvals WHERE summary = 'detail 是 list' AND status = 'waiting'"
+).fetchone()[0]
+db.close()
+server.resolve_approval(approval_id=list_detail_id, decision="approved", decided_by="老闆")
+r = server.record_transaction(type="expense", amount=5500, category="設備",
+                               description="拿 list detail", payment_status="paid",
+                               approved_id=list_detail_id)
+_assert("p2.13: detail 是 list → 乾淨 ERROR（不拋例外）",
+        "ERROR" in r and "格式錯誤" in r, detail=r[:200])
+
+server.create_approval(type="expense", summary="resume_params 是 list",
+                       detail='{"resume_action": "record_transaction", "resume_params": ["type"]}',
+                       approver="老闆", requester="test")
+db = server.get_db()
+list_rp_id = db.execute(
+    "SELECT id FROM approvals WHERE summary = 'resume_params 是 list' AND status = 'waiting'"
+).fetchone()[0]
+db.close()
+server.resolve_approval(approval_id=list_rp_id, decision="approved", decided_by="老闆")
+r = server.record_transaction(type="expense", amount=5600, category="設備",
+                               description="拿 list resume_params", payment_status="paid",
+                               approved_id=list_rp_id)
+_assert("p2.13: resume_params 是 list → 乾淨 ERROR（不拋例外）",
+        "ERROR" in r and "格式錯誤" in r, detail=r[:200])
+
+# round-5 LOW：falsy 非 dict resume_params（[] / null）也要走「格式錯誤」、不可被 or {} 靜默吞
+for _bad_label, _bad_detail, _bad_amt in [
+    ("resume_params 空 list", '{"resume_action": "record_transaction", "resume_params": []}', 5700),
+    ("resume_params 是 null", '{"resume_action": "record_transaction", "resume_params": null}', 5800),
+]:
+    server.create_approval(type="expense", summary=_bad_label, detail=_bad_detail,
+                           approver="老闆", requester="test")
+    _bdb = server.get_db()
+    _bad_id = _bdb.execute("SELECT id FROM approvals WHERE summary = ? AND status = 'waiting'",
+                           (_bad_label,)).fetchone()[0]
+    _bdb.close()
+    server.resolve_approval(approval_id=_bad_id, decision="approved", decided_by="老闆")
+    r = server.record_transaction(type="expense", amount=_bad_amt, category="設備",
+                                   description="拿 " + _bad_label, payment_status="paid",
+                                   approved_id=_bad_id)
+    _assert("p2.13: " + _bad_label + " → 乾淨 ERROR（格式錯誤、不拋例外）",
+            "ERROR" in r and "格式錯誤" in r, detail=r[:200])
+
 # missing detail 整段 → 擋（detail=None / 空）
 db = server.get_db()
 db.execute("INSERT INTO approvals (type, summary, detail, status) "
@@ -1974,8 +2109,11 @@ server.create_approval(type="expense", summary="整數金額",
                        detail=json.dumps({
                            "resume_action": "record_transaction",
                            "resume_params": {
-                               "type": "expense", "amount": 12000,
-                               "business_unit": "",
+                               "type": "expense", "amount": 12000, "category": "設備",
+                               "description": "整數浮點等價", "transaction_date": "2026-01-15",
+                               "related_customer_id": 0, "related_order_id": 0,
+                               "related_invoice": "", "business_unit": "",
+                               "payment_status": "paid", "due_date": "",
                            },
                        }, ensure_ascii=False),
                        approver="老闆", requester="test")
@@ -1993,8 +2131,8 @@ _assert("p2.13: float tolerance — int 12000 vs 12000.009 blocked",
 
 # 整數與整數浮點等價：12000 vs 12000.0 → 應通過
 r = server.record_transaction(type="expense", amount=12000.0, category="設備",
-                               description="整數浮點等價", payment_status="paid",
-                               approved_id=int_amt_id)
+                               description="整數浮點等價", transaction_date="2026-01-15",
+                               payment_status="paid", approved_id=int_amt_id)
 _assert("p2.13: int 12000 vs 12000.0 passes (whole numbers)",
         "帳目" in r and "#" in r, detail=r[:200])
 
@@ -2099,8 +2237,11 @@ server.create_approval(type="expense", summary="rollback 路徑",
                        detail=json.dumps({
                            "resume_action": "record_transaction",
                            "resume_params": {
-                               "type": "expense", "amount": 11000,
-                               "business_unit": "",
+                               "type": "expense", "amount": 11000, "category": "設備",
+                               "description": "rollback marker", "transaction_date": "2026-01-15",
+                               "related_customer_id": 0, "related_order_id": 0,
+                               "related_invoice": "", "business_unit": "",
+                               "payment_status": "paid", "due_date": "",
                            },
                        }, ensure_ascii=False),
                        approver="老闆", requester="test")
@@ -2117,8 +2258,8 @@ try:
     raised = False
     try:
         server.record_transaction(type="expense", amount=11000, category="設備",
-                                   description="rollback marker", payment_status="paid",
-                                   approved_id=rollback_appr_id)
+                                   description="rollback marker", transaction_date="2026-01-15",
+                                   payment_status="paid", approved_id=rollback_appr_id)
     except RuntimeError:
         raised = True
     _assert("p2.13: MEDIUM F — mark_consumed rowcount=0 raises RuntimeError",
@@ -2132,6 +2273,30 @@ try:
             bad_cnt == 0, detail=f"transactions with 'rollback marker' = {bad_cnt}")
 finally:
     _appr_repo.mark_consumed = orig_mark
+
+
+# === notifier 控制檔受保護路徑不變量（round-5/6：lock / 暫存 mcp-config 不可落 floor-writable /tmp）===
+
+_section("notifier 控制檔受保護路徑")
+from shared.escalation import _notifier_state_dir, _notifier_lock_path
+import os as _os_ni
+_old_lsd = _os_ni.environ.get("LINE_STATE_DIR")
+try:
+    _os_ni.environ["LINE_STATE_DIR"] = "/srv/protected/state"
+    _assert("notifier: state dir 尊重 LINE_STATE_DIR",
+            _notifier_state_dir() == "/srv/protected/state")
+    _assert("notifier: lock 在 state dir 下、非 /tmp",
+            _notifier_lock_path() == "/srv/protected/state/sme-notifier.lock"
+            and not _notifier_lock_path().startswith("/tmp"))
+    _os_ni.environ.pop("LINE_STATE_DIR", None)
+    _assert("notifier: 無 LINE_STATE_DIR 時 fallback ~/.claude（非 /tmp）",
+            _notifier_state_dir().endswith("/.claude/channels/line")
+            and not _notifier_state_dir().startswith("/tmp"))
+finally:
+    if _old_lsd is None:
+        _os_ni.environ.pop("LINE_STATE_DIR", None)
+    else:
+        _os_ni.environ["LINE_STATE_DIR"] = _old_lsd
 
 
 # === Schema version check ===

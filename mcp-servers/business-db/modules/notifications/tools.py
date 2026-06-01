@@ -3,6 +3,7 @@
 Phase 2.4 三層化（套 P2.1 attachments pattern）。
 """
 from shared.mcp_instance import mcp
+from shared import escalation as _escalation
 
 from . import service
 
@@ -77,3 +78,29 @@ def list_line_groups(group_type: str = "", channel_id: str = "") -> str:
         channel_id: 篩選 LINE OA channel（多品牌模式），留空=全部
     """
     return service.list_line_groups(group_type=group_type, channel_id=channel_id)
+
+
+@mcp.tool()
+def list_pending_escalations(limit: int = 50) -> str:
+    """列出待投遞的主管上報（status=pending、已解析收件人）。全權限層限定（部門層由 floor gate 移除）。
+
+    給 claude -p 通報投遞器用：讀出後逐筆用 mcp__line__reply 推給「該筆的 target_line_user_id」
+    （收件人一律照 row、不可自行決定），再呼叫 mark_escalation_sent(id)。
+    回 JSON：{"pending":[{id,event_type,summary,actor,business_unit,target_line_user_id,channel_id}],"count"}。
+
+    Args:
+        limit: 最多回幾筆（預設 50）
+    """
+    return _escalation.list_pending_for_notifier(limit=limit)
+
+
+@mcp.tool()
+def mark_escalation_sent(escalation_id: int) -> str:
+    """標記某筆主管上報已送達（status pending→sent）。通報投遞器推送成功後呼叫。
+
+    rowcount guard 防重複送（已 sent / 不存在 → 回無法標記、不報錯）。
+
+    Args:
+        escalation_id: pending_escalations 的 id
+    """
+    return _escalation.mark_sent_tool(escalation_id)

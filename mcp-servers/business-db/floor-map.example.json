@@ -1,0 +1,17 @@
+{
+  "_README": "能力設定層（決策 #171）— floor → 該層能力。複製成 data/floor-map.json 並改成你公司的實際部門/品牌。無此檔時系統用安全預設（全權限層 operator/confidential 看全部、其餘 financial=none/role=staff/上報 boss）= 等同未啟用、向後相容。導入(onboarding)時客製這張表。應被 floored session sandbox denyRead（跨層設定不給部門 agent 讀）。",
+  "_fields": {
+    "business_units": "此層可碰哪些事業體/品牌（字串陣列；[] 或省略=未指定）。給路由 + #11 BU-scoping 用。",
+    "financial_visibility": "none（看不到財務、預設）| all（看全部財務，如會計層）| own_bu（只看自己 BU 的財務、待 #11 BU-scoping；目前 fail-closed 等同 none）",
+    "role": "boss | manager | staff（給 #9 上報 / #10 HITL 用）",
+    "escalation_target": "上報給誰：floor 名 / LINE user_id / 'boss'（給 #9 用）",
+    "department": "人看的部門標籤"
+  },
+  "floors": {
+    "confidential": {"financial_visibility": "all", "role": "boss", "escalation_target": "boss", "department": "機密 / 老闆層（全權限、看全部）"},
+    "general": {"financial_visibility": "none", "role": "staff", "escalation_target": "boss", "department": "一般部門（看不到財務/HR）"},
+    "external": {"financial_visibility": "none", "role": "staff", "escalation_target": "boss", "department": "對外業務層"},
+    "accounting": {"financial_visibility": "all", "role": "manager", "escalation_target": "boss", "department": "會計層（看全部財務、不碰 HR/員工）"},
+    "sales_brand_a": {"business_units": ["brand_a"], "financial_visibility": "own_bu", "role": "manager", "escalation_target": "boss", "department": "（多品牌範例）品牌A業務：只看 A 的財務（待 #11 才真正生效）"}
+  }
+}

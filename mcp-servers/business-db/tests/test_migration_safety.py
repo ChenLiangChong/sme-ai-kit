@@ -77,17 +77,31 @@ if "server" in sys.modules:
 import server  # noqa: E402
 
 server.DB_PATH = db_path
-server.init_db()  # 跑既有 init_db 邏輯 + run_migrations
 
-conn = sqlite3.connect(db_path)
-rows = conn.execute("SELECT version, notes FROM schema_version").fetchall()
-check("fresh DB: schema_version has version 1 (baseline)",
-      any(r[0] == 1 for r in rows))
-check("fresh DB: noted as baseline",
-      any("baseline" in (r[1] or "") for r in rows))
-check("fresh DB: current_version >= 1 (latest of all applied)",
-      current_version(conn) >= 1)
-conn.close()
+# init_db() 不可崩。常見崩法（決策 #174）：新欄位同時寫進 schema.sql 的 CREATE TABLE
+# 又留在某 migration 的 ALTER ADD COLUMN → fresh DB 先建含欄的表、migration 再 ALTER →
+# duplicate column → run_migrations 無 per-statement try/except → RuntimeError → 起不來。
+_fresh_ok, _fresh_err = True, ""
+try:
+    server.init_db()  # 跑既有 init_db 邏輯 + run_migrations
+except Exception as e:
+    _fresh_ok, _fresh_err = False, repr(e)
+check("fresh DB: init_db() 不崩（schema.sql=凍結 baseline、新表/新欄只走 migration）",
+      _fresh_ok, detail=_fresh_err)
+
+if _fresh_ok:
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("SELECT version, notes FROM schema_version").fetchall()
+    check("fresh DB: schema_version has version 1 (baseline)",
+          any(r[0] == 1 for r in rows))
+    check("fresh DB: noted as baseline",
+          any("baseline" in (r[1] or "") for r in rows))
+    # 跑到最新 migration 版本＝所有 migration 都 apply 成功（auto-track migrations 目錄、不寫死）
+    _latest = max((_parse_version(p.name) for p in _list_migration_files()), default=0)
+    check(f"fresh DB: 跑到最新 migration 版本 {_latest}（每支 migration 都 apply 成功、無中途崩）",
+          current_version(conn) == _latest,
+          detail=f"got {current_version(conn)}, latest {_latest}")
+    conn.close()
 
 
 # === 2. Existing DB baseline detection ===
@@ -130,21 +144,30 @@ import server  # noqa: F811
 
 server.DB_PATH = db_path4
 
-# 跑 3 次 init_db
-for i in range(3):
-    server.init_db()
+def _table_count(path: str) -> int:
+    c = sqlite3.connect(path)
+    try:
+        return c.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchone()[0]
+    finally:
+        c.close()
+
+# 跑 3 次 init_db；table 數比「1 次後」vs「3 次後」是否相同（測冪等、不寫死絕對表數，
+# 否則每加一個 migration 表就要改測試＝又會 stale，正是 #174 stale test 的根因）
+server.init_db()
+_count_after_1 = _table_count(db_path4)
+server.init_db()
+server.init_db()
+_count_after_3 = _table_count(db_path4)
 conn = sqlite3.connect(db_path4)
 rows = conn.execute("SELECT version FROM schema_version").fetchall()
 check("idempotent: 3 次 init_db 後 schema_version 沒重複 row",
       len(rows) == len(set(r[0] for r in rows)),
       detail=f"versions: {[r[0] for r in rows]}")
-table_count = conn.execute(
-    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-).fetchone()[0]
-# 20 業務 table（schema.sql CREATE TABLE）+ 1 schema_version + 3 leave_*（migration 004）= 24
-# 注意：若未來 migration 加新表，這裡也要更新；ALTER ADD COLUMN 不影響表數
-check("idempotent: table 數穩定（20 業務 + 3 leave + schema_version = 24）",
-      table_count == 24, detail=f"got {table_count}")
+check("idempotent: table 數穩定（1 次 vs 3 次 init 相同、不隨重跑增減）",
+      _count_after_1 == _count_after_3,
+      detail=f"after1={_count_after_1} after3={_count_after_3}")
 conn.close()
 
 

@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from shared.auth import _check_permission
 from shared.business_units import _get_approval_threshold, _validate_business_unit
 from shared.db import _now, get_db, transaction
+from shared.escalation import enqueue_escalation
 from shared.utils import _build_guidance
 
 from modules.approvals import service as approvals_service
@@ -197,7 +198,7 @@ def _build_order_approval_request(
         + _build_guidance(next_steps=[
             f"create_approval(type='purchase', "
             f"summary='建立訂單：{customer_name} NT${total:,.0f}', detail='{detail_json}')",
-            "LINE 通知主管審核",
+            "建立後系統自動上報簽核人（不需另行手動通知主管）",
             "主管核准後再執行 create_order",
         ])
     )
@@ -458,6 +459,18 @@ def qc_order(order_id: int, result: str, notes: str, checked_by: str) -> str:
             detail=f"QC {result}: {notes or '無備註'}",
             business_unit=order["business_unit"],
         )
+        if result == "failed":
+            # REPORT 硬接線（#9/#173）：QC 不合格主管必知（硬接線、取代下方 _build_guidance 可跳過的軟提示）。
+            enqueue_escalation(
+                db,
+                event_type="qc_failed",
+                summary=f"訂單 #{order_id} QC 不合格（{notes or '無備註'}）",
+                detail={"order_id": order_id, "result": result, "notes": notes or None,
+                        "checked_by": checked_by or None,
+                        "business_unit": order["business_unit"]},
+                actor_user_id=checked_by or "",
+                business_unit=order["business_unit"] or "",
+            )
         prev_qc_status = order["qc_status"]
         prev_qc_notes = order["qc_notes"]
         prev_qc_by = order["qc_checked_by"]
@@ -969,6 +982,24 @@ def cancel_order(
             detail=reason,
             business_unit=order["business_unit"],
         )
+        if was_fulfilled:
+            # REPORT 硬接線（#9/#173）：已出貨/已收款訂單被取消退貨＝不可逆高風險，主管必知。
+            enqueue_escalation(
+                db,
+                event_type="order_cancelled_shipped",
+                summary=(
+                    f"已出貨訂單 #{order_id} 被"
+                    f"{'退貨' if cancel_type == 'returned' else '取消'}"
+                    f"（原因：{reason}）"
+                ),
+                detail={"order_id": order_id, "cancel_type": cancel_type,
+                        "reason": reason, "prev_status": order["status"],
+                        "total_amount": order["total_amount"],
+                        "total_paid": total_paid,
+                        "business_unit": order["business_unit"]},
+                actor_user_id=actor_user_id,
+                business_unit=order["business_unit"] or "",
+            )
 
     auto_done.append(f"訂單狀態 → {cancel_type}")
     next_steps: list[str] = []

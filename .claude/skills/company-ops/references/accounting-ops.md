@@ -13,26 +13,17 @@
 
 從對話中提取：類型（收入/支出）、金額、分類、描述、日期
 
-1. 查審核門檻：`record_transaction` 內建門檻攔截（讀 `company` 表的 `approval_threshold`），超過會自動拒絕記帳
-2. AI 應**主動先判斷**，超過門檻先 `create_approval`，不要等 record_transaction 擋
-3. 門檻設定：`update_company(approval_threshold=金額)`
-4. 超過門檻 → 建審核時 `detail` **必須**含完整 `resume_params` 給核准後執行用：
-   ```
-   create_approval(
-     type='purchase',
-     summary='採購碳粉匣 12,000 元',
-     detail='{"resume_action": "record_transaction", "resume_params": {"type": "expense", "amount": 12000, "category": "supplies", "description": "碳粉匣"}, "then": "記帳完成後通知採購人員"}',
-     business_unit=事業體,
-   )
-   ```
-   → 等核准 → 從 approval 取 `resume_params` 呼叫 `record_transaction(...)`
-5. 門檻內 → 直接 `record_transaction`
-6. 回報：「已記錄 {類型} NT${金額} [{分類}]」
+1. **一律直接 `record_transaction(...)`（不帶 `approved_id`）**——不要自己預判門檻、**不要自己 `create_approval`**。門檻分流由 record_transaction 內部處理：
+   - **門檻內** → 直接記帳、回「帳目 #N」。
+   - **超門檻** → 系統自動用完整 `resume_params` 建審核 + 上報簽核人、回「已建審核 #N」（決策 #183：detail 由系統自建、agent 不手寫，確保核准後 gate 一字不差比對得過）。
+2. **核准後執行**：簽核人核准後（LINE 回「核准 #N」或全權限層 `resolve_approval`），由**全權限層 session** 從 approval 取鎖定的 `resume_params` 呼叫 `record_transaction(approved_id=N, ...)` 完成記帳（見 `line-comms.md` 執行模型）。
+3. 門檻設定：`update_company(approval_threshold=金額)`。
+4. 回報：「已記錄 {類型} NT${金額} [{分類}]」。
 
-⚠️ record_transaction 有內建安全網（超過 company.approval_threshold 會自動拒絕），但 AI 應主動先建審核，提供更好的使用體驗。
+⚠️ 決策 #183 的重點轉變：**絕不要自己 `create_approval` 來記帳**。舊流程要求「主動先建審核」會讓 agent 手寫不完整的 `resume_params`（少了 gate 要的欄位）而被擋——現在一律交給 `record_transaction` 自建、agent 不碰 detail。
 
 > 詳細的 HITL gate 行為（`resume_params` 一字不差驗證、`consumed_at` 單次消費、過期保護、ERROR 判讀）統一寫在 **CLAUDE.md HITL 章節**。本檔只列「記帳場景什麼時候要走 HITL」。
-> 重點：核准後**必須**從 approval 取出原始 `resume_params` 再呼叫 `record_transaction`，不要從對話脈絡重新推導金額或事業體，否則會被 gate 擋下。
+> 重點：核准後**必須**從 approval 取出原始 `resume_params` 再呼叫 `record_transaction(approved_id=N)`，不要從對話脈絡重新推導金額或事業體，否則會被 gate 擋下。
 
 缺少資訊時：
 - 沒說金額 → 必問
@@ -349,7 +340,7 @@ record_transaction(type='expense', category='insurance', description='健保-雇
 ## Do's and Don'ts
 
 ### Do
-- 金額超過 `approval_threshold` 時，主動先 `create_approval`，不要等 `record_transaction` 擋
+- 金額超過 `approval_threshold` 時，一律直接 `record_transaction`、由它自建審核——**不要自己 `create_approval`**（決策 #183）
 - 收據看不清楚的欄位直接問，不要猜
 - 金額一律用 NT$ + 千位逗號（如 NT$12,345）
 - 分類完一律告知讓使用者確認
@@ -367,7 +358,7 @@ record_transaction(type='expense', category='insurance', description='健保-雇
 
 ### 記一筆支出
 1. `record_transaction(type='expense', amount=金額, category='supplies', description='買影印紙')`
-→ 超過門檻會自動提示建審核
+→ 超過門檻系統會自動建審核並上報簽核人，不需自己 `create_approval`
 
 ### 月結作業
 1. `monthly_summary(year_month='2026-03')`
