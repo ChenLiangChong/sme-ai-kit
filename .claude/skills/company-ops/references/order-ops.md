@@ -28,8 +28,8 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
 | `list_orders` | 列出訂單 | 可按 customer_id 或 status 篩選 |
 | `update_order` | 更新狀態/物流/備註 | 支援 driver, estimated_delivery |
 | `qc_order` | 品質檢查 | result: passed/failed/partial |
-| `fulfill_order` | 確認出貨 | ⚠️ **自動扣庫存 + 自動建立應收帳款** |
-| `cancel_order` | 取消/退貨 | ⚠️ **自動回補庫存 + 作廢待收帳款** |
+| `fulfill_order` | 確認出貨 | 注意：**自動扣庫存 + 自動建立應收帳款** |
+| `cancel_order` | 取消/退貨 | 注意：**自動回補庫存 + 作廢待收帳款** |
 | `record_payment` | 記錄付款 | 用 transaction_id 銷帳，支援部分付款 |
 
 ---
@@ -55,7 +55,7 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
 | shipped | * | 等待客戶確認送達 → `update_order(order_id=X, status='delivered')` |
 | shipped | passed (re-QC) | 補出貨剩餘品項 → `fulfill_order(order_id=X, partial_items_json='...')` |
 | delivered | * | 收款 → `record_payment(transaction_id=Y, amount=Z)` |
-| paid | * | ✅ 完成，無需動作 |
+| paid | * | 完成，無需動作 |
 
 ### 找到對應的應收帳款
 
@@ -63,7 +63,7 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
 
 ### Tool 回傳值指引
 
-每個訂單操作的 tool（`create_order`、`qc_order`、`fulfill_order`、`record_payment`）回傳值都包含 `👉 下一步` 提示，跟著做即可。不需要背流程。
+每個訂單操作的 tool（`create_order`、`qc_order`、`fulfill_order`、`record_payment`）回傳值都包含「下一步」提示區塊（純文字、條列、由 `_build_guidance` 產生），跟著做即可。不需要背流程。
 
 ---
 
@@ -91,7 +91,7 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
    - 查商品 `sell_price`（`check_stock` 回傳）
    - 特殊報價 → `query_knowledge(question='客戶名 商品名 特價')` 查例外
    - items_json 的 `price` 用**原始售價 sell_price**（不要自己算折扣）
-   - ⚠️ `create_order` 會自動查詢客戶折扣率並套用到訂單總額，不需要手動計算
+   - 注意：`create_order` 會自動查詢客戶折扣率並套用到訂單總額，不需要手動計算
 
 4. **建立訂單**（`create_order` 內建審核門檻檢查）
    ```
@@ -104,9 +104,9 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
    )
    ```
    - `create_order` 會自動計算金額、套用客戶折扣、檢查審核門檻
-   - 超過門檻 → `create_order` 回傳 ⚠️ 提示，**訂單不會建立**
-     → 依提示先 `create_approval` → LINE 通知主管 → 主管核准後再帶 `approved_id` 呼叫 `create_order`
-   - 門檻內 → 訂單直接建立，回傳 ✅ 和下一步指引
+   - 超過門檻 → `create_order` 回傳提示，**訂單不會建立**。`create_order` 是 gate-backed（HITL A 類）：若手動 `create_approval`，`detail` 必須帶 `resume_action='create_order'` + **完整 `resume_params`（與最終 `create_order` 參數一字不差**：customer_id / items_json / business_unit 等），否則核准後消費時 gate 擋下（見 CLAUDE.md〈HITL 審核〉A 類）。核准後帶 `approved_id` 呼叫 `create_order`；通知主管走上報 / 全權限層、非自行 reply
+     - 規劃中（#26）：比照記帳 #183 改為**系統自建審核**、屆時 agent 不手寫 `create_approval`（同 accounting-ops 模式）
+   - 門檻內 → 訂單直接建立，回傳成功訊息和下一步指引
 
 5. **通知**
    - LINE 通知客戶：「訂單 #{id} 已建立，{品項明細}，總金額 NT${total}」
@@ -120,15 +120,17 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
 
 | payment_terms | 流程 |
 |--------------|------|
-| **prepaid** | 通知客戶匯款 → 等 `record_transaction(type='income', related_order_id=訂單ID)` → 付清後才 → confirmed → QC → fulfill |
-| **deposit_30** | 通知客戶付 30% 訂金 → `record_transaction(amount=總額×0.3)` → confirmed → QC → fulfill → 出貨後收尾款 |
+| **prepaid** | 通知客戶匯款 → 收款後 `record_transaction(type='income', amount=訂單總額, category='sales_revenue', related_order_id=訂單ID, payment_status='paid')`（amount=`get_order` 回傳的訂單總額；折扣已含在總額內） → 付清後才 → confirmed → QC → fulfill |
+| **deposit_30** | 通知客戶付 30% 訂金 → `record_transaction(type='income', amount=訂單總額×0.3, category='sales_revenue', related_order_id=訂單ID, payment_status='paid')`（amount=`get_order` 訂單總額×0.3、agent 自行算好金額傳入） → confirmed → QC → fulfill → 出貨後再記尾款（同上、amount=剩餘金額） |
 | **net30 / net60** | 直接 → confirmed → QC → fulfill_order（自動建應收帳款，due_date = 出貨日+30/60天） |
 | **cod** | 直接 → QC → fulfill → 送達時收款 |
 
-⚠️ `fulfill_order` 有內建付款條件檢查：
+注意：`fulfill_order` 有內建付款條件檢查：
 - prepaid 客戶未付全額 → 拒絕出貨
 - deposit_30 客戶未付 30% → 拒絕出貨
 - net30/net60 → 自動帶 due_date
+
+> floor 註記：上表的 `record_transaction`（訂金 / 預付收款）屬財務工具，受 floor gate——floored 非財務 / 非全權限層（`financial_visibility`≠all）呼不到屬正常，需交給有該工具的層 / 全權限層執行（見 CLAUDE.md〈部門安全層（floor）與兩道牆〉、line-comms 第六節〈執行模型〉）。`record_payment` / `check_overdue`（第七節）同此限制。
 
 ---
 
@@ -139,13 +141,13 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
 1. `update_order(order_id, status='confirmed')`
 2. LINE 通知客戶：「訂單 #{id} 已確認，預計 {日期} 出貨」
 3. 如果需要備貨時間較長 → 建立任務：
-   `create_task(title='備貨 訂單#{id}', assignee=倉管, due_date=出貨日前一天, category='delivery')`
+   `create_task(title='備貨 訂單#{id}', assignee=倉管, due_date='<出貨日前一天 YYYY-MM-DD>', category='delivery')`（日期欄位傳實際 `YYYY-MM-DD`、工具不解析自然語言、agent 先換算）
 
 ---
 
 ## 四、品質檢查（出貨前必須步驟）
 
-⚠️ **出貨前必須通過 QC，不可跳過。**
+**出貨前必須通過 QC，不可跳過。**
 
 1. 員工完成備貨後回報
 2. 執行品檢：
@@ -165,6 +167,8 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
 | `passed` | 進入出貨流程（第五節） |
 | `failed` | 通知主管 + 記錄不良原因 + 不出貨 |
 | `partial` | 列出合格/不合格品項 → 問主管：「部分品項不合格，是否部分出貨？」→ 部分出貨流程 |
+
+> 注意：`qc_order(result='failed')` 會**自動上報主管**（escalation `qc_failed` 觸發、系統在同一 transaction 蓋章通知，見 CLAUDE.md〈上報（escalation）機制〉）。表中「通知主管」是系統自動做的——**不要自己 reply 老闆/主管**；floored 受限層的通知一律走上報機制、不自行撈主管 user_id 去 push。
 
 ---
 
@@ -191,7 +195,7 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
    ```
    只指定要出貨的合格品項和數量。不合格品項不列入。
 
-   ⚠️ 這個操作會**自動執行**：
+   注意：這個操作會**自動執行**：
    - 扣減對應品項的庫存（部分出貨只扣指定品項）
    - 在 transactions 表建立應收帳款紀錄（部分出貨按出貨品項金額計算）
    - 訂單 items 會標記 `shipped_qty`（部分出貨時）
@@ -199,9 +203,9 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
    **不要再手動 `update_stock` 或 `record_transaction`**，否則會重複。
 
 2. **不合格品項後續處理**（僅部分出貨時）
-   - 退回供應商 → 建立 task(category='return', title='退回不合格品項 訂單#{id}')
-   - 報廢 → update_stock 扣除 + record_transaction(type='expense', category='write_off')
-   - 重新品檢 → 建立新訂單或等供應商補貨後重新 qc_order
+   - 退回供應商 → `create_task(title='退回不合格品項 訂單#{id}', category='return', assignee=倉管)`
+   - 報廢 → `update_stock(sku='報廢品 SKU', quantity_change=-報廢數量, reason='品檢不合格報廢')` 扣除 + `record_transaction(type='expense', amount=報廢數量×unit_cost, category='write_off', description='訂單#{id} 不合格品項報廢')`（amount=報廢數量 × `check_stock` 回傳的 `unit_cost`、agent 自行算好金額；report 為財務工具、受 floor gate）
+   - 重新品檢 → 建立新訂單或等供應商補貨後重新 `qc_order`
 
 3. **更新物流資訊**
    ```
@@ -209,7 +213,7 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
      order_id,
      status='shipped',
      driver='司機名或物流單號',
-     estimated_delivery='預計到貨日',
+     estimated_delivery='<預計到貨日 YYYY-MM-DD>',
      notes='物流備註'
    )
    ```
@@ -219,8 +223,8 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
    - 如果有出貨單/簽收單 → `add_attachment(target_type='order', target_id=訂單ID, file_path='data/media/orders/{orderId}/出貨單.jpg', description='出貨單')`
 
 5. **庫存檢查**
-   - 出貨後自動扣庫存，檢查是否觸發 `low_stock_alerts()`
-   - 低於安全庫存 → 通知相關人員
+   - 出貨後自動扣庫存，可呼叫 `low_stock_alerts()` 看是否低於安全庫存（此工具只回資料、不通知、無排程）
+   - 低於安全庫存 → 由 agent 後續判斷：通知相關人員 / 建補貨 task（`create_task`）。系統目前不會自動通知或排程
 
 ---
 
@@ -230,16 +234,18 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
 
 1. `update_order(order_id, status='delivered')`
 2. `log_interaction(actor='AI助理', action='delivery', target_type='order', target_id=訂單ID, detail='訂單 #{id} 已送達')`
-3. 排程售後關懷（7 天後，參考 crm-ops）：
+3. 售後關懷屬人工 follow-up（參考 crm-ops）：系統無排程器，不會自動在 N 天後追蹤。可建 task 提醒（`create_task(title='售後關懷 訂單#{id}', assignee=業務, due_date='<送達日+7天 YYYY-MM-DD>')`），由 agent 在啟動流程 / 收到該 task 到期提示時人工發送：
    - 「{客戶} 您好，上次的訂單使用還順利嗎？有任何問題歡迎告訴我們。」
 
 ---
 
 ## 七、收款
 
+> floor 註記：本節 `check_overdue` / `record_payment` / 退款的 `record_transaction` 皆屬財務工具，受 floor gate——floored 非財務 / 非全權限層呼不到屬正常，需交給有該工具的層 / 全權限層執行（見 CLAUDE.md〈部門安全層（floor）與兩道牆〉、line-comms 第六節〈執行模型〉；末節〈注意事項〉亦有同一提醒）。
+
 ### 檢查逾期帳款
 
-`check_overdue()` — 自動回傳所有到期日已過且未全額付清的帳目。
+`check_overdue()` — 回傳所有到期日已過且未全額付清的帳目（只回逾期清單、不自動通知或建任務）。
 
 ### 收款流程
 
@@ -259,7 +265,7 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
 
 ### 催收邏輯
 
-催收規則統一由 **accounting-ops 第六節**定義（帳齡分類、催收動作、自動通知）。
+催收規則統一由 **accounting-ops 第六節**定義（帳齡分類、催收動作）。注意 `check_overdue` 只回逾期清單、**不自己通知或建任務**——催收通知 / 建催收任務是 agent 後續動作。
 order-ops 只負責收款操作（`record_payment`），不重複定義催收時機。
 
 ---
@@ -280,13 +286,14 @@ order-ops 只負責收款操作（`record_payment`），不重複定義催收時
 - 回補庫存（已出貨的品項）
 - 作廢待收帳款（pending/overdue 的 transactions）
 - 如果客戶已付款，指引退款流程
+- **取消「已出貨」訂單會自動上報主管**（escalation `order_cancelled_shipped` 觸發、系統蓋章通知，見 CLAUDE.md〈上報（escalation）機制〉）——不需自行通知
 
 ### 退貨流程
 
 1. `cancel_order(order_id, reason='退貨原因', cancel_type='returned')`
    - 自動回補庫存 + 作廢待收帳款
-   - 如果已收款 → 指引：`record_transaction(type='expense', category='refund', ...)`
-2. 如果退回商品品質不OK → 手動 `update_stock(sku, -數量, '退貨損耗')` 扣回
+   - 如果已收款 → 退款記帳：`record_transaction(type='expense', amount=退款金額, category='refund', related_order_id=訂單ID, description='訂單#{id} 退貨退款')`（amount=客戶實際已付金額、查 `list_transactions(type='income', related_order_id=訂單ID)` 的已收款；屬財務工具、受 floor gate）
+2. 如果退回商品品質不OK → 手動 `update_stock(sku='退貨品 SKU', quantity_change=-退貨數量, reason='退貨損耗')` 扣回
 
 ---
 
@@ -323,10 +330,10 @@ order-ops 只負責收款操作（`record_payment`），不重複定義催收時
 
 ### Do
 - 出貨前必須通過 QC（`qc_order`），不可跳過
-- 大額訂單系統會自動阻擋，先 `create_approval` 送審再 `create_order`
+- 大額訂單超門檻時 `create_order` 自己會擋下並回提示、**訂單不建立**——核准後帶 `approved_id` 重呼 `create_order`（手動 `create_approval` 須帶完整 `resume_params`、見第二節第 4 步；規劃中 #26 將改系統自建審核、屆時不手寫 `create_approval`）
 - 取消/退貨用 `cancel_order`（自動回補庫存 + 作廢帳款）
-- 退貨後如品質不OK，手動 `update_stock(sku, -數量, '退貨損耗')` 扣回
-- 每個 tool 回傳值都有「👉 下一步」提示，跟著做即可
+- 退貨後如品質不OK，手動 `update_stock(sku='退貨品 SKU', quantity_change=-退貨數量, reason='退貨損耗')` 扣回
+- 每個 tool 回傳值都有「下一步」提示，跟著做即可
 
 ### Don't
 - 不要在 `fulfill_order` 後再手動 `update_stock`（自動扣庫存，會重複）
@@ -344,17 +351,17 @@ order-ops 只負責收款操作（`record_payment`），不重複定義催收時
 4. `update_order(order_id=ID, status='confirmed')` — 確認訂單
 5. `qc_order(order_id=ID, result='passed', checked_by='檢查人')` — 品檢
 6. `fulfill_order(order_id=ID)` — 出貨（自動扣庫存 + 建應收帳款）
-7. 依回傳的「👉 下一步」→ `update_order(order_id=ID, driver='物流', estimated_delivery='日期')`
+7. 依回傳的「下一步」→ `update_order(order_id=ID, status='shipped', driver='物流單號或司機名', estimated_delivery='<預計到貨日 YYYY-MM-DD>')`
 
 ### 收款銷帳
 1. `list_transactions(type='income', related_order_id=ID)` — 找應收帳款
 2. `record_payment(transaction_id=帳目ID, amount=收款金額)` — 記錄收款
-3. 依回傳的「👉 下一步」→ `update_order(order_id=ID, status='paid')`
+3. 依回傳的「下一步」→ `update_order(order_id=ID, status='paid')`
 
 ### 取消/退貨
 1. `cancel_order(order_id=ID, reason='原因')` — 取消（自動回補庫存+作廢帳款）
 2. `cancel_order(order_id=ID, reason='原因', cancel_type='returned')` — 退貨
-3. 依回傳的「👉 下一步」處理退款（如有已收款項）
+3. 依回傳的「下一步」處理退款（如有已收款項）
 
 ---
 
@@ -362,8 +369,9 @@ order-ops 只負責收款操作（`record_payment`），不重複定義催收時
 
 - **fulfill_order 會自動扣庫存**，不要另外手動 `update_stock`
 - **出貨前必須過 QC**，不可跳過
-- **大額訂單需 HITL 審核**（`create_approval`）
+- **大額訂單超門檻時 `create_order` 自己擋下並回提示、訂單不建立**（gate-backed HITL A 類）——核准後帶 `approved_id` 重呼 `create_order`，手動 `create_approval` 須帶完整 `resume_params`（與最終 `create_order` 參數一字不差，見第二節第 4 步及 CLAUDE.md〈HITL 審核〉A 類）；規劃中 #26 將改系統自建審核
 - 所有訂單操作建議 `log_interaction` 記錄
 - 退貨入庫**需要手動** `update_stock` 回補（fulfill_order 的反向操作不自動）
 - 客戶合約、PO 等文件用 `add_attachment(target_type='order')` 保存
 - 訂單附件統一存放在 `data/media/orders/{orderId}/` 目錄下
+- **財務動作受 floor 限制**：`record_payment`、退款的 `record_transaction` 屬財務工具，floored 非財務層（`financial_visibility`≠all）被移除、呼不到屬正常——收款 / 退款要交給有財務工具的層或全權限層執行（見 line-comms 第六節〈執行模型〉）

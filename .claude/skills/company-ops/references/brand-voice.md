@@ -56,7 +56,10 @@ store_fact(
 5. **句子風格偏好？**
    例：「短句，直接，不繞彎」
 
-每個回答都用 `store_fact(category='brand')` 存入。
+每個回答都存成一條 brand 規則，必帶 `title` + `content`（`category` 固定 `brand`），例如禁用詞：
+```
+store_fact(category='brand', title='品牌禁用詞', content='不可使用：親、寶貝、趕快搶購', source_type='explicit', source_quote='老闆原話：絕對不要用「親」「寶貝」', set_by='老闆')
+```
 
 ### 方式三：兩者結合（最完整）
 
@@ -145,23 +148,26 @@ store_fact(
 
 ### 範本結構
 
-每個範本存在 business_rules 表，category='brand'：
+每個範本存成一條 brand 規則（`category='brand'`），下表的 `title` 是命名慣例；實際存入時 `category` / `title` / `content` 三個必填都要帶（範本全文放 `content`），例如：
+```
+store_fact(category='brand', title='範本-感謝信', content='感謝您訂購 {產品名}……（範本全文）', source_type='observed', set_by='系統分析')
+```
 
-| 範本名 | 場景 | 存入方式 |
+| 範本名 | 場景 | 存入時的 title |
 |--------|------|---------|
-| 感謝信 | 購買後致謝 | `store_fact(category='brand', title='範本-感謝信')` |
-| 催款信 | 應收帳款提醒 | `store_fact(category='brand', title='範本-催款信')` |
-| 節日問候 | 過年/中秋/端午 | `store_fact(category='brand', title='範本-節日問候')` |
-| 新品通知 | 新產品上架 | `store_fact(category='brand', title='範本-新品通知')` |
-| 客訴回覆 | 處理客訴後 | `store_fact(category='brand', title='範本-客訴回覆')` |
-| 歡迎新客 | 首次購買 | `store_fact(category='brand', title='範本-歡迎新客')` |
+| 感謝信 | 購買後致謝 | `範本-感謝信` |
+| 催款信 | 應收帳款提醒 | `範本-催款信` |
+| 節日問候 | 過年/中秋/端午 | `範本-節日問候` |
+| 新品通知 | 新產品上架 | `範本-新品通知` |
+| 客訴回覆 | 處理客訴後 | `範本-客訴回覆` |
+| 歡迎新客 | 首次購買 | `範本-歡迎新客` |
 
 ### 範本使用流程
 
 1. 判斷場景 → 從 DB 找對應範本
 2. 替換變數（{客戶名}、{產品名}、{金額}）
 3. 套用當前語氣場景（對客戶/對供應商）
-4. 對外發送 → 送審
+4. 發送：**對外行銷 / 廣播**（如新品通知、促銷）走 `create_approval`（`manual_broadcast`）HITL 審核；一對一客服 / 交易性回覆（感謝信、客訴回覆、催款提醒）依對應模組流程直接發、不必送審
 
 ---
 
@@ -179,7 +185,7 @@ store_fact(
 ## Do's and Don'ts
 
 ### Do
-- 對外文案一律 `create_approval` 送審
+- **對外行銷 / 廣播**文案走 `create_approval` HITL 審核（`manual_broadcast`、B 類人工審核，見 CLAUDE.md〈HITL 審核〉）；一般客服回覆、交易性訊息（出貨 / 收款 / 客訴回覆）依對應模組流程處理、**不是全部送審**
 - 使用台灣中文：「資料」「軟體」「透過」「取得」
 - 每次產文案前先 `query_knowledge(question='品牌語氣', category='brand')` 讀取設定
 - LINE 訊息控制在 200 字內，重點放前面
@@ -208,8 +214,9 @@ store_fact(
 
 ## 八、注意事項
 
-- 對外文案一律送審
+- **對外行銷 / 廣播**文案走 HITL 審核（`create_approval` + `manual_broadcast`、B 類）；一般客服 / 交易性回覆依對應模組流程處理、非全部送審（root 契約只有對外行銷 / 廣播需審，見 CLAUDE.md〈HITL 審核〉）
 - 不要擅自改變老闆設定的品牌風格
 - DB 沒有品牌規則 → 用中性專業語氣，建議設定
 - 範本只是起點，每次都要根據具體情境微調
+- **送審即上報、執行分層**：對外行銷送 `create_approval`（`manual_broadcast`、B 類人工審核）當下，系統即上報簽核人（見 CLAUDE.md〈上報（escalation）機制〉approval_pending）；核准後的人工執行（撈客群 → 逐一發送 → log_interaction）要在有對外發送能力的層執行，floored 受限層未必發得出。`manual_broadcast` 不適用 resume_params 一字不差（見 CLAUDE.md〈HITL 審核〉B 類）
 - 不要過度使用 emoji 和驚嘆號

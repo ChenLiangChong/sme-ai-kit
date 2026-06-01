@@ -6,7 +6,9 @@
 
 ## 權限
 
-只有 admin 或 manager 可以操作。
+流程規範上由 admin / manager 操作，但**系統目前未以 employee `permissions` enforce**（`register_employee` / `update_employee` 無 `_check_permission`）——真正硬牆只有 floor gate（人事 / HR 工具在 floored 層被物理移除）。`permissions` 是業務層的軟分流 / 上報判斷用。
+
+人事操作（`register_employee` / `update_employee` / LINE 綁定）屬**員工機密 + HR 工具**：floored 受限業務層被 floor gate 物理移除這組工具（見 CLAUDE.md〈部門安全層（floor）與兩道牆〉），在那層**呼不到屬正常、不是系統壞掉**。新人報到 / 離職 / 綁定一律在全權限層（`SME_FLOOR=''` 或 `confidential`）執行；受限層辨識到「這是人事異動」時，依 line-comms.md 第六節「執行模型」交給全權限層處理，不要自己嘗試 `register_employee` / `update_employee`。
 
 ---
 
@@ -25,8 +27,11 @@
 ### 執行
 
 ```
-register_employee(name, role, department, permissions, phone)
+register_employee(name=姓名, role='staff', department=部門,
+                  line_user_id=LINE用戶ID, permissions='basic',
+                  phone=電話, business_units='留空=全部事業體')
 ```
+> 用 keyword 帶參數：tool 的位置順序是 `name, role, department, line_user_id, permissions, phone, business_units`（第 4 個是 `line_user_id`、不是 permissions——位置帶錯會把權限值塞進 LINE ID 欄）。
 
 ### 假期配額分配（選用 — 公司有正式請假制度時）
 
@@ -72,7 +77,7 @@ register_employee(name, role, department, permissions, phone)
 
 ## 三、歡迎訊息
 
-綁定成功後自動發送：
+綁定成功後由 agent 立即發送（onboarding 流程當下的 agent 動作、非背景排程）：
 
 ```
 歡迎加入 {公司名稱}！🎉
@@ -90,7 +95,7 @@ register_employee(name, role, department, permissions, phone)
 
 ## 四、首週訓練任務
 
-自動建立：
+由 agent 建立（onboarding 流程當下、非系統背景排程）：
 ```
 create_task(
   title='新人訓練 - {姓名}',
@@ -102,7 +107,7 @@ create_task(
 5. 閱讀部門相關 SOP',
   assignee=姓名,
   priority='normal',
-  due_date=一週後
+  due_date='<一週後 YYYY-MM-DD>'
 )
 ```
 
@@ -127,8 +132,10 @@ create_task(
 ### Day 4-7：獨立
 
 - 追蹤訓練任務進度
-- 第 5 天主動問：「新人訓練還順利嗎？有沒有什麼不清楚的？」
-- 第 7 天提醒主管：「{姓名} 的新人訓練任務明天到期」
+- Day 5（靠 task 提醒 / agent 在啟動流程追蹤、**非系統自動**）：主動問「新人訓練還順利嗎？有沒有什麼不清楚的？」
+- 訓練任務到期前：agent 在啟動流程看到該 task 到期提示時提醒主管「{姓名} 的新人訓練任務即將到期」
+
+> 系統**無 Day-N 排程器**會自己在第 5 / 7 天觸發——以上靠 `create_task` 排提醒 + agent 在啟動流程 / 收到到期提示時人工 follow-up（同 order-ops 售後關懷模式）。
 
 ---
 
@@ -138,7 +145,7 @@ create_task(
 
 ### 步驟
 
-1. **確認身份和權限**（只有 admin 可操作）
+1. **確認身份和權限**（流程上由 admin / manager 操作；系統目前未以 employee `permissions` enforce、真正硬牆是 floor gate——見開頭〈權限〉）
 2. **列出該員工的未完成任務**：
    ```
    list_tasks(assignee=姓名, status='pending')
@@ -146,7 +153,7 @@ create_task(
    ```
 3. **問老闆**：「{姓名} 還有 {N} 項未完成任務，要轉移給誰？」
 4. **轉移任務** → 逐一 `update_task(task_id, assignee=新負責人)`
-5. **停用帳號 + 解綁 LINE**：
+5. **停用帳號 + 解綁 LINE**（**不可逆 / 敏感動作**：清權限 + 標離職；`permissions` / `active` 變更會觸發上報 `employee_permissions_changed`，見 CLAUDE.md〈上報（escalation）機制〉）：
    ```
    update_employee(
      employee_id=員工ID,
@@ -156,6 +163,7 @@ create_task(
      notes='離職日期：{日期}，原因：{原因}'
    )
    ```
+   > **actor 與硬牆**：人事 / HR 工具（含 `update_employee`）本就只在全權限層可用（見上方〈權限〉）＝這裡真正的硬牆。注意 `update_employee` 目前把操作記為 `actor='system'`、**尚未**強制具名 verified actor（#10 規劃 admin-gate + 不可逆動作拒空 actor、未做）；floored session 的可信身份機制見 CLAUDE.md〈actor 身份信任〉。
 6. **記錄** → `store_fact(category='hr', title='離職記錄-{姓名}', content='離職日期：{日期}，原因：{原因}，已轉移任務、解綁LINE、停用帳號')`
 7. **leave_balances 保留**：不要刪該員工的 `leave_balances` row（用於離職結算 / 補薪計算）。`leave_requests` 在員工被刪時透過 `ON DELETE SET NULL` 保留紀錄，所以離職用 `active=0` 而非 DELETE 就足夠
 8. **回報完成**
@@ -188,8 +196,8 @@ create_task(
 ### 新人報到完整流程
 1. `register_employee(name='[員工姓名]', role='staff', department='倉庫', permissions='basic', phone='[手機號碼]')`
 2. 請新人傳訊息到 LINE OA → `lookup_employee(name_or_line_id='[員工姓名]')` → `update_employee(employee_id=ID, line_user_id='Uxxxx')`
-3. `reply(channel_id='default', chat_id='Uxxxx', text='歡迎加入！')`
-4. `create_task(title='新人訓練 - [員工姓名]', assignee='[員工姓名]', due_date='一週後', category='admin')`
+3. `reply(channel_id=新人傳綁定訊息進來的 channel_id, chat_id='Uxxxx', text='歡迎加入！')`（回同一個收到訊息的 OA、不要寫死 `default`、見 line-comms 通知頻道選擇）
+4. `create_task(title='新人訓練 - [員工姓名]', assignee='[員工姓名]', due_date='<一週後 YYYY-MM-DD>', category='admin')`（日期傳實際 `YYYY-MM-DD`、工具不解析「一週後」）
 
 ### 離職處理
 1. `list_tasks(assignee='離職員工', status='pending')` — 查未完成任務

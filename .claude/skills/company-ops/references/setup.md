@@ -136,6 +136,60 @@ ngrok config add-authtoken <authtoken>
 
 ---
 
+## 五、部門安全層（floor）部署
+
+LINE-runtime 可以「分層」啟動：不同部門的 session 套不同的可信邊界，限制各層只看得到該看的資料、各層的 DB 工具白名單也不同。**這裡只講「怎麼起、要準備哪些檔」；floor 兩道牆的把關演算法、SME_FLOOR 三態語義，見 CLAUDE.md〈部門安全層（floor）與兩道牆〉，不在此重述。**
+
+### Step 1：用 start-line.sh `<層>` 受限啟動
+
+`start-line.sh` 是 LINE-runtime 的啟動入口，帶一個 layer 參數決定這個 session 屬於哪一層：
+
+```bash
+./start-line.sh                # 不帶層 = 全權限（floor = data/、settings = .claude/line-runtime-settings.json）
+./start-line.sh general        # 一般部門層（floor = data/general、settings = .claude/line-runtime-general.json）
+./start-line.sh <層名>         # 任一已建好資料夾 + settings 的層
+```
+
+`start-line.sh <層>` 啟動受限層時會：注入 `SME_FLOOR=<層>`（business-db 據此套該層工具白名單＝第二道牆）、把 `cwd` 設成該層資料夾、載入該層 sandbox settings `.claude/line-runtime-<層>.json`（第一道牆）、並以 `--tools` built-in 白名單啟動；不帶層 ＝ `SME_FLOOR` 空 ＝ 全權限。**兩道牆 / 三態 / 工具白名單 / denyRead 清單的機制細節見 CLAUDE.md〈部門安全層（floor）與兩道牆〉——這裡只管部署要對齊什麼：**
+
+起層前的前置條件（腳本會檢查、缺就 fail）：該層的資料夾 `data/<層>/` 要存在、該層 settings `.claude/line-runtime-<層>.json` 要存在。**這兩個都要對齊 floor-map（見 Step 2）裡的層名。**
+
+> **不要在這裡寫死具體部門層清單**（會計 / 人資 / 內勤 / 業務 / 對外）。哪些層、各層看哪些 BU / 財務，是導入時老闆拍板的客製設定，用 Step 2 的範例檔當起點即可。
+
+### Step 2：floor-map.json ＝ 能力設定層
+
+各層「能看哪些財務 / 是什麼角色 / 上報給誰」不寫死在腳本，而是集中在一張能力設定表。範例檔在 `mcp-servers/business-db/floor-map.example.json`，導入時**複製成 `data/floor-map.json` 並改成這家公司的實際部門 / 品牌**：
+
+```bash
+cp mcp-servers/business-db/floor-map.example.json data/floor-map.json
+# 再依老闆拍板的部門結構改 floors 內容
+```
+
+每層可設的欄位（語義以範例檔 `_fields` 為準）：
+
+| 欄位 | 作用 |
+|------|------|
+| `financial_visibility` | `none`（看不到財務、預設）/ `all`（看全部財務，如會計層）/ `own_bu`（只看自己 BU 的財務、待 #11；目前 fail-closed 等同 none）。決定這層的 MCP 進程**有沒有財務工具** |
+| `role` | `boss` / `manager` / `staff`，給上報與 HITL 判斷用 |
+| `escalation_target` | 上報給誰：填 LINE user_id＝系統特判直送；其餘值（如 `'boss'`）走 `role=boss` → `admin` → `company.boss_line_id` 的 coalesce。（**目前未實作「填 floor 名」當收件人**）|
+| `business_units` | 此層可碰哪些事業體（待 #11 BU-scoping 才真正生效）|
+| `department` | 人看的部門標籤 |
+
+無 `data/floor-map.json` 時系統走安全預設（全權限層看全部、其餘 `financial_visibility=none` / `role=staff` / 上報 `boss`），等同未啟用分層、向後相容。`floor-map.json` 屬機密設定、應在各受限層 settings 的 `denyRead` 內（範例 settings 已含）。
+
+> floor-map 的 `financial_visibility` 直接決定「哪一層能真正記帳 / 收款 / 退款」——`record_transaction` / `record_payment` 等財務工具只在有財務可見度的層存在，受限層即使核准了審核也記不了帳、要落在有財務工具的層（通常是全權限層）。（`create_order` **不在** floor 移除清單、任何層都呼得到，只是超門檻仍走 HITL gate、不受 `financial_visibility` 控。）此分工的完整一條龍見 **line-comms.md 第六節「執行模型」**。
+
+### Step 3：必須常駐一個全權限 session
+
+分層部署時，**必須常駐一個 `SME_FLOOR=confidential` 的 session**（`./start-line.sh confidential`）。注意：bare `./start-line.sh`（`SME_FLOOR` 空）雖然工具上也是全權限，但老闆 / admin 的 LINE 訊息被 line-channel **硬路由到 `confidential` 層**（`server.ts` 的 `BOSS_TARGET_FLOOR='confidential'`、待 #13 改由 floor-map 推導）——只有 `confidential` session 收得到、才接得住核准閉環。理由：
+
+- 老闆 / admin 的 LINE 訊息（含「核准 #N」）會被路由進全權限 session；沒有這層，老闆的核准訊息**無處落地**、in-session push 的「核准 → 執行 → 回覆」閉環會斷。
+- 各受限層的上報（escalation）需要一個收件端來通知老闆並完成核准。受限層 session 自己**不該、也未必能**撈到老闆 user_id 去 reply；通知與簽核一律走上報機制、由全權限層處理。
+
+這條的完整兩 session 拓樸與身份路由見 **line-comms.md 第六節「執行模型」**；上報投遞 / 觸發機制見 **CLAUDE.md〈上報（escalation）機制〉**。
+
+---
+
 ## 多 LINE OA 設定
 
 ### 何時需要
@@ -147,22 +201,27 @@ ngrok config add-authtoken <authtoken>
 ```json
 {
   "channels": {
-    "brand-a": {
+    "brand_a": {
       "name": "品牌A 官方帳號",
       "access_token": "從 LINE Developers Console 取得",
       "channel_secret": "從 LINE Developers Console 取得",
-      "business_unit": "品牌A"
+      "business_unit": "brand_a"
     },
-    "brand-b": {
+    "brand_b": {
       "name": "品牌B 官方帳號",
       "access_token": "...",
       "channel_secret": "...",
-      "business_unit": "品牌B"
+      "business_unit": "brand_b"
     }
   },
-  "default_channel": "brand-a"
+  "default_channel": "brand_a",
+  "default_channel_id": "brand_a"
 }
 ```
+
+> **`business_unit` 必須對齊 `register_business_entity` 的 `entity_id`**（小寫底線，如 `brand_a` / `brand_b`，非人看的「品牌A」），否則此 OA 進來的訊息帶的 `business_unit` 跟事業體登錄對不上、按 BU 篩選 / 門檻會錯位。
+>
+> **`default_channel` 與 `default_channel_id` 兩個 key 都要設、同值**：目前 line-channel `server.ts` 讀 `default_channel`、cron `flush_escalations.py` 讀 `default_channel_id`，兩 reader 讀不同 key；兩者都填同一個 channel key（此例 `brand_a`）以相容兩端，待 code 統一後可收斂成一個。
 
 ### Step 2：更新 .mcp.json
 
@@ -172,9 +231,9 @@ ngrok config add-authtoken <authtoken>
 
 `/exit` 然後重新 `claude`。啟動時 stderr 會顯示每個 OA 的 webhook 設定：
 ```
-line-channel: 多 OA 模式，載入 2 個 channel（預設: brand-a）
-line-channel: 品牌A 官方帳號 webhook = https://xxx.ngrok-free.app/webhook/brand-a ✅
-line-channel: 品牌B 官方帳號 webhook = https://xxx.ngrok-free.app/webhook/brand-b ✅
+line-channel: 多 OA 模式，載入 2 個 channel（預設: brand_a）
+line-channel: 品牌A 官方帳號 webhook = https://xxx.ngrok-free.app/webhook/brand_a
+line-channel: 品牌B 官方帳號 webhook = https://xxx.ngrok-free.app/webhook/brand_b
 ```
 
 ### 向下相容

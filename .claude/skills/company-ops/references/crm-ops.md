@@ -20,9 +20,9 @@
 | 流失客 (Lost) | 超過 180 天沒購買 | 低成本觸及或放棄 |
 | 忠實客 (Loyal) | 累計購買 5 次以上 | VIP 待遇、推薦獎勵 |
 
-### 自動標記邏輯
+### 階段判讀（agent 自己算，系統不自動分類）
 
-每次查詢客戶時，根據 `last_purchase_date` 和 `total_purchases` 自動判斷所在階段，在回覆中標注。
+CRM 工具只儲存與回傳既有欄位（`pipeline_stage`、`last_purchase_date`、`total_purchases` 等）、**沒有 lifecycle 自動分類器**。查詢客戶（`get_customer` / `find_customer`）時由 **agent 依這些欄位手動判讀**所在階段、在回覆中標注；這只是回覆時的呈現，不會回寫客戶紀錄。要把判讀結果固化到客戶上，需 agent 明確 `update_customer(customer_id=..., pipeline_stage=...)`。
 
 ---
 
@@ -30,14 +30,17 @@
 
 ### 新增客戶
 
-1. `add_customer(name, phone?, email?, tags?, notes?)`
-2. 如果知道 LINE user_id → 同時綁定
+1. `add_customer(name, type="customer", phone="", email="", line_user_id="", tags="", notes="", discount_rate=0.0, payment_terms="net30", primary_business_unit="")`
+   - `type` **只接受 customer / supplier / distributor** 三種；類型在新增時定、之後**不能改**。
+2. 如果知道 LINE user_id → 同時綁定（傳 `line_user_id`）
 3. 建議至少取得：姓名 + 電話或 LINE
 
 ### 更新客戶
 
-- `update_customer(customer_id, name?, phone?, email?, tags?, notes?, pipeline_stage?, type?)`
-- 可更新：基本資料、標籤、Pipeline 階段、客戶類型（customer/supplier/distributor/partner/prospect）
+- `update_customer(customer_id, name="", phone="", email="", line_user_id="__SKIP__", tags="", notes="", pipeline_stage="", total_purchases=-1, discount_rate=-1.0, payment_terms="", primary_business_unit="__SKIP__")`
+- 可更新：基本資料、標籤、累計消費金額、折扣率 / 付款條件、業務（銷售）階段。
+- **沒有 `type` 參數**：客戶類型只有 customer / supplier / distributor、且只能在 `add_customer` 時定，`update_customer` 改不了。
+- 「潛在 / 跟進中 / 已成交」這類**銷售階段**用 `pipeline_stage` 欄位描述（**不是** type）：值為 `none | prospect | contacted | negotiating | closed_won | closed_lost`。例：`update_customer(customer_id=<客戶 customer_id>, pipeline_stage='negotiating')`（`customer_id` 必填）。
 
 ### 查詢
 
@@ -54,13 +57,13 @@
 | payment_terms | 付款條件 | prepaid / cod / deposit_30 / net30 / net60 |
 
 操作：
-- 新增時設定：`add_customer(..., discount_rate=0.15, payment_terms='net30')`
-- 修改：`update_customer(id, discount_rate=0.2, payment_terms='net60')`
-- 特殊單品報價：`store_fact(category='pricing', title='A經銷商 SKU-A001 特價', content='NT$350')`
+- 新增時設定：`add_customer(name='<客戶名>', type='distributor', discount_rate=0.15, payment_terms='net30')`（`name` 必填、其餘可省）
+- 修改：`update_customer(customer_id=<客戶 customer_id>, discount_rate=0.2, payment_terms='net60')`（`customer_id` 必填）
+- 特殊單品報價：`store_fact(category='pricing', title='A經銷商 SKU-A001 特價', content='NT$350', source_quote='<老闆／業務確認的原話>')`（`category`/`title`/`content` 必填；`source_type` 預設 `explicit` 須附 `source_quote`，無原話則改 `source_type='inferred'`——見 CLAUDE.md〈反捏造原則〉）
 
 ### 資料衛生
 
-每月自動檢查：
+系統**沒有每月自動檢查 / 巡檢 job**。下列由 **agent 在被要求或啟動流程判斷時手動巡檢**（撈客戶清單後逐項比對），需要追蹤可建 task 提醒人工 follow-up：
 - 重複客戶（同電話或同名）→ 建議合併
 - 無聯繫方式的客戶 → 標記為不完整
 - tags 為空的客戶 → 建議補上標籤
@@ -74,7 +77,7 @@
 | 維度 | 衡量 | 資料來源 |
 |------|------|---------|
 | R (Recency) | 多久沒來 | `last_purchase_date` 距今天數 |
-| F (Frequency) | 來多少次 | `list_orders(customer_id=客戶ID)` 的訂單筆數（需啟用 order-ops 模組）。若未啟用，暫用 total_purchases / 平均客單價 估算 |
+| F (Frequency) | 來多少次 | `list_orders(customer_id=<客戶 customer_id>)` 的訂單筆數（需啟用 order-ops 模組）。若未啟用，暫用 total_purchases / 平均客單價 估算 |
 | M (Monetary) | 花多少錢 | `total_purchases` |
 
 > Phase 1 以 R + M 為主要維度。F 在 order-ops 模組完善後可加入進階分群。
@@ -83,12 +86,12 @@
 
 | 分群 | R 條件 | M 條件 | 建議動作 |
 |------|--------|--------|---------|
-| 🏆 冠軍客戶 | 近 30 天有消費 | 總額前 20% | 維護、專屬服務、推薦計畫 |
-| 💪 忠實客戶 | 近 60 天有消費 | 總額中上 | 感謝回饋、新品預覽 |
-| 🌱 有潛力 | 近 30 天有消費 | 總額一般 | 提升客單價、交叉銷售 |
-| ⚠️ 需要關注 | 60-120 天沒消費 | 總額前 20% | 立即挽回！發關懷訊息 |
-| 😴 沉睡中 | 120-180 天沒消費 | 任何 | 喚醒優惠、問卷調查 |
-| ❌ 已流失 | 超過 180 天 | 任何 | 低成本觸及或放棄 |
+| 冠軍客戶 | 近 30 天有消費 | 總額前 20% | 維護、專屬服務、推薦計畫 |
+| 忠實客戶 | 近 60 天有消費 | 總額中上 | 感謝回饋、新品預覽 |
+| 有潛力 | 近 30 天有消費 | 總額一般 | 提升客單價、交叉銷售 |
+| 需要關注 | 60-120 天沒消費 | 總額前 20% | 立即挽回！發關懷訊息 |
+| 沉睡中 | 120-180 天沒消費 | 任何 | 喚醒優惠、問卷調查 |
+| 已流失 | 超過 180 天 | 任何 | 低成本觸及或放棄 |
 
 ### 執行方式
 
@@ -126,9 +129,11 @@
 
 1. 選定目標客群
 2. 草擬訊息 → 參考 brand-voice 模組
-3. **必須送審**：`create_approval(type='announcement', summary=訊息摘要, detail='{"resume_action": "manual_broadcast", "resume_params": {"audience": "客群描述", "channel": "line", "text": "完整訊息內容"}, "note": "核准後人工執行：先撈客群 LINE user_id 清單、逐一 reply、最後 log_interaction（非單一 tool call）", "then": "發送後逐一 log_interaction"}')`
-4. 主管核准後發送
-5. 記錄發送時間，更新客戶的最後聯繫日
+3. **對外行銷/廣播須送審**（`type` / `summary` 為必填）：`create_approval(type='announcement', summary='<訊息摘要>', detail='{"resume_action": "manual_broadcast", "resume_params": {"audience": "<客群描述>", "channel": "line", "text": "<完整訊息內容>"}, "note": "核准後人工執行：先撈客群 LINE user_id 清單、逐一 reply、最後 log_interaction（非單一 tool call）", "then": "發送後逐一 log_interaction"}')`
+   - 行銷廣播走 `manual_broadcast`、是 **B 類 manual approval**（resume_action 開頭 `manual_`、resolve 後人工多步驟、不適用 resume_params 一字不差；別寫死「需 admin 核准」——見 CLAUDE.md〈HITL 審核〉B 類）。一般客服 / 交易性回覆依本檔對應流程、非全部送審。
+   - **建審核當下即上報簽核人**（escalation `approval_pending` 觸發）：不必自己撈老闆 user_id 去通知，系統會上報。
+4. 主管核准後**人工執行**：逐一 `reply` 客群 + `log_interaction`。這步要在**有對外 reply 能力的層**執行（floored 業務層未必能 push 到客群、跨層分工見 line-comms 第六節〈執行模型〉）。
+5. 發送的事實靠每筆 `log_interaction` 留底。CRM **沒有「最後聯繫日」欄位、也沒有自動更新它的排程**；要追蹤觸及頻率改翻 `log_interaction` 紀錄、或 agent 自行於下次操作判讀，不要寫成系統會回寫聯繫日。
 
 ---
 
@@ -139,7 +144,7 @@
 ### 處理步驟
 
 1. **立即回覆**（5 分鐘內）：「收到您的反映，我們非常重視，正在處理中。」
-2. **記錄**：`log_interaction(actor, action='complaint', detail=內容)`
+2. **記錄**：`log_interaction(actor='AI助理', action='complaint', target_type='customer', target_id=<客戶 customer_id>, detail='<客訴內容原文>')`（`actor`/`action` 為必填）
 3. **分級**：
 
 | 嚴重度 | 定義 | 處理時限 | 通知 |
@@ -148,10 +153,12 @@
 | 中 | 品質不佳、缺貨、延遲 | 24 小時 | 負責人 |
 | 低 | 小瑕疵、誤解、建議 | 48 小時 | 負責人 |
 
-4. **查詢相關規則**：`query_knowledge(問題描述, category='customer_service')`
+> **「通知老闆」怎麼通知**：不要這層自己撈老闆 user_id 直接 `reply`（floored 業務層未必撈得到、也未必 push 得到老闆）。走 escalation 機制 / 由全權限層處理，與其他上報走一致路徑——跨層通知與簽核見 line-comms 第六節〈執行模型〉。建審核（如大額退款 / 超權限賠償）時系統會自動上報簽核人。
+
+4. **查詢相關規則**：`query_knowledge(question='<問題描述>', category='customer_service')`
 5. **依規則處理或建審核**
 6. **回覆客戶處理結果**
-7. **追蹤**：3 天後確認客戶是否滿意
+7. **追蹤**：系統不會自動排程回訪。要事後確認客戶是否滿意，請 `create_task`（標題如「客訴 #X 後續滿意度確認」、可在 description 註記建議幾天後做），交由人工 follow-up——**沒有 N 天後自動追蹤的 scheduler**。
 
 ### 客訴禁忌
 
@@ -183,9 +190,9 @@
 | 成長性 | 10% | 採購量趨勢（上升/持平/下降） |
 
 紅黃綠分級：
-- 🟢 75+ 分：健康
-- 🟡 50-74 分：需關注
-- 🔴 50 分以下：需介入
+- 綠（75+ 分）：健康
+- 黃（50-74 分）：需關注
+- 紅（50 分以下）：需介入
 
 ---
 
@@ -215,8 +222,9 @@ NPS = 推薦者% - 批評者%
 
 ### 何時問
 
-- 購買後 7 天（產品滿意度）
-- 客訴處理後 3 天（服務滿意度）
+下列是建議時機、**不是系統自動排程**（CRM 沒有 NPS scheduler、也沒有觸發送問卷的機制）。要落實得靠人工 follow-up，可 `create_task` 排提醒：
+- 購買後約 7 天（產品滿意度）
+- 客訴處理後約 3 天（服務滿意度）
 - 每季一次（整體滿意度）
 
 ---
@@ -236,7 +244,7 @@ NPS = 推薦者% - 批評者%
 ## 九、客戶附件
 
 客戶相關的重要文件（合約、名片、報價單等）：
-`add_attachment(target_type='customer', target_id=客戶ID, file_path='data/media/customers/{customerId}/檔名', description='描述')`
+`add_attachment(target_type='customer', target_id=<客戶 customer_id>, file_path='data/media/customers/<customer_id>/<檔名>', description='<描述>')`（`target_type`/`target_id`/`file_path` 為必填）
 
 ---
 
@@ -245,7 +253,7 @@ NPS = 推薦者% - 批評者%
 ### Do
 - 客戶資料異動都 `log_interaction`
 - 行銷訊息先過 brand-voice 再發
-- 群發前 `create_approval(type='announcement', summary=訊息摘要, detail='{"resume_action": "manual_broadcast", "resume_params": {"audience": "...", "channel": "line", "text": "..."}, "note": "核准後人工執行：先撈客群 LINE user_id 清單、逐一 reply、最後 log_interaction（非單一 tool call）", "then": "..."}')` 送審
+- 對外行銷/群發前 `create_approval(type='announcement', summary='<訊息摘要>', detail='{"resume_action": "manual_broadcast", "resume_params": {"audience": "<客群描述>", "channel": "line", "text": "<完整訊息內容>"}, "note": "核准後人工執行：先撈客群 LINE user_id 清單、逐一 reply、最後 log_interaction（非單一 tool call）", "then": "發送後逐一 log_interaction"}')` 送審（`type`/`summary` 必填；B 類 manual；建審核即上報簽核人；核准後人工執行落在有對外 reply 能力的層——見第四節）
 - 遵守頻率限制：同一客戶每月推送不超過 2 次
 - 客訴立即回覆（5 分鐘內），先同理再處理
 
@@ -267,25 +275,27 @@ NPS = 推薦者% - 批評者%
 2. 根據 R（距今天數）+ F（`list_orders` 計算）+ M（total_purchases）判斷分群
 
 ### 客訴處理
-1. `reply(channel_id='default', chat_id=客戶chat_id, text='收到您的反映，我們非常重視，正在處理中。')`
-2. `log_interaction(actor='AI助理', action='complaint', detail=客訴內容)`
-3. `query_knowledge(question=問題描述, category='customer_service')` — 查處理規則
-4. 退款：直接 `record_transaction(type='expense', category='refund', amount=退款金額, description='退款給{客戶}')`——超門檻它會用完整 `resume_params` 自動建審核並上報（決策 #183）、**勿自行 `create_approval`**；記帳完成後 LINE 通知客戶
+1. `reply(channel_id='<收到客訴訊息的 channel_id>', chat_id='<客戶 chat_id>', text='收到您的反映，我們非常重視，正在處理中。')`（回同一個收到客訴的 OA、不要寫死 `default`、見 line-comms 通知頻道選擇）
+2. `log_interaction(actor='AI助理', action='complaint', target_type='customer', target_id=<客戶 customer_id>, detail='<客訴內容原文>')`（`actor`/`action` 為必填）
+3. `query_knowledge(question='<問題描述>', category='customer_service')` — 查處理規則
+4. 退款：直接 `record_transaction(type='expense', amount=<退款金額，取原訂單/原收款 transaction 的實付額、勿自行推算>, category='refund', description='退款給<客戶名>（原訂單 #<order_id>）')`——`type`/`amount`/`category` 為必填；超門檻它會用完整 `resume_params` 自動建審核並上報（決策 #183）、**勿自行 `create_approval`**；記帳完成後 LINE 通知客戶
+   - **退款記帳受 floor `financial_visibility` 限制**：`general` / `external` 業務層**沒有 `record_transaction`**、記不了帳。此時不要自己想辦法繞，把退款交給**有財務工具的層**（會計層 / 全權限層）執行。跨層誰執行、核准後一條龍見 line-comms 第六節〈執行模型〉。
 
 ## 中斷恢復
 
 如果 context 被壓縮：
 1. `get_context_summary(scope='full')` — 查看客戶數、進行中訂單
-2. `find_customer(query=正在處理的客戶名)` — 恢復客戶資訊和 pipeline_stage
-3. `list_orders(customer_id=客戶ID)` — 查看該客戶的訂單狀態
+2. `find_customer(query='<正在處理的客戶名>')` — 恢復客戶資訊和 pipeline_stage
+3. `list_orders(customer_id=<客戶 customer_id>)` — 查看該客戶的訂單狀態
 
 ---
 
 ## 十、注意事項
 
-- 群發行銷一律需 admin 核准
+- 群發行銷一律走 HITL 審核（`create_approval` B 類 manual broadcast、見第四節）；建審核當下即上報簽核人。
+  - **流程上**核准者應為 admin / 主管；但**系統未對「誰能 resolve」全面 enforce**——`resolve_approval` 在非全權限（floored）層才要求 verified manager 以上身份（決策 #24/#180），operator / 全權限層的脈絡不強制 admin。真正擋越權看不該看的是 **floor gate**（HR / 財務工具在 floored 層被物理移除）、不是這條注意事項。
 - 單筆查詢不需要核准
-- 客戶資料修改要 log_interaction
+- 客戶資料修改建議 `log_interaction` 留痕（非系統強制 enforce）
 - 所有行銷訊息先過 brand-voice 模組
 - 同一客戶每月推送不超過 2 次
 - 客訴紀錄永久保留，不可刪除

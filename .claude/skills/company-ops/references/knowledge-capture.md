@@ -58,7 +58,7 @@ register_business_entity(
 
 1. `register_business_entity(entity_id='new_brand', name='新品牌', channel_id='new_brand', approval_threshold=-1)`
 2. 設定 LINE OA：在 `data/line-channels.json` 新增 channel 設定，重啟 LINE server
-3. 建立庫存：`update_stock(sku='...', name='...', business_unit='new_brand', quantity=初始數量)`
+3. 建立庫存：`update_stock(sku='SKU-NB001', name='新品名稱', business_unit='new_brand', quantity_change=50)`
 4. 建立規則：`store_fact(category='...', title='...', business_unit='new_brand', ...)`
 5. 確認老闆已加入新 OA 為好友
 6. 測試：透過新 OA 發送測試訊息，確認 `business_unit` 正確帶入
@@ -124,7 +124,7 @@ set_leave_balance(
 
 #### 3. 確認簽核人
 
-老闆是預設簽核人。若有多事業體、可指定不同主管簽該事業體員工的假。
+目前請假簽核**預設由 boss / admin 路由**（`request_leave` 建 approval 時不寫死簽核人、收件人由上報 coalesce `role=boss` → `permissions=admin` 推導，見 CLAUDE.md〈上報（escalation）機制〉）。「不同事業體指定不同主管簽該 BU 員工的假」目前**尚未實作、需後續開發**；現階段先讓老闆（或具 admin 權限者）統一簽核。
 
 > 詳細的請假流程、HITL 簽核、查餘額、取消請假等，見 **`.claude/skills/company-ops/references/leave-ops.md`**。
 
@@ -193,6 +193,8 @@ handoff 到 **brand-voice** 模組。三種方式擇一：
 | LINE 訊息路由 | 「陌生人傳訊息要通知誰？有業務/客服負責人嗎？還是全部通知你？」→ `store_fact(category='sop', title='LINE 陌生人路由')` |
 | 事業體差異 | 「不同品牌/事業體的退貨政策、定價、品牌語氣有沒有不同？」→ 有差異的規則加 `business_unit` 參數存入 |
 | 客戶跨事業體 | 「有沒有客戶同時跟多個品牌/事業體合作？折扣和付款條件一樣嗎？」→ 不同的用 `set_customer_entity_terms` 設定 |
+
+> **「LINE 訊息路由」存的是「通知誰」這個設定，不要連帶寫死「由我這個 session 自己 reply 老闆」**。runtime 收到陌生人訊息時，通知如何送到負責人 / 老闆是由 line-channel 的身份路由 + 上報（escalation）機制處理（floored 業務層未必撈得到老闆 user_id、也未必能 push 到他）；跨層通知 / 簽核的實際執行模型統一見 `line-comms.md`〈執行模型：老闆核准後一條龍（兩 session 拓樸）〉。導入時把規則內容寫成「陌生人意圖 X → 通知負責人 Y」即可，不要固化舊的「自行 reply」心智模型。
 
 ### Step 7：業務流程映射
 
@@ -318,6 +320,26 @@ create_task(title='導入 Step 2：員工名冊+LINE綁定', category='admin', a
 
 ---
 
+## 二之一、機密軸（confidential）— 哪些知識不該被部門層看到
+
+寫規則時除了 `category` / `business_unit`，還要判斷一條**獨立的軸 `confidential`**：這條知識該不該讓部門層員工看到。導入時的重點是——**`store_fact` 不特別指定就是公開**，敏感內容（財務 / HR / 定價底線）若沒設 `confidential=True`，部門層員工日後 `query_knowledge` 就查得到＝洩漏。預設值、`confidential` 與 `business_unit` 兩軸獨立、非全權限層過濾規則等機制見 CLAUDE.md〈機密軸（confidential）〉/ migration 006。
+
+### 哪些主題該存成機密
+
+導入訪談有幾個領域**最容易碰到機密內容**，這類答案應明確 `store_fact(confidential=True)`：
+
+| 訪談領域 | 為什麼該設機密 |
+|---------|---------------|
+| 財務（核准門檻邏輯、利潤率、成本結構） | 部門層員工不該看到公司財務底細 |
+| HR（薪資級距、考績規則、個別員工註記） | 員工 PII / 待遇屬機密 |
+| 定價策略（成本加成邏輯、議價底線、不同客戶差別待遇的理由） | 牌價可公開，但「為什麼這樣定 / 底線多少」是機密 |
+| 供應商議價底線、成本價 | 部門層不該知道進貨成本 |
+
+> 判斷原則：**「對外的規則 / 流程」可公開（員工要照著做），「為什麼這樣定 / 數字底線 / 個人待遇」設機密。** 例如「經銷商統一 8 折」可公開（`confidential=False`），但「給 A 經銷商 7 折是因為他量大、底線到 65 折」應 `store_fact(confidential=True)`。
+> 不確定就問老闆：「這條要讓所有員工都查得到，還是只有你（和會計）看得到？」確認後再決定 `confidential`。
+
+---
+
 ## 三、主動訪談流程
 
 系統初次導入或老闆說「幫我建立公司規則」時，按領域逐一提問：
@@ -334,6 +356,8 @@ create_task(title='導入 Step 2：員工名冊+LINE綁定', category='admin', a
 | 6 | 庫存 | 「什麼時候補貨？安全庫存怎麼定？盤點頻率？」 |
 | 7 | 財務 | 「多少金額需要你核准？記帳有什麼規定？」 |
 | 8 | 品牌 | 「對外溝通的語氣？禁用詞？」 |
+
+> 領域 2（定價）/ 4（人事）/ 7（財務）涉及機密底線、個人待遇、成本時，答案要 `store_fact(confidential=True)`，否則部門層員工 `query_knowledge` 全看得到。判斷與範例見〈二之一、機密軸〉。
 
 ### 訪談技巧
 

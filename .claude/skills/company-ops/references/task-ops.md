@@ -14,7 +14,9 @@
 1. 從對話中提取：標題、描述、指派對象、優先級、截止日期、category（分類）
 2. 如果有指派對象，先 `lookup_employee` 確認人存在
 3. 呼叫 `create_task`
-4. 指派對象有綁 LINE → 用 `reply` 通知：「你有一項新任務：{標題}，截止 {日期}」
+4. 指派對象有綁 LINE → agent 主動用 `reply` 通知：「你有一項新任務：{標題}，截止 {日期}」（系統不自動推播給被指派人；通知是否送得到、由當前 floor 能否觸及該 LINE 脈絡決定，見 line-comms 執行模型）
+
+> `lookup_employee` 屬 HR 工具，受 floor gate——floored 非全權限層呼不到屬正常、需交有該工具的層 / 全權限層執行（見 CLAUDE.md〈部門安全層（floor）與兩道牆〉、line-comms 第六節執行模型）。受限層在這種情況下：可直接 `create_task` 帶 `assignee` 字串（跳過確認），或把「確認員工 + 通知」交回全權限層。
 
 ### category 分類
 
@@ -87,10 +89,12 @@
 - 高：今明天到期、客戶在等、有外部時限（報稅、合約）
 - 低：截止日在一週以上、沒有外部壓力
 
-**自動標記邏輯：**
-- 截止日 ≤ 2 天且重要 → 自動升為 `urgent`
-- 已逾期 → 一律標為 `urgent`
-- 無截止日且 low → 每兩週提醒：「這個任務還需要嗎？」
+**優先級調整準則（agent 判斷後改、系統不自動升級）：**
+- 截止日 ≤ 2 天且重要 → agent 建議 / 改 `update_task(task_id, priority='urgent')`
+- 已逾期 → agent 視為 `urgent` 處理（DB 不會自己改 priority）
+- 無截止日且 low → 啟動流程或週回顧時由 agent 判斷是否提醒老闆「這個任務還需要嗎？」
+
+> tasks 模組無排程 / 自動標記：以上是 agent 在處理任務時主動套用的判斷、不是系統定時跑的邏輯。
 
 ### 每日任務建議排序
 
@@ -121,33 +125,41 @@ pending → in_progress → done
 DB 沒有 `blocked` 狀態。當任務被阻擋時：
 1. 狀態維持 `in_progress`（或視情況退回 `pending`）
 2. 在描述前方加註：`[BLOCKED] 原因：{原因}`
-3. 通知建立者 + 主管
+3. agent 可主動通知建立者（`reply`）；要通知主管走 line-comms 執行模型，系統不會自動上報阻擋
 4. 阻擋解除後移除 `[BLOCKED]` 標記
-5. 查詢所有被擋任務：`search_tasks` 搜尋描述含 `[BLOCKED]`
+5. 查詢所有被擋任務：`search_tasks(query='[BLOCKED]')`
 
 ### 狀態操作規則
 
-| 動作 | 觸發語句 | 操作 | 後續 |
+| 動作 | 觸發語句 | 操作 | 後續（agent 判斷、非系統自動） |
 |------|---------|------|------|
-| 開工 | 「開始做了」「我在處理#3」 | `update_task(id, status='in_progress')` | 通知建立者 |
-| 完成 | 「做完了」「#3 完成了」 | `update_task(id, status='done')` | 通知建立者 |
-| 卡住 | 「等材料」「被擋住了」 | 維持 `in_progress`，描述加註 `[BLOCKED] {原因}` | 通知建立者+主管 |
-| 取消 | 「取消#5」「不做了」 | 先確認 → `update_task(id, status='cancelled')` | 通知相關人 |
+| 開工 | 「開始做了」「我在處理#3」 | `update_task(task_id=3, status='in_progress')` | 若建立者有綁 LINE、agent 可主動 `reply` 告知（系統不自動通知） |
+| 完成 | 「做完了」「#3 完成了」 | `update_task(task_id=3, status='done')` | 同上、agent 視情況通知建立者 |
+| 卡住 | 「等材料」「被擋住了」 | 維持 `in_progress`，描述加註 `[BLOCKED] {原因}` | agent 可 `reply` 通知建立者；主管通知走 line-comms 執行模型，非系統自動上報 |
+| 取消 | 「取消#5」「不做了」 | 先確認 → `update_task(task_id=5, status='cancelled')` | agent 視情況通知相關人 |
+
+> `update_task` 第一參數是 `task_id`（不是 `id`）。tasks 模組只有 CRUD / search、本身不發通知；上表「後續」是 agent 接著做的動作，不是系統自動行為。
 
 ---
 
 ## 四、到期提醒
 
-由 CLAUDE.md 啟動流程觸發，查所有有 due_date 且未完成的任務：
+系統**不會**定時掃任務 due_date 主動推播。任務到期提醒靠兩個入口、都是 agent 當下判斷後處理：
+- **啟動流程**：`get_context_summary` 啟動 readout 會帶出待處理任務（含截止日），agent 看到逾期 / 即將到期的、在當次對話裡提醒老闆
+- **agent 主動 follow-up**：發現逾期或將到期、可建一筆提醒 task 或直接 `reply` 通知負責人
 
-| 時間點 | 動作 | 通知對象 |
+下表是 agent 判斷「該不該提醒、提醒誰」的準則（**非系統自動排程的通知時程**）：
+
+| 時間點 | agent 處理建議 | 提醒對象（agent 自行 reply / 建 task） |
 |--------|------|---------|
 | 到期前 2 天 | 提醒 | 負責人 |
 | 到期前 1 天 | 強調提醒 | 負責人 |
-| 到期當天 | ⚠️ 警告 | 負責人 |
-| 逾期 1 天 | 逾期通知 | 負責人 + 建立者 |
-| 逾期 3 天 | 升級通知 | 負責人 + 建立者 + 主管 |
-| 逾期 7 天 | 強制檢討 | 主管，建議取消或重新排期 |
+| 到期當天 | 警告語氣 | 負責人 |
+| 逾期 1 天 | 逾期提醒 | 負責人 + 建立者 |
+| 逾期 3 天 | 建議升級處理 | 負責人 + 建立者 + 主管（通知走 line-comms 執行模型） |
+| 逾期 7 天 | 建議檢討、取消或重新排期 | 主管 |
+
+> 任務逾期**不**走 escalation 自動上報（escalation 觸發限於審核 / 財務 / 訂單 / 員工權限 / 品檢等，見 CLAUDE.md〈上報（escalation）機制〉），任務的提醒與升級都是 agent 行為。
 
 ---
 
@@ -164,10 +176,10 @@ DB 沒有 `blocked` 狀態。當任務被阻擋時：
 ```
 第 XX 週回顧（MM/DD - MM/DD）
 
-✅ 本週完成：X 項
-🔄 進行中：X 項
-⏳ 待辦：X 項
-🔴 逾期：X 項
+本週完成：X 項
+進行中：X 項
+待辦：X 項
+逾期：X 項
 
 完成率：XX%
 準時率：XX%
@@ -212,7 +224,7 @@ DB 沒有 `blocked` 狀態。當任務被阻擋時：
 1. 抽取所有「誰要做什麼、什麼時候完成」
 2. 只有明確有負責人+動作的才建任務
 3. 排除純資訊分享、待討論、FYI
-4. 逐一建立任務，統一通知被指派的人
+4. 逐一建立任務；建完後 agent 可主動逐一 `reply` 通知被指派的人（系統不自動通知，且 `lookup_employee` 確認身份受 floor gate、見上方第一節 caveat）
 
 | 會議中的說法 | 轉換 |
 |------------|------|
@@ -232,15 +244,17 @@ DB 沒有 `blocked` 狀態。當任務被阻擋時：
 | 全部都很急 | 套用優先級矩陣強制排序 |
 | 一人扛太多 | 工作量平衡檢查 |
 | 只建不關 | 週回顧時清理 |
-| pending 超 14 天 | 提醒：「這個任務是不是可以取消？」 |
-| in_progress 超 7 天 | 追蹤：「進度如何？需要幫忙嗎？」 |
+| pending 超 14 天 | 啟動 / 週回顧時 agent 提醒：「這個任務是不是可以取消？」 |
+| in_progress 超 7 天 | 啟動 / 週回顧時 agent 追蹤：「進度如何？需要幫忙嗎？」 |
+
+> 上述「超 N 天」靠 agent 在啟動 readout 或週回顧時掃 `list_tasks` 結果判斷，系統不會定時自動跑或推播。
 
 ---
 
 ## 九、任務附件
 
 任務相關的檔案（設計稿、打版照片、參考圖等）：
-`add_attachment(target_type='task', target_id=任務ID, file_path='data/media/tasks/{taskId}/檔名', description='描述')`
+`add_attachment(target_type='task', target_id=3, file_path='data/media/tasks/3/檔名', description='描述')`（`target_type` / `target_id` / `file_path` 為必填，`target_id` 帶實際任務 ID）
 
 ---
 
@@ -248,10 +262,10 @@ DB 沒有 `blocked` 狀態。當任務被阻擋時：
 
 ### Do
 - 缺少資訊主動問（指派對象、截止日），不要猜
-- 每次狀態變更自動 `log_interaction`
-- `in_progress` 超 7 天主動追蹤：「進度如何？需要幫忙嗎？」
-- `pending` 超 14 天提醒：「這個任務是不是可以取消？」
-- 指派前檢查員工工作量（4-6 項提醒老闆，7+ 項建議重新分配）
+- 每次狀態變更後 agent 接著 `log_interaction`（tool 不會自動寫）
+- 啟動 / 週回顧時掃 `list_tasks`，對 `in_progress` 超 7 天的追蹤：「進度如何？需要幫忙嗎？」
+- 啟動 / 週回顧時對 `pending` 超 14 天的提醒：「這個任務是不是可以取消？」
+- 指派前 `list_tasks(assignee=...)` 檢查員工工作量（4-6 項提醒老闆，7+ 項建議重新分配）
 
 ### Don't
 - 不要猜 deadline（沒說就問「有截止日期嗎？」）
@@ -263,9 +277,9 @@ DB 沒有 `blocked` 狀態。當任務被阻擋時：
 ## 快速參考
 
 ### 建立任務
-1. `lookup_employee(name_or_line_id='員工甲')` — 確認人存在
+1. `lookup_employee(name_or_line_id='員工甲')` — 確認人存在（HR 工具，受 floor gate；floored 非全權限層呼不到屬正常，見第一節 caveat）
 2. `create_task(title='詢問報價', assignee='員工甲', priority='normal', due_date='2026-04-10', category='admin', created_by='老闆')`
-3. `reply(channel_id='default', chat_id=員工甲的LINE_user_id, text='你有一項新任務：詢問報價，截止 4/10')`
+3. agent 主動 `reply(channel_id=員工所在 OA 的 channel_id, chat_id=員工甲的LINE_user_id, text='你有一項新任務：詢問報價，截止 2026-04-10')`（系統不自動推播；通知頻道選擇見 line-comms、多 OA 別寫死 `default`）
 
 ### 完成任務
 1. `update_task(task_id=3, status='done')`
@@ -283,7 +297,7 @@ DB 沒有 `blocked` 狀態。當任務被阻擋時：
 ## 十、注意事項
 
 - Phase 1 不用子任務，保持扁平
-- 每次狀態變更自動寫 interaction_log
+- 每次狀態變更後 agent 接著 `log_interaction`（`update_task` 不會自動寫 interaction_log）
 - 找不到任務時用 search_tasks 模糊搜尋
 - LINE 通知保持簡短，一則不超過 3 行
 - 批量建立任務時統一報告，非逐一回覆

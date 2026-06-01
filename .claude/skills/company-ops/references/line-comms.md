@@ -12,6 +12,8 @@
 
 ### 第一步：辨識身份
 
+> floor 提醒：`lookup_employee` / `list_employees` / 暱稱綁定用的 `update_employee` 屬 **HR 工具**、floored 受限層被物理移除。受限部門 session 能用的辨識是 `find_customer` / `find_partner`（非 HR）＋ channel 已驗證的 `user_id`；「是不是員工 / 綁定未綁員工 / 列員工找負責人」要在全權限 / `confidential` 層做。floored 層辨識不出員工身份時依第六節交給全權限層、別假設有 `lookup_employee`。
+
 從 `<channel>` tag 的 `user_id` 取得 LINE User ID，**依序查以下身份**（找到即停）：
 
 1. 呼叫 `lookup_employee(user_id)` — 是員工嗎？
@@ -22,24 +24,33 @@
    - 如果找到一位 `line_user_id` 為空的員工 → 回覆對方確認：「你是 {部門} 的 {姓名} 嗎？」
    - 對方確認 → `update_employee(employee_id, line_user_id=user_id)` 完成綁定
    - 找不到或多人同名 → 走陌生人流程（第二節）
-5. 也可能是待綁定的外包夥伴（`find_partner(暱稱)` + 回覆確認 + `update_partner(line_user_id=...)`）
-6. 陌生人處理 → **不要回覆對方**。改為通知老闆（第二節）
+5. 也可能是待綁定的外包夥伴：先 `find_partner(暱稱)` 取得 `partner_id` → 回覆確認 → `update_partner(partner_id=ID, line_user_id=user_id)` 完成綁定（`update_partner` 必填 `partner_id`、不可只帶 `line_user_id`）
+6. 陌生人處理 → **不要回覆對方**。改為按第二節分層路由給對應負責人（要通知老闆時走 escalation / 由有對外 reply 能力的層處理，見第二節與第六節）
 7. 老闆回覆「這是 XXX」→ 綁定到對應的員工、客戶或外包記錄
 
-老闆的 LINE user_id：查 `employees` 表 `role='boss'`。
+> **誰能 reply 通知，看你這層的能力**：若你是受限部門 session（有 `SME_FLOOR`），不一定撈得到老闆 `user_id`、也不一定 push 得到老闆。「要通知老闆 / 簽核人」一律走**上報（escalation）機制**或由**全權限層**處理，不要自己撈 `role=boss` 的 user_id 去 `reply`（見 CLAUDE.md〈上報（escalation）機制〉、本檔第六節執行模型）。在有對外 reply 能力的層（如全權限層 / 客服層）才直接 reply 通知。
 
 ### 第二步：判斷權限
 
-| 意圖 | 需要的權限 |
+權限有**兩層**、不要搞混：
+
+- **軟層（對話禮貌提示，純 UX）**：依下表的 LINE 個人身份標記（`permissions` 欄＝這個 LINE 用戶在員工名冊上記的 basic / manager / admin）給出禮貌提示，例如「這個操作通常需要主管處理，我幫你轉給 {主管}」。這只是話術、**不是真正的隔離**。
+- **硬層（真正的牆）= business-db floor gate**：你這個 session 能呼叫到哪些工具，由 `SME_FLOOR` + floor-map 在 server 啟動時物理決定（見 CLAUDE.md〈部門安全層（floor）與兩道牆〉）。**呼不到某支工具＝這層沒有那個權限、不是系統壞**；能呼叫到的工具就是被允許的。受限層連 `business.db` 都讀不到、唯一入口是這組 floor-gated MCP 工具。
+
+| 意圖 | LINE 個人身份標記（提示 / 上報判斷用） |
 |------|-----------|
 | 查詢（庫存/任務/規則） | basic |
 | 回報進度、建立任務 | basic |
 | 記帳/報銷 | basic |
 | 修改庫存 | manager |
-| 修改規則 | admin |
-| 群發訊息 | admin |
 
-權限不足 → 回覆：「這個操作需要主管權限。」
+> `permissions` 欄只是**禮貌提示 + 上報判斷**用的個人身份標記，不是硬隔離。真正能不能做，看你這層 floor gate 有沒有那支工具。
+>
+> **過時提醒**（別再照舊表回「需要 admin」）：
+> - 「修改規則」不再是單純 admin 把關——知識有**機密軸**（confidential），非全權限層的 `query_knowledge` 本來就看不到機密規則（見 CLAUDE.md〈機密軸（confidential）〉）。
+> - 「群發訊息」不再是 admin 關鍵字把關——對外廣播走 `manual_broadcast` 的 **HITL 審核**（見 CLAUDE.md〈HITL 審核〉B 類 manual），核准後人工多步驟發送。
+
+**診斷本層能力**：不確定自己這層有沒有某個權限／工具時，用 `floor_status` / `floor_config_status` 查本層實際的可見度與工具範圍，不要靠猜。被 gate 擋下（呼不到工具）→ 照實回報「這層沒有這個權限」，不要當系統錯誤。
 
 ### 第三步：處理並回覆
 
@@ -69,6 +80,8 @@
 
 **如果沒有自訂規則** → 用預設邏輯：
 
+**意圖分類（業務邏輯，按這張表判斷該通知哪個角色）：**
+
 | 意圖判斷 | 通知誰 | 怎麼找 |
 |---------|--------|--------|
 | 詢價/業務合作 | 業務負責人 | `list_employees()` 找 department 含「業務/銷售」的 manager，沒有就通知老闆 |
@@ -77,10 +90,13 @@
 | 推銷/廣告/垃圾 | 不通知任何人 | 直接 `mark_read`，不浪費老闆時間 |
 | 無法判斷 | 老闆 | fallback，永遠通知老闆 |
 
-通知格式（多 OA 一定要帶 `channel_id`＝陌生人來訊的同一個 OA，否則會用錯 OA 推播給負責人）：
-```
-reply(chat_id=負責人的LINE_user_id, channel_id=收到訊息的channel_id, text="有陌生人傳了訊息：\n暱稱：{user}\n內容：{content}\n判斷意圖：{意圖}\nUser ID: {user_id}")
-```
+**怎麼把通知送出去（看你這層能不能 reply）：**
+
+- **有對外 reply 能力的層**（全權限層 / 客服層等）：直接 `reply` 通知對應負責人。多 OA 一定要帶 `channel_id`＝陌生人來訊的同一個 OA，否則會用錯 OA 推播給負責人：
+  ```
+  reply(chat_id=負責人的LINE_user_id, channel_id=收到訊息的channel_id, text="有陌生人傳了訊息：\n暱稱：{user}\n內容：{content}\n判斷意圖：{意圖}\nUser ID: {user_id}")
+  ```
+- **受限部門 session（有 `SME_FLOOR`）的退路**：你不一定撈得到負責人 / 老闆的 `user_id`，也不一定 push 得到。此時**不要自己撈 boss user_id 去 reply**——把「要通知誰 + 內容」交給上報（escalation）機制 / 由全權限層處理（見 CLAUDE.md〈上報（escalation）機制〉、本檔第六節執行模型）。floored 層辨識到「這是要轉給老闆 / 主管」時，記著等系統上報送達，不要硬塞 reply。
 
 ### Step 3：標記已處理
 
@@ -94,7 +110,9 @@ reply(chat_id=負責人的LINE_user_id, channel_id=收到訊息的channel_id, te
 
 ### 找老闆 + 通知頻道選擇
 
-老闆的 LINE user_id：`list_employees()` 找 `role='boss'` 的員工取 `line_user_id`。
+> 以下「撈 `role='boss'` user_id 直接 reply」只適用**有對外 reply 能力的層**（全權限層 / 客服層）。受限部門 session 要通知老闆走上報機制，不自己撈 boss user_id（見上一段退路、CLAUDE.md〈上報（escalation）機制〉）。
+
+老闆的 LINE user_id（有 reply 能力的層）：`list_employees()` 找 `role='boss'` 的員工取 `line_user_id`。
 
 **通知頻道選擇（多 OA 環境重要）：**
 1. **優先**：用收到陌生訊息的同一個 `channel_id` 通知（老闆能直接知道來源 OA）
@@ -183,7 +201,7 @@ LINE MCP server（`line-channel/server.ts` L662-675）已經：
 收到群組訊息（已保證被 @ 過）
   ↓
 Step 1: list_line_groups 或查 line_groups 表
-  ├─ 未登錄 → 走規則 #33（沉默 + 通知 老闆）
+  ├─ 未登錄 → 走規則 #33（沉默 + 上報老闆，見下方 SOP）
   └─ 已登錄 → Step 2
 
 Step 2: 按 group_type
@@ -195,22 +213,28 @@ Step 3: 識別發訊者身份（依序查）
   1. lookup_employee(user_id) → 員工 → 按 permissions 執行
   2. find_customer(user_id) → 客戶/供應商 → 套品牌語氣
   3. find_partner(user_id) → 外包夥伴 → 協作身份，可查詢不可執行
-  4. 都沒找到 → 陌生人 → 🔴 紅旗通知 老闆
+  4. 都沒找到 → 陌生人 → [紅旗] 上報老闆（走 escalation / 全權限層；受限層別自撈 boss user_id）
 
-Step 4: 對外動作（發 LINE/記帳/下單）永遠走 HITL
+Step 4: 需審核的對外動作走 HITL（超門檻記帳/訂單、對外行銷 manual_broadcast）
 ```
+
+> **「上報老闆」的執行方式統一**：有對外 reply 能力的層才直接 reply 老闆；受限部門 session 走上報（escalation）機制 / 由全權限層處理，**不要自己撈 `role=boss` user_id 去 push**（與本檔第六節執行模型一致、見 CLAUDE.md〈上報（escalation）機制〉）。
+>
+> **Step 4 對外動作 HITL**：記帳超門檻時直接 `record_transaction`、它會**在同一 tx 內系統自建審核並上報簽核人**（決策 #183、勿自行 `create_approval`）；對外行銷廣播走 `manual_broadcast`（HITL B 類）；建立審核**當下**就會通知簽核人（escalation `approval_pending`）。核准後的執行流程見第六節。
 
 ### 新群組登入 SOP（規則 #33 摘要）
 
+> 以下「通知老闆」的送達方式與決策樹、第六節一致：有對外 reply 能力的層直接 DM 老闆；受限部門 session 走上報（escalation）/ 全權限層，不自撈 boss user_id（見 CLAUDE.md〈上報（escalation）機制〉）。
+
 #### 情境 A：Bot 被加入新群組
 LINE MCP 發 `event.type='join'` → AI 應：
-1. 對 老闆 發 LINE DM：「🆕 Bot 被加入新群組 C...，要登錄嗎？」
+1. 通知老闆「Bot 被加入新群組 C...，要登錄嗎？」（有 reply 能力的層直接 DM；受限層走上報）
 2. 老闆 回覆「登錄：類型 / 名稱 / 成員」→ `register_line_group()`
 3. 老闆 回「忽略」→ 不登錄（下次該群組 @AI 走情境 B）
 
 #### 情境 B：未登錄群組有人 @AI
 1. **沉默不回**（絕對不在陌生群組發話）
-2. 對 老闆 發 LINE DM 通知「未登錄群組有人 @AI，要登錄嗎？」
+2. 通知老闆「未登錄群組有人 @AI，要登錄嗎？」（送達方式同情境 A）
 
 #### 情境 C：老闆 主動預先登錄
 老闆 在對話說「幫我登錄這個群組...」→ `register_line_group()`
@@ -291,7 +315,7 @@ Phase 1 用文字回覆（不用 Postback 按鈕）：
 #### 2. 兩 session 拓樸
 
 - **發起/建審核的 session**：記帳一律直接 `record_transaction`——超門檻時它**在同一 tx 內自建審核並上報簽核人**（決策 #183、勿自行 `create_approval`）。大額 `create_order` 目前仍由 agent 先 `create_approval`（待後續比照 #183 收斂）。
-- **執行的 session（必須有財務工具）**：真正 `record_transaction` / `create_order` 的地方。一個 floor 有沒有財務工具**取決於 floor-map 的 `financial_visibility`**：`confidential`（全權限）一定有；設成 `financial_visibility='all'` 的部門層（如專責記帳的會計層）也有；預設的 `general` 層**沒有**（能 `resolve_approval` 但記不了帳）。
+- **執行的 session**：真正 `record_transaction` 的地方**必須有財務工具**——一個 floor 有沒有財務工具**取決於 floor-map 的 `financial_visibility`**：`confidential`（全權限）一定有；設成 `financial_visibility='all'` 的部門層（如專責記帳的會計層）也有；預設的 `general` 層**沒有**（能 `resolve_approval` 但記不了帳）。（註：`create_order` 不在 floor 移除清單、任何層都呼得到，只是超門檻要先帶核准的 `approved_id`、不像 `record_transaction` 受 `financial_visibility` gate。）
 - ⇒ 核准後的記帳要落在「有財務工具」的 session。最穩的是 `confidential` 全權限層（老闆所在、見第 4 點路由）；若部署把會計層設成 `financial_visibility='all'`，該層在審核核准後也能自行執行。
 
 #### 3. 老闆 LINE 回「核准 #N」→ 全權限 session 一條龍
@@ -334,7 +358,7 @@ Phase 1 用文字回覆（不用 Postback 按鈕）：
 
 - 同一人 1 小時內不主動推超過 5 則
 - 員工問問題的回覆不算限制
-- 廣播一律需 admin 核准
+- 廣播 / 對外行銷文案一律走 `manual_broadcast` 的 HITL 審核（核准後人工多步驟發送）；**別把核准人身份寫死成 admin**——誰能核准是 HITL gate / floor 的事，見 CLAUDE.md〈HITL 審核〉B 類 manual
 - 晚上 10 點到早上 8 點不主動推送（除非緊急）
 
 ---
@@ -376,7 +400,7 @@ Phase 1 用文字回覆（不用 Postback 按鈕）：
 
 額度追蹤方式：
 - 系統目前無法自動查詢 LINE 額度（LINE MCP 尚未支援 quota API）
-- 每月 1 日提醒老闆：「建議到 LINE Official Account Manager 後台檢查本月訊息額度」
+- `get_context_summary` 有推送用量摘要可參考；**系統目前未自動排程「月初額度檢查」提醒**。需檢查時由 agent 在啟動流程 / 對話中提醒老闆「建議到 LINE Official Account Manager 後台檢查本月訊息額度」，或建一筆 task 做人工 follow-up（待實作自動月檢）
 - 日常優先使用 `reply`（回覆訊息不計入 push 額度），減少主動 push
 - 群發前先估算：本月已發 N 則 + 這次要發 M 則，是否超過方案上限
 
@@ -395,7 +419,7 @@ Phase 1 用文字回覆（不用 Postback 按鈕）：
 - 不要回覆陌生人（通知老闆或對應負責人）
 - 不要對同一人 1 小時內推超過 5 則
 - 不要在晚上 10 點到早上 8 點主動推送（除非緊急）
-- 不要未經 admin 核准就廣播
+- 不要未走 `manual_broadcast` HITL 審核就廣播 / 發對外行銷訊息（核准人身份別寫死 admin，見 CLAUDE.md〈HITL 審核〉B 類）
 - 不要在未辨識身份的情況下執行操作
 
 ## 快速參考

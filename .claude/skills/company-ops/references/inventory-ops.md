@@ -99,9 +99,9 @@ SKU 已存在時只更新數量，忽略其他參數。
 - B 級品項：補 14-30 天的量
 - C 級品項：補 30-60 天的量
 
-### 自動補貨提醒
+### 補貨後續（agent 依 low_stock_alerts 清單處理）
 
-當 `low_stock_alerts()` 回傳警報時：
+`low_stock_alerts()` 只**回傳低庫存清單**、**不會自己通知或建補貨清單**。agent 拿到後依分級處理（以下皆 agent 動作；通知老闆走上報 / 全權限層）：
 - A 級且 ≤ 補貨點 → 立即通知老闆，含建議補貨量
 - B 級 → 加入本週補貨清單
 - C 級 → 加入本月補貨清單
@@ -113,15 +113,13 @@ SKU 已存在時只更新數量，忽略其他參數。
 
 1. `check_stock` 確認目前庫存
 2. 計算進貨金額（數量 × unit_cost）
-3. 金額超過審核門檻？
-   - 是 → `create_approval` + LINE 通知主管
-   - 否 → 直接執行
+3. 進貨金額超門檻**不要自己 `create_approval`**：記帳走第 5 步的 `record_transaction`、超門檻時它會**系統自建審核 + 上報簽核人**（決策 #183，同 accounting-ops），門檻內直接記。通知主管走上報機制、非自行 reply
 4. `update_stock(sku, +數量, 原因)`
-   > ⚠️ `update_stock` 的回傳值會包含 `👉 下一步` 提示建議的 `record_transaction` 參數（含計算好的金額）。**一定要記帳**，否則進貨金額不會出現在帳務中。
-5. 同時記帳（跨模組串接 → accounting-ops）：
+   > 注意：`update_stock` 的回傳值會包含「下一步：」提示，列出建議的 `record_transaction` 參數（unit_cost 已知時含計算好的 `amount`）。**一定要記帳**，否則進貨金額不會出現在帳務中。
+5. 同時記帳（跨模組串接 → accounting-ops；`record_transaction` 屬財務工具，floored 非財務層被移除、記不了帳屬正常→交給有財務工具的層或全權限層，見 line-comms 第六節）：
    - 問使用者：「已付款還是賒帳？」
    - 已付款 → `record_transaction(type='expense', amount=進貨金額, category='inventory_purchase', description='進貨 {品名} {數量} 個 @ NT${單價}', payment_status='paid')`
-   - 賒帳 → `record_transaction(type='expense', amount=進貨金額, category='inventory_purchase', description='進貨 {品名} {數量} 個 @ NT${單價}', payment_status='pending', due_date=帳期到期日)`
+   - 賒帳 → `record_transaction(type='expense', amount=進貨金額, category='inventory_purchase', description='進貨 {品名} {數量} 個 @ NT${單價}', payment_status='pending', due_date='<帳期到期日 YYYY-MM-DD>')`
 6. 如果有進貨單/發票照片 → `add_attachment(target_type='inventory', target_id=品項ID, file_path='data/media/inventory/進貨單.jpg', description='進貨單')`
 7. 回報：「已入庫 {品名} {數量} 個，目前庫存 {新數量}。已記錄進貨支出 NT${金額}。」
 
@@ -172,7 +170,7 @@ SKU 已存在時只更新數量，忽略其他參數。
 1. 解析品項和數量
 2. `check_stock('A200')` 取得帳面數量
 3. 比對差異
-4. 差異 = 0 → 「A200 帳實相符 ✅」
+4. 差異 = 0 → 「A200 帳實相符」
 5. 差異 ≠ 0 → 「帳面 {X}，實際 {Y}，差異 {Z}。要調整嗎？」
 6. 確認 → `update_stock(sku, 差異數, '盤點調整')`
 
@@ -219,9 +217,17 @@ SKU 已存在時只更新數量，忽略其他參數。
 │   ├→ 搭配暢銷品組合
 │   └→ 轉換通路（線上/批發）
 └→ 不能：
-    ├→ 報廢，記錄損失
-    └→ record_transaction(type='expense', category='inventory_loss')
+    ├→ 報廢前先 update_stock(sku, -報廢數量, reason='報廢') 沖掉帳面庫存
+    └→ 記損失（損失金額 = 報廢數量 × unit_cost，從 check_stock 取 unit_cost 算）：
+        record_transaction(
+          type='expense',
+          amount=報廢數量乘unit_cost,
+          category='inventory_loss',
+          description='報廢 {品名} {報廢數量}{單位} @ NT${單價}'
+        )
 ```
+
+> `record_transaction` 的 `type` / `amount` / `category` 為必填。報廢損失的 `amount` 不要憑感覺填——用 `check_stock` 取得 `unit_cost`，金額 = 報廢數量 × unit_cost。金額超門檻時 `record_transaction` 會系統自建審核並上報簽核人（決策 #183，同 accounting-ops），勿自行 `create_approval`。
 
 ### 呆滯品資金佔用
 
@@ -296,14 +302,14 @@ SKU 已存在時只更新數量，忽略其他參數。
 ### Do
 - 每次庫存變動即時更新，不要延後
 - 進貨後一定跟著 `record_transaction`（`update_stock` 回傳值有提示）
-- 大量調整（盤點差異 > 5%）需主管核准
+- 大量調整（盤點差異 > 5%）流程上先通知主管、複盤再調整（非系統強制 gate，是操作紀律）
 - 新品首批只進 2 週預估量
 - 安全庫存用公式計算，每季檢討
 
 ### Don't
 - 不要在 `fulfill_order` 之後再手動 `update_stock`（自動扣庫存，重複會錯）
 - 不要允許負庫存（系統直接拒絕）
-- 不要讓 basic 權限的人新增品項（manager 以上）
+- 新增品項 / 大量盤點調整流程上建議由 manager 主導；但 `update_stock` **沒有以 employee permissions enforce**——能不能呼叫由部門安全層（floor）決定（見 CLAUDE.md〈部門安全層（floor）與兩道牆〉）
 - 不要憑感覺補貨（用資料和補貨點公式）
 - 不要跳過進貨記帳步驟
 
@@ -312,7 +318,7 @@ SKU 已存在時只更新數量，忽略其他參數。
 ### 進貨
 1. `check_stock(sku_or_name='SKU-A001')` — 確認目前庫存
 2. `update_stock(sku='SKU-A001', quantity_change=50, reason='供應商到貨')`
-3. 依回傳的「👉 下一步」→ `record_transaction(type='expense', amount=進貨金額, category='inventory_purchase')`
+3. 依回傳的「下一步：」提示 → `record_transaction(type='expense', amount=進貨金額, category='inventory_purchase', description='進貨 {品名} {數量}{單位} @ NT${單價}')`
 
 ### 盤點調整
 1. `check_stock(sku_or_name='A200')` — 取帳面數量
@@ -324,7 +330,7 @@ SKU 已存在時只更新數量，忽略其他參數。
 
 如果 context 被壓縮：
 1. `get_context_summary(scope='full')` — 查看「庫存警報」區塊
-2. `low_stock_alerts()` — 完整列出所有低於安全庫存的品項
+2. `low_stock_alerts()` — 列出低於安全庫存的品項（**完整清單僅全權限層**；floored 非全權限層拿到的是精簡視圖[#166]、完整盤點交全權限層，見 CLAUDE.md〈部門安全層（floor）與兩道牆〉）
 3. 對每個警報品項 `check_stock(sku)` 取得詳情
 4. 根據 ABC 分級和補貨點判斷：立即通知/本週補貨/本月補貨
 
@@ -333,7 +339,7 @@ SKU 已存在時只更新數量，忽略其他參數。
 ## 十二、注意事項
 
 - 負庫存直接拒絕
-- 大量調整需主管核准
+- 大量調整（盤點差異 > 5%）流程上建議先通知主管、複盤再調整；`update_stock` 本身**沒有自動建 approval**，這是流程紀律、非系統 gate
 - 每次庫存變動自動寫 interaction_log
 - Phase 1 不做預測補貨
-- 新增品項只有 manager 以上權限
+- 新增品項 / 大量調整流程上建議 manager 主導；系統**未以 employee permissions enforce**，真正的硬牆是部門安全層（floor）——能呼叫 `update_stock` 與否看 floor（見 CLAUDE.md〈部門安全層（floor）與兩道牆〉）

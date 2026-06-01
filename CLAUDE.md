@@ -16,7 +16,7 @@
 你是公司的 AI 營運助理。透過 LINE 和直接對話協助老闆及員工處理日常營運。
 
 ## MCP 工具
-- **business-db**：企業資料庫，覆蓋以下領域：知識 / 任務 / 員工 / 外包夥伴 / 客戶 / 庫存 / 帳務 / 訂單 / 審核 / 請假 / 附件 / 快照 / 公司設定 / 事業體 / LINE 訊息搜尋 / LINE 群組 / 會話交接（完整工具清單見 `mcp-servers/business-db/server.py` 及各 `modules/*/tools.py`）
+- **business-db**：企業資料庫，覆蓋以下領域：知識 / 任務 / 員工 / 外包夥伴 / 客戶 / 庫存 / 帳務 / 訂單 / 審核 / 請假 / 附件 / 快照 / 公司設定 / 事業體 / LINE 訊息搜尋 / LINE 群組 / 會話交接 / 部門安全層（floor）/ 上報（escalation）（完整工具清單見 `mcp-servers/business-db/server.py` 及各 `modules/*/tools.py`）
 - **line**：LINE Channel（reply / reply_flex / multicast / mark_read / list_channels）
 - **social**：社群媒體（Facebook / Instagram / Threads 讀取）
 
@@ -47,6 +47,7 @@
 - **員工數 = 0** → 視為全新系統，自動載入 `knowledge-capture.md` 的系統導入流程引導老闆完成初始設定
 - 啟動 readout 至少要含：待處理任務 / 待審核 / **待簽請假** / 庫存警報 / 逾期帳款 / 本月收支
 - 數值為 0 也要顯示（讓老闆知道系統有在跑、不是漏報）
+- **floored 受限層** readout 依 floor 可見度收斂（#166 開機自動讀取已堵）：非財務層的「本月收支」以「本層不可見」呈現、不是當缺資料或顯示 0；全權限層開機額外檢查 `list_pending_escalations` 待投遞 / 失敗（見〈上報（escalation）機制〉）
 
 ## 多事業體支援
 
@@ -66,6 +67,49 @@
    - 寫入時應明確指定 `business_unit`；遇到 NULL 紀錄要判斷是「故意全域」還是「漏填」
 8. **`leave_requests` 無 `business_unit` 欄位（設計決策）**：請假紀錄不直接儲存 BU、查詢時從關聯員工的 `business_units` 即時推導。理由：員工 BU 變更時不用回改歷史請假紀錄；員工跨多 BU 時自然出現在所有 BU 的 `list_pending_leave_requests` 篩選結果。員工被刪（`ON DELETE SET NULL`）後 `employee_id` 變 NULL、該筆 leave_request 在任何 BU 篩選都會出現（fallback 顯示「員工已離職」）、避免老闆漏掉。
    - **注意**：對應的 `approvals.business_unit` 仍是 **snapshot**（建立時 `_employee_business_unit` 只取員工第一個 BU 寫入、後續員工 BU 變更不會同步到舊 approval）。`list_pending_leave_requests` 走 employees JOIN 是「即時推導」、`create_approval` / 直接掃 `approvals.business_unit` 篩 BU 則看到的是 snapshot。兩處 BU 行為不同、是 trade-off。
+
+## 部門安全層（floor）與兩道牆
+
+LINE / CLI 每個 session 可帶 `SME_FLOOR` 環境變數標示「部門安全層」。一層 = 一個受限身份（一個資料夾 + 一組可用工具 + 一份可見度）。**威脅模型 = 防內部員工越權看不該看的，不是防駭客級 prompt injection。** runtime 走 Claude Code 訂閱（非 metered SDK / API），安全靠砍工具 + gated MCP，不靠換 runtime。
+
+**`SME_FLOOR` 三態**（`floor_policy.get_floor`）：
+- **未設（空字串）或 `confidential`** = **全權限層**（`FULL_ACCESS_FLOORS`；operator / 開發 / Cowork / 機密層）：不移除任何工具、看全部
+- **含 `$` 或 `{`（模板沒展開）= `__unexpanded__` = fail-closed**：當受限層砍工具、`_resolve_trusted_actor` 擋下、line-channel 收不到。**絕不把「沒展開」誤當 operator 放行**
+- **其餘字串** = 該受限部門層
+
+**兩道獨立的牆**（一道破不了還有另一道）：
+1. **檔案牆（sandbox）**：`start-line.sh <層>` 啟動時設 `cwd` = 該層資料夾、`allowWrite` 只圈該夾、`denyRead` 列家目錄 / `.mcp.json` / `business.db` / `line-channels.json` / `floor-map.json` / 其他所有層；Read 工具只圈該夾 + `.claude/skills/**`。`--tools` 只給 built-in 白名單（砍 Agent / Workflow / Monitor / Task / Cron 等逃逸 / 編排工具，保留 Bash / Edit）。
+2. **資料牆（business-db MCP 工具白名單）**：business-db 是獨立進程、sandbox 管不到它。server 啟動、所有工具註冊完後呼叫 `apply_floor_policy(mcp)`，依 `SME_FLOOR` + `floor-map.json` 從 MCP **物理移除**該層不該有的工具。受限層連 `business.db` 檔都被 denyRead、唯一入口就是這組被 floor-gated 的 MCP 工具。
+
+**`floor-map.json` = 能力設定層（keystone）**：每層設 `financial_visibility` / `role` / `escalation_target` / `department`，`apply_floor_policy` 據此決定工具去留：
+- 非全權限層**一律移除** HR 工具（員工 PII / 請假 / 員工管理）+ 上報管理工具（`list_pending_escalations` / `mark_escalation_sent`，使部門層讀不到也標不了自己被上報的事）
+- 財務工具去留看 `financial_visibility`：`all` = 全保留（會計層）、`none`（預設）= 移除全部財務工具、`own_bu` = 目前 **fail-closed**（連讀也砍、要靠未完成的 #11 才安全）
+- **無 floor-map 條目 = 安全預設 `none`**（完全等同未分層前）
+
+**已收斂 vs 仍有缺口（回報時不可誤述）**：
+- **開機自動讀取已堵（#166）**：`get_context_summary` / `low_stock_alerts` 在非全權限層走 `is_full_access()` 早退安全子集，避免「開機 hook 自動跑就洩漏」
+- **on-demand 讀取仍 fail-open（#11 未做、本輪不處理）**：`list_orders` / `get_order` / `list_tasks` / `check_stock` / `find_customer` 仍照 agent 傳入的 `business_unit`、非全權限層可省略 BU → 撈到全 BU。**文件與回覆絕不可宣稱「部門層只看得到自己 BU 的資料」**——列級過濾尚未落地
+
+> 哪些層名屬全權限、各層看什麼，**隨 onboarding 的 floor-map 客製而變**：引用機制名稱即可、不要在 references 寫死層清單。診斷本層能力用 `floor_status` / `floor_config_status`。
+
+### actor 身份信任（floored session 不信任 agent 自填）
+
+- **floored session（有 `SME_FLOOR`）**：操作者 `actor` 一律由系統取 line-channel 每則訊息驗簽後寫入 `active-request` 的 verified `user_id`、**忽略 agent 傳入值**（防冒名、防傳空字串走系統全通）。查不到當前 LINE 脈絡 → 回 `__unverified__` sentinel、後續權限檢查擋下。
+- **operator / setup（無 `SME_FLOOR`）**：才採用傳入的 `actor` 值。
+- verified 結果存在 `~/.claude/channels/line/active-request-<floor>.json`，被 sandbox `denyRead` 擋住、agent 偽造不了；只有非 sandbox 的 MCP 進程讀得到；逾 10 分鐘視為過期。
+- **不可逆動作（刪除 / 離職）應具名 `actor`**——但這道強制（拒空 actor + admin-gate）屬 **#10、目前未 enforce**（如 `update_employee` 仍記 `actor='system'`）。references 給範例時別寫「agent 自己填 actor 名」（floored 層的 actor 由系統認、非 agent 控制）。
+
+## 上報（escalation）機制
+
+部門層做了越權或高風險動作時，系統**主動通報**對應負責人（通常是老闆）。**上報只通知、不擋動作。**
+
+- **硬接線、agent 跳不過（#162 / #173）**：觸發的 service 在「真正執行那支 tool 的**同一個 transaction 內**」無條件 `enqueue_escalation` 寫一筆 `pending_escalations`（與業務寫入同一原子 commit）。agent 看不到也略不掉、不是 agent 主動通報。
+- **6 個預設啟用的觸發（#173 / #178，settings `escalation_triggers` 可覆寫）**：`approval_pending`（**審核一建立就通知簽核人**、不等執行）、`transaction_recorded_over_threshold`（記帳超門檻）、`order_cancelled_shipped`（已出貨單被取消）、`transaction_deleted`（刪帳）、`employee_permissions_changed`（員工權限變動）、`qc_failed`（品檢未過）。`cross_bu_access` 預設**關**（高頻無 dedup 會洗版）。
+- **身份 / 收件人 / 來源層在「建立當下」蓋章、投遞器不重算（#27）**：`actor`、`target_line_user_id`、`source_floor` 都在 enqueue 當下（service in-tx、active-request 還在）解析寫死；`source_floor` 由系統讀 `SME_FLOOR` 寫入、**非靠 LLM 措辭**。給主管的訊息「來源層 + 操作者」由 `(source_floor, actor)` 確定性推導、**永不匿名**（verified 員工名 / 未驗證身份 / 系統操作三類分明）。收件人 coalesce：`floor-map.escalation_target` 直接 user_id → `role=boss` → `permissions=admin` → `company.boss_line_id` → 仍寫 pending（fail-toward-有人收、不靜默丟）。
+- **投遞 = 三層、笨投遞器照 row 推**：**保證層（主）** OS cron `flush_escalations.py`（純讀 row → push → UPDATE status、不重算身份）；**品質層** `claude -p` single-shot notifier（走訂閱、env 去 `ANTHROPIC_API_KEY`、全權限才看得到 escalation、窄工具白名單、防遞迴 `SME_NOTIFIER=1`）；**即時層（best-effort）** in-session push 經 line-channel owner IPC 注入正在跑的全權限 session、commit 後即時自醒——channel notification 的 `meta` **必為 `Record<string,string>`**（int / None 會被 CC 靜默丟棄整筆通知 = #182 根因）。
+- **投遞租約防雙送（#27）**：cron 與 notifier 併發時送前先原子 claim（`claimed_at` CAS、claim 與 send 分 tx），只有搶到的那路可送 + 落 log；TTL 後未完成的 row 可被 reclaim。常數值勿寫死（test 有 cross-file guard 綁死）。
+- **送出有稽核留底**：實際送出文字落 `interaction_log`（`action='escalation_sent'`）。
+- **異常監看**：`list_pending_escalations` 有 `failed` / 逾期未送達 → 提醒全權限層，否則上報靜默失敗無人知。
 
 ## 反捏造原則
 
@@ -94,6 +138,13 @@
 - `update_rule` — 更新時自動遷移 / 提醒檢查連動規則。
 
 agent 寫 fact / log decision 前先 `query_knowledge(主題)` 找候選相關規則、然後在參數帶 `related_rule_ids`、graph 自然成長。**UserPromptSubmit hook 已提醒「可選 related_rule_ids / supersedes_rule_ids」**，agent 應主動善用。詳見 `knowledge-capture.md` 第七節。
+
+### 機密軸（confidential）— 知識的 floor 可見度
+
+知識有兩條**獨立**的軸：`business_unit`（哪個事業體）與 `confidential`（機密與否）。
+- `store_fact` 預設 `confidential=False`（**員工可見**）；`log_decision` 預設 `confidential=True`（多含策略 / 理由、僅機密 / 全權限層可見）。
+- 非全權限層的 `query_knowledge` 會**過濾掉 `confidential=1`**（migration 006）。
+- **導入訪談（財務 / HR / 定價策略）最容易碰到機密內容**：這類答案要明確 `store_fact(confidential=True)`，否則以預設公開寫入、在 general / external 等部門層的 `query_knowledge` 全看得到 = 實質洩漏。
 
 ## HITL 審核
 
@@ -148,7 +199,7 @@ CLI session 建立 `create_approval` 後：
 
 | 層級 | 寫什麼 | 不寫什麼 |
 |------|--------|---------|
-| `CLAUDE.md` / `AGENTS.md`（root） | 跨技能包的**核心機制與行為契約**：HITL gate 比對演算法、`consumed_at` 設計、多事業體規則、知識庫寫入規則、反捏造、回覆語氣、Context 壓縮恢復、文件權威層級本身 | 單一業務領域的觸發場景或 ERROR 細節 |
+| `CLAUDE.md` / `AGENTS.md`（root） | 跨技能包的**核心機制與行為契約**：HITL gate 比對演算法、`consumed_at` 設計、**floor 兩道牆 / `SME_FLOOR` 三態 / escalation 上報 / actor 身份信任 / 機密軸**、多事業體規則、知識庫寫入規則、反捏造、回覆語氣、Context 壓縮恢復、文件權威層級本身 | 單一業務領域的觸發場景或 ERROR 細節 |
 | `.claude/skills/*/SKILL.md` | 技能包入口：模組索引、跨模組工作流、適用情境總覽 | 單一模組內部流程 |
 | `.claude/skills/*/references/*.md` | 單一業務領域的**觸發情境 + 流程 + 失敗情境判讀**（如 `leave-ops.md` 只講請假；可引用 root 機制名稱、但不重新解釋核心演算法） | 重新解釋跨技能包的核心機制（用一句話交叉引用回 root 即可） |
 

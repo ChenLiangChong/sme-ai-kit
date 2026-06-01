@@ -1,0 +1,26 @@
+{
+  "_about": "company-ops 技能包『包級觸發率』eval set。用 skill-creator-advanced/run_eval.py 跑：每條 query 測 company-ops 的 description 會不會讓 agent 載入此技能包。should_trigger=true 應載入(營運情境)、false 不應載入(社群/設計/純程式碼→走別的 skill)。查詢用通用詞、不放真實/虛構具名(git-safe)。模組級路由(載入後讀對哪個 reference)是另一層、不在此 set。",
+  "queries": [
+    {"id": "ops-dash-1", "query": "今天有什麼要處理的？", "should_trigger": true, "tags": ["dashboard"], "notes": "營運儀表板"},
+    {"id": "acct-expense", "query": "幫我記一筆支出，買文具花了 1200", "should_trigger": true, "tags": ["accounting"], "notes": "記帳"},
+    {"id": "leave-apply", "query": "有同事下週一到三要請特休三天", "should_trigger": true, "tags": ["leave"], "notes": "請假"},
+    {"id": "inv-check", "query": "招牌商品這個品項還剩多少庫存？", "should_trigger": true, "tags": ["inventory"], "notes": "查庫存"},
+    {"id": "order-create", "query": "幫客戶開一張訂單，10 箱主力商品", "should_trigger": true, "tags": ["order"], "notes": "下單"},
+    {"id": "acct-income", "query": "這個月公司收入多少？", "should_trigger": true, "tags": ["accounting"], "notes": "月收支"},
+    {"id": "onboard-new", "query": "有新員工要建檔、綁定他的 LINE", "should_trigger": true, "tags": ["onboarding"], "notes": "新人導引"},
+    {"id": "hitl-approve", "query": "核准 #18", "should_trigger": true, "tags": ["hitl"], "notes": "HITL 簽核"},
+    {"id": "crm-lookup", "query": "這個客戶最近一次下單是什麼時候？", "should_trigger": true, "tags": ["crm"], "notes": "客戶管理"},
+    {"id": "inv-receive", "query": "倉庫剛到貨 50 箱，幫我入庫", "should_trigger": true, "tags": ["inventory"], "notes": "進貨"},
+    {"id": "acct-overdue", "query": "有哪些客戶逾期還沒付款？幫我追", "should_trigger": true, "tags": ["accounting", "crm"], "notes": "催款"},
+    {"id": "order-qc", "query": "訂單 #23 出貨前品檢過了嗎？", "should_trigger": true, "tags": ["order"], "notes": "品檢/出貨"},
+    {"id": "knowledge-rule", "query": "老闆說以後 VIP 客戶一律打 95 折，記下來", "should_trigger": true, "tags": ["knowledge"], "notes": "規則萃取"},
+    {"id": "report-weekly", "query": "給我一份這週的營運週報", "should_trigger": true, "tags": ["report"], "notes": "報表"},
+
+    {"id": "neg-ig-post", "query": "幫我寫一篇介紹新品的 Instagram 貼文", "should_trigger": false, "tags": ["social-media"], "notes": "社群內容→social-media"},
+    {"id": "neg-poster", "query": "設計一張新品發表會的海報", "should_trigger": false, "tags": ["design"], "notes": "視覺設計→sme-design/ui-ux"},
+    {"id": "neg-fb-analytics", "query": "分析我們 Facebook 粉專這個月的觸及和互動", "should_trigger": false, "tags": ["social-media"], "notes": "社群數據→social-media"},
+    {"id": "neg-pycode", "query": "幫我寫個 Python 腳本，把資料夾裡的圖片批次壓縮", "should_trigger": false, "tags": ["code"], "notes": "純寫程式→不載入"},
+    {"id": "neg-email-seq", "query": "我想規劃一套 Email 冷觸及序列", "should_trigger": false, "tags": ["social-media"], "notes": "行銷觸及→social-media"},
+    {"id": "neg-pitch-deck", "query": "做一份給投資人的募資簡報", "should_trigger": false, "tags": ["design"], "notes": "簡報設計→sme-design"}
+  ]
+}
