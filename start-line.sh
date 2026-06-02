@@ -14,8 +14,10 @@
 #   4. 啟動 cwd = 該層 floor → 中和 harness 自動把 cwd(".") 注入 allowWrite 的寫入破口
 # 威脅模型：防內部員工越權看不該看的（非駭客級 injection）。
 #
-# 注意：line-channel 目前是「廣播」、尚未做 DB 驅動定向派送（Flow B 下一步）。
-#       多開 session 時，同一則 LINE 訊息每個 session 都會收到 → 測「分層隔離」請用終端機直接下指令。
+# 多 session 派送（決策 #4，已做 + live 驗）：line-channel owner 對每則進來的訊息算出 target_floor
+#   （boss/admin→confidential、其餘→channel.business_unit 或預設 general；依 floor-map 的細路由待 #13），
+#   蓋進 notification 的 meta；各 session 的 notification 經 shouldDeliver(target_floor === 自己 SME_FLOOR)
+#   自我過濾 → 同一則 LINE 訊息只進對應那層的 session、不再全廣播；active-request 亦 per-floor（防跨層誤歸因）。
 set timeout 15
 # base = 這個腳本所在目錄（＝ repo root）：自動推導、不寫死絕對路徑，換機器 / 換資料夾 / 上 NAS 免改。
 # （原 v6 寫死絕對路徑；改為 info script 推導後此檔可攜、可進 git 當部署參考。）
