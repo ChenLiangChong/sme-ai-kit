@@ -96,7 +96,7 @@
 - 「最近的支出」→ `list_transactions(type='expense')`
 - 修帳：`update_transaction(transaction_id=帳目ID, category='正確分類', business_unit='正確事業體')` — 第一參數是 `transaction_id`；修正分類、事業體、狀態等欄位（金額不可改，需刪除重建）
 - 刪帳：`delete_transaction(transaction_id=帳目ID, reason='原因', actor_user_id='')` — 第一參數是 `transaction_id`，必須有原因。
-  - **流程上限 admin/manager，但系統未完全 enforce**：`_check_permission` 只在 `actor_user_id` 非空時才驗，operator / system 留空可繞過；floored session 的 `actor_user_id` 由系統取 verified `user_id`（agent 自填無效）、operator 路徑可留空。真正的硬牆是 floor gate（財務工具在 floored 非財務層被物理移除）。`#10` 規劃補強制具名 actor + admin-gate、**目前未做**（見 CLAUDE.md〈actor 身份信任〉）。
+  - **權限：需 `manager` 以上（#10 已落實）**：floored session 的 `actor_user_id` 由系統取 verified `user_id`（agent 自填無效、非 manager / 未驗證身份擋下），audit log 記真實操作者名（不再 `actor='system'`）；operator（無 `SME_FLOOR`、空 actor）放行＝全權限路徑（設計如此、威脅模型只防 agent 路徑越權）。另有 floor gate 硬牆（財務工具在 floored 非財務層被物理移除）。
   - **刪帳會自動上報主管**（escalation `transaction_deleted` 觸發、系統蓋章通知，見 CLAUDE.md〈上報（escalation）機制〉）；屬不可逆動作。
 
 ---
@@ -357,7 +357,7 @@ agent 在啟動 readout / 月結時依上表自行提醒（系統僅 `_date_remi
 
 ### Don't
 - 不要在沒確認金額的情況下記帳
-- 刪帳流程上限 admin/manager（但系統未完全 enforce：`actor_user_id` 留空可繞、真正硬牆是 floor gate、`#10` 未做）；agent 不應替 basic 權限者執行刪帳
+- 刪帳需 `manager` 以上（#10 已落實：floored 取 verified actor 驗權 + audit 具名；operator 全權限路徑放行；另有 floor gate 硬牆）；agent 不應替 basic 權限者執行刪帳
 - 不要猜測收據上看不清楚的數字
 - 不要做複式簿記或電子發票（Phase 1 不支援）
 - 不要給確定性的稅務建議
@@ -393,7 +393,7 @@ agent 在啟動 readout / 月結時依上表自行提醒（系統僅 `_date_remi
 ## 十二、注意事項
 
 - 帳務極敏感，每次操作都 log_interaction
-- 刪帳流程上限 admin/manager（系統未完全 enforce：actor 空可繞、硬牆是 floor gate、`#10` 補強未做，詳見第三節刪帳說明）
+- 刪帳需 `manager` 以上（#10 已落實：floored verified actor 驗權 + audit 具名；operator 放行；另有 floor gate 硬牆，詳見第三節刪帳說明）
 - Phase 1 簡單收支，不做複式簿記
 - 電子發票 Phase 1 不做
 - 稅務建議附加：「詳細請諮詢記帳士」

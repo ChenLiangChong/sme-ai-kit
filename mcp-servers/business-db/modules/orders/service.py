@@ -89,17 +89,33 @@ def create_order(
         if gate.error:
             return gate.error
         if gate.needs_approval:
-            return _build_order_approval_request(
-                customer_name=customer["name"],
-                customer_id=customer_id,
-                items=items,
-                items_json=items_json,
-                notes=notes,
+            # 系統自建審核（決策 #183 模式、#26 套到 orders）：超門檻時 create_order 自己用完整
+            # resume_params 建審核 + 觸發 approval_pending 上報，不靠 agent 手寫 create_approval。
+            # detail 的 resume_params 鍵需涵蓋上方 gate verify_fields（customer_id/items_json/
+            # business_unit）→ 核准後依鎖定參數 create_order(approved_id=…) consume 必過。
+            discount_note = f"（已含折扣 {discount*100:.0f}%）" if discount > 0 else ""
+            approval_id = approvals_service.create_in_tx(
+                db,
+                type_="purchase",
+                summary=f"建立訂單：{customer['name']} NT${total:,.0f}{discount_note}",
+                detail=_order_resume_detail(
+                    customer_id=customer_id,
+                    items_json=items_json,
+                    notes=notes,
+                    business_unit=business_unit,
+                    created_by=created_by,
+                ),
+                requester=created_by or "system",
                 business_unit=business_unit,
-                created_by=created_by,
-                total=total,
-                threshold=threshold,
-                discount=discount,
+                escalate=True,
+            )
+            return (
+                f"訂單金額 NT${total:,.0f}{discount_note} 超過審核門檻 NT${threshold:,.0f}，"
+                f"已自動建立審核 #{approval_id} 並上報簽核人。"
+                + _build_guidance(next_steps=[
+                    f"等簽核人核准（LINE 回「核准 #{approval_id}」或全權限層 resolve_approval）",
+                    f"核准後由全權限 / 業務層 session 依審核鎖定的原始參數執行 create_order(approved_id={approval_id})、客戶 / 品項一字不差、無需人工重填",
+                ])
             )
 
         order_id = repository.insert_order(
@@ -167,41 +183,27 @@ def create_order(
     )
 
 
-def _build_order_approval_request(
-    customer_name: str,
+def _order_resume_detail(
     customer_id: int,
-    items: list,
     items_json: str,
     notes: str,
     business_unit: str,
     created_by: str,
-    total: float,
-    threshold: float,
-    discount: float,
 ) -> str:
-    items_str = "\n".join(
-        f"  - {i.get('name', i.get('sku', '?'))} × {i.get('qty', 0)} "
-        f"@ NT${i.get('price', 0):,.0f}" for i in items
-    )
-    detail_json = json.dumps({
+    """訂單審核的 resume detail JSON（決策 #183/#26）。resume_params 的鍵需涵蓋 create_order
+    gate verify_fields（customer_id / items_json / business_unit），核准後依此鎖定參數
+    create_order(approved_id=…) 的 consume 才會一字不差通過。"""
+    return json.dumps({
         "resume_action": "create_order",
         "resume_params": {
-            "customer_id": customer_id, "items_json": items_json,
-            "notes": notes, "business_unit": business_unit, "created_by": created_by,
+            "customer_id": customer_id,
+            "items_json": items_json,
+            "notes": notes,
+            "business_unit": business_unit,
+            "created_by": created_by,
         },
         "then": "訂單建立後通知客戶和倉管",
     }, ensure_ascii=False)
-    discount_note = f"（已含折扣 {discount*100:.0f}%）" if discount > 0 else ""
-    return (
-        f"注意：訂單金額 NT${total:,.0f}{discount_note} 超過審核門檻 NT${threshold:,.0f}，"
-        f"需先核准。\n客戶：{customer_name}\n品項：\n{items_str}"
-        + _build_guidance(next_steps=[
-            f"create_approval(type='purchase', "
-            f"summary='建立訂單：{customer_name} NT${total:,.0f}', detail='{detail_json}')",
-            "建立後系統自動上報簽核人（不需另行手動通知主管）",
-            "主管核准後再執行 create_order",
-        ])
-    )
 
 
 def _format_create_order_success(

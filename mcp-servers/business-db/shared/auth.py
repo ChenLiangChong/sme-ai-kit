@@ -94,3 +94,20 @@ def _check_permission(db, actor_user_id: str, required: str, business_unit: str 
                 business_unit=business_unit,
             )
     return ""
+
+
+def _resolve_actor_label(db, actor_user_id: str) -> str:
+    """回傳可信操作者的人類可讀標籤，供不可逆動作的 audit log（interaction_log.actor）具名。
+
+    與 _check_permission 同源（先過 _resolve_trusted_actor）：floored 取 line-channel verified
+    user_id 對應的員工名、operator/setup 用傳入值、查無對應員工則回原值、完全無值才回 'system'。
+    決策 #10：刪除 / 離職等不可逆動作不可再記 actor='system'，audit 要追得到是誰做的。
+    """
+    resolved = _resolve_trusted_actor(actor_user_id)
+    if not resolved or resolved == "__unverified__":
+        return resolved or "system"
+    emp = db.execute(
+        "SELECT name FROM employees WHERE line_user_id = ? AND active = 1",
+        (resolved,),
+    ).fetchone()
+    return emp["name"] if emp else resolved

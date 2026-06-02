@@ -55,8 +55,12 @@ def update_employee(
     business_units: str = "__SKIP__",
     active: int = -1,
     notes: str = "",
+    actor_user_id: str = "",
 ) -> str:
     """更新員工資料。只傳入要修改的欄位。
+
+    改員工資料屬不可逆 / 高風險動作（決策 #10），需 admin 權限：floored session 由系統取
+    line-channel 驗過的 user_id 驗權（agent 自填無效）；operator（無 SME_FLOOR）走全權限路徑。
 
     Args:
         employee_id: 員工 ID（必填）
@@ -69,6 +73,7 @@ def update_employee(
         business_units: 所屬事業體（逗號分隔，如 'brand_d,distribution'）。傳空字串清除（=全部事業體）
         active: 1=在職 0=離職
         notes: 備註
+        actor_user_id: 操作者 LINE user_id（admin 權限驗證 + audit 具名；留空=operator 系統呼叫）
     """
     return service.update_employee(
         employee_id=employee_id,
@@ -81,6 +86,7 @@ def update_employee(
         business_units=business_units,
         active=active,
         notes=notes,
+        actor_user_id=actor_user_id,
     )
 
 

@@ -179,6 +179,7 @@ def enqueue_escalation(
     summary: str,
     detail=None,
     actor_user_id: str = "",
+    actor_label: str = "",
     business_unit: str = "",
     channel_id=None,
 ):
@@ -193,6 +194,8 @@ def enqueue_escalation(
         summary: 一行人話摘要（推給主管的內文主體；不可空）
         detail: 完整明細，dict/list 自動 json.dumps、字串原樣、None 不存
         actor_user_id: 觸發者（會經 _resolve_trusted_actor：floored 取 verified user_id 忽略此值）
+        actor_label: caller 在「寫入前」預解析好的操作者顯示名（決策 #10/codex-HIGH：操作若會改到
+            操作者自己的員工列、寫入後再反查會找不到 → 退回顯示內部 user_id；非空＝直接用、空＝走內部反查）
         business_unit: 觸發事件所屬事業體
         channel_id: 指定推送 OA（不給則由 BU 解析）
     """
@@ -206,7 +209,12 @@ def enqueue_escalation(
     # 人話 actor：由「可信 verified user_id」反查員工名（衍生自可信身份、非 agent 自填，
     # 仍守不可偽造）。查不到員工 → 用 user_id；'__unverified__' 原樣保留。給主管的訊息更可讀。
     actor = actor_uid
-    if actor_uid and actor_uid != "__unverified__":
+    if actor_label:
+        # caller 已在「寫入前」解析好可信操作者名（決策 #10/codex-HIGH）：若本次操作會改到操作者
+        # 自己的員工列（line_user_id / active=0），寫入後再內部反查會找不到 active 員工 → 退回把
+        # 內部 user_id 寫進 audit / 通報。預解析名稱避免此洩漏；空字串＝不覆蓋、走下方內部反查。
+        actor = actor_label
+    elif actor_uid and actor_uid != "__unverified__":
         erow = db.execute(
             "SELECT name FROM employees WHERE line_user_id=? AND active=1", (actor_uid,)
         ).fetchone()

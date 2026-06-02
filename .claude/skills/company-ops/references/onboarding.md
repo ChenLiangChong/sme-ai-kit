@@ -6,7 +6,7 @@
 
 ## 權限
 
-流程規範上由 admin / manager 操作，但**系統目前未以 employee `permissions` enforce**（`register_employee` / `update_employee` 無 `_check_permission`）——真正硬牆只有 floor gate（人事 / HR 工具在 floored 層被物理移除）。`permissions` 是業務層的軟分流 / 上報判斷用。
+`update_employee` 需 `admin`（#10 已落實 `_check_permission` admin-gate + audit 具名）；`register_employee`（建新員工）仍未以 `permissions` enforce、靠 floor gate 硬牆（人事 / HR 工具在 floored 層被物理移除）。floored session 的 actor 由系統取 verified `user_id`（agent 自填無效）；operator（無 floor）為全權限路徑。`permissions` 同時也是業務層的軟分流 / 上報判斷用。
 
 人事操作（`register_employee` / `update_employee` / LINE 綁定）屬**員工機密 + HR 工具**：floored 受限業務層被 floor gate 物理移除這組工具（見 CLAUDE.md〈部門安全層（floor）與兩道牆〉），在那層**呼不到屬正常、不是系統壞掉**。新人報到 / 離職 / 綁定一律在全權限層（`SME_FLOOR=''` 或 `confidential`）執行；受限層辨識到「這是人事異動」時，依 line-comms.md 第六節「執行模型」交給全權限層處理，不要自己嘗試 `register_employee` / `update_employee`。
 
@@ -163,7 +163,7 @@ create_task(
      notes='離職日期：{日期}，原因：{原因}'
    )
    ```
-   > **actor 與硬牆**：人事 / HR 工具（含 `update_employee`）本就只在全權限層可用（見上方〈權限〉）＝這裡真正的硬牆。注意 `update_employee` 目前把操作記為 `actor='system'`、**尚未**強制具名 verified actor（#10 規劃 admin-gate + 不可逆動作拒空 actor、未做）；floored session 的可信身份機制見 CLAUDE.md〈actor 身份信任〉。
+   > **actor 與硬牆**：人事 / HR 工具（含 `update_employee`）本就只在全權限層可用（見上方〈權限〉）＝這裡的硬牆。`update_employee` 現需 `admin`（#10 已落實 admin-gate）且 audit log 記 verified 操作者名（不再 `actor='system'`）；floored 非 admin / 未驗證身份會被擋、operator（無 floor）為全權限路徑。可信身份機制見 CLAUDE.md〈actor 身份信任〉。
 6. **記錄** → `store_fact(category='hr', title='離職記錄-{姓名}', content='離職日期：{日期}，原因：{原因}，已轉移任務、解綁LINE、停用帳號')`
 7. **leave_balances 保留**：不要刪該員工的 `leave_balances` row（用於離職結算 / 補薪計算）。`leave_requests` 在員工被刪時透過 `ON DELETE SET NULL` 保留紀錄，所以離職用 `active=0` 而非 DELETE 就足夠
 8. **回報完成**

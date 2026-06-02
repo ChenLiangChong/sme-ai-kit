@@ -13,7 +13,7 @@ Codex P2 spot-check 三個警告全部落實：
 import json
 from datetime import datetime
 
-from shared.auth import _check_permission
+from shared.auth import _check_permission, _resolve_actor_label
 from shared.business_units import _get_approval_threshold, _validate_business_unit
 from shared.db import _now, get_db, transaction
 from shared.escalation import enqueue_escalation
@@ -456,7 +456,7 @@ def delete_transaction(transaction_id: int, reason: str, actor_user_id: str) -> 
         repository.delete_transaction(db, transaction_id)
         repository.insert_interaction_log(
             db,
-            actor="system",
+            actor=_resolve_actor_label(db, actor_user_id),
             action="transaction_deleted",
             target_id=transaction_id,
             detail=(
