@@ -18,7 +18,7 @@
 #       多開 session 時，同一則 LINE 訊息每個 session 都會收到 → 測「分層隔離」請用終端機直接下指令。
 set timeout 15
 # base = 這個腳本所在目錄（＝ repo root）：自動推導、不寫死絕對路徑，換機器 / 換資料夾 / 上 NAS 免改。
-# （原 v6 寫死 /mnt/d/gitDir/sme-ai-kit；改為 info script 推導後此檔可攜、可進 git 當部署參考。）
+# （原 v6 寫死絕對路徑；改為 info script 推導後此檔可攜、可進 git 當部署參考。）
 set base [file dirname [file normalize [info script]]]
 set layer [lindex $argv 0]
 if {$layer eq ""} {
