@@ -8,7 +8,7 @@ sent/retry/failed、backoff、rowcount guard）全在 shared.escalation.flush_pe
 部署（crontab，每 2 分鐘；路徑換成你的絕對路徑）：
   */2 * * * * SME_DB_PATH=/abs/data/business.db CHANNEL_ACCESS_TOKEN=xxxxx \\
       /abs/.venv/bin/python3 /abs/mcp-servers/business-db/flush_escalations.py >> /abs/data/flush.log 2>&1
-多 OA：改放 data/line-channels.json（{"channels":{"id":{"access_token":...}},"default_channel_id":"id"}），
+多 OA：改放 data/line-channels.json（{"channels":{"id":{"access_token":...}},"default_channel":"id"}），
 不必設 env token。cron 在 host 跑、不受 LINE-runtime sandbox 管（讀得到 DB + token）。
 
 LINE push 限制（critic）：對「未加該 OA 好友」的主管回 200 但靜默不達＝無法在此層偵測（push API 無回條）；
@@ -40,7 +40,9 @@ def _load_tokens():
         chans = cfg.get("channels", {}) or {}
         tokens = {cid: c.get("access_token", "") for cid, c in chans.items() if c.get("access_token")}
         if tokens:
-            return tokens, (cfg.get("default_channel_id") or next(iter(tokens)))
+            # 主 key＝default_channel（對齊 line-channel server.ts + line-channels.example.json）；
+            # default_channel_id 留作 legacy alias 向後相容；都缺則退回第一個 channel。
+            return tokens, (cfg.get("default_channel") or cfg.get("default_channel_id") or next(iter(tokens)))
     except Exception:
         pass
     # 2) env

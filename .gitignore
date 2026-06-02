@@ -21,6 +21,7 @@ docs/*
 !docs/project-overview.html
 !docs/skill-translation/
 !docs/course/
+!docs/deployment/
 
 # course/ 內預設不追蹤、只 whitelist lesson-01 舊版 3 檔
 docs/course/*

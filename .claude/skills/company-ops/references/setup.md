@@ -214,14 +214,13 @@ cp mcp-servers/business-db/floor-map.example.json data/floor-map.json
       "business_unit": "brand_b"
     }
   },
-  "default_channel": "brand_a",
-  "default_channel_id": "brand_a"
+  "default_channel": "brand_a"
 }
 ```
 
 > **`business_unit` 必須對齊 `register_business_entity` 的 `entity_id`**（小寫底線，如 `brand_a` / `brand_b`，非人看的「品牌A」），否則此 OA 進來的訊息帶的 `business_unit` 跟事業體登錄對不上、按 BU 篩選 / 門檻會錯位。
 >
-> **`default_channel` 與 `default_channel_id` 兩個 key 都要設、同值**：目前 line-channel `server.ts` 讀 `default_channel`、cron `flush_escalations.py` 讀 `default_channel_id`，兩 reader 讀不同 key；兩者都填同一個 channel key（此例 `brand_a`）以相容兩端，待 code 統一後可收斂成一個。
+> **`default_channel`＝預設發送的 OA**（沒帶明確 `channel_id` 的推播 / 上報兜底用）：`server.ts` 與 cron `flush_escalations.py` 現在都以此 key 為主（`default_channel_id` 僅留作 legacy alias），設一個即可。
 
 ### Step 2：更新 .mcp.json
 
