@@ -48,6 +48,10 @@ elif $IS_LINUX; then
         sudo apt-get update -qq && sudo apt-get install -y -qq ngrok
     }
     command -v expect &>/dev/null || sudo apt-get install -y -qq expect
+    # bubblewrap = Claude Code 在 Linux 的 sandbox 後端：floored 層的 line-runtime-*.json 設
+    # sandbox.enabled + failIfUnavailable=true，缺 bwrap → 受限層 session fail-closed 起不來
+    # （macOS 用內建 sandbox-exec、不需此套件，故只在 Linux 段裝）。
+    command -v bwrap &>/dev/null || sudo apt-get install -y -qq bubblewrap
     if command -v npm &>/dev/null && ! command -v claude &>/dev/null; then
         npm install -g @anthropic-ai/claude-code
     fi
