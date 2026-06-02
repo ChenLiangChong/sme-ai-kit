@@ -1,0 +1,52 @@
+{
+  "_README": "受限部門層的 sandbox settings 範本（floor 第一道牆：檔案 sandbox）。每個受限層一份：複製成 .claude/line-runtime-<層>.json，把 <層> 換成層名（須對齊 floor-map.json 與 data/<層>/ 資料夾），把 __REPO__ 換成 repo 的絕對路徑（如 /home/you/sme-ai-kit、或 NAS 掛載點 /volume1/sme-ai-kit）。底線開頭的 _ 鍵是說明、複製後請刪除。未來 #13 manifest 生成器會從 floor-map.json 自動產出這些檔（含下方 denyRead 交叉表），屆時不必手寫。機制細節見 CLAUDE.md〈部門安全層（floor）與兩道牆〉。第二道牆（business-db 工具白名單）由 SME_FLOOR + floor-map.json 在 MCP 進程內套用、不在此檔。",
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "filesystem": {
+      "_allowWrite": "只圈本層資料夾 + /tmp；本層 agent 寫不出這裡。start-line.sh 另會把 cwd 設成本層資料夾（中和 harness 把 cwd 注入 allowWrite 的破口）。",
+      "allowWrite": [
+        "__REPO__/data/<層>",
+        "/tmp"
+      ],
+      "_denyRead": "本層讀不到的東西。固定項＝家目錄/系統 + 機密設定檔（.mcp.json/.env/business.db/line-channels.json/floor-map.json）。動態項＝【其他所有層的資料夾】：每多一層，就要在每一份 line-runtime-*.json 的 denyRead 補上那層 → 漏列一層=該層的牆破一個洞（這個 O(n²) 交叉表正是 #13 生成器要自動化的主因）。下面 <其他層N> 換成除了本層以外的所有層資料夾。",
+      "denyRead": [
+        "~/",
+        "//home",
+        "//etc",
+        "//root",
+        "//var",
+        "__REPO__/.mcp.json",
+        "__REPO__/.env",
+        "__REPO__/data/business.db",
+        "__REPO__/data/line-channels.json",
+        "__REPO__/data/floor-map.json",
+        "__REPO__/data/<其他層1>",
+        "__REPO__/data/<其他層2>",
+        "__REPO__/data/<其他層3>"
+      ]
+    },
+    "_allowUnsandboxedCommands": "必為 false。true = Bash 可跳出 sandbox = 破口（決策 #9h，全層一律 false）。",
+    "allowUnsandboxedCommands": false
+  },
+  "permissions": {
+    "_allow": "MCP 工具給萬用（mcp__*）；真正的逐工具裁切在 business-db 端靠 SME_FLOOR + floor-map.json 做（第二道牆、財務/HR 工具依 financial_visibility 物理移除）。Read/Write/Edit 用 allow 圈在本層資料夾；.claude/skills/** 唯讀（讓本層讀得到 SOP、零安全增量、#169）；保留 built-in Bash/WebSearch/WebFetch/Skill/ToolSearch。路徑保持 `//` 前綴 + 絕對路徑格式。",
+    "allow": [
+      "mcp__business-db__*",
+      "mcp__line__*",
+      "mcp__apify__*",
+      "mcp__social__*",
+      "mcp__notionApi__*",
+      "mcp__fal-ai__*",
+      "Read(//__REPO__/data/<層>/**)",
+      "Read(//__REPO__/.claude/skills/**)",
+      "Write(//__REPO__/data/<層>/**)",
+      "Edit(//__REPO__/data/<層>/**)",
+      "Bash",
+      "WebSearch",
+      "WebFetch",
+      "Skill",
+      "ToolSearch"
+    ]
+  }
+}
