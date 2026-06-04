@@ -186,6 +186,22 @@ def mark_filed(
     return cur.rowcount
 
 
+def mark_calendared(
+    db: sqlite3.Connection,
+    deadline_id: int,
+    calendar_event_id: str,
+    calendar_provider: str | None,
+    synced_at: str,
+) -> int:
+    """落回外部行事曆 event_id（calendar-agnostic，SPEC『寫兩處』的回填）。"""
+    cur = db.execute(
+        "UPDATE deadlines SET calendar_event_id=?, calendar_provider=?, calendar_synced_at=? "
+        "WHERE id=?",
+        (calendar_event_id, calendar_provider, synced_at, deadline_id),
+    )
+    return cur.rowcount
+
+
 # ───────────────────────── interaction_log ─────────────────────────
 
 def insert_interaction_log(

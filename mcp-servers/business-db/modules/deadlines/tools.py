@@ -106,6 +106,8 @@ def create_deadline(
     court_region: str = "",
     party_region: str = "",
     buffer_days: int = 1,
+    stated_period_days: int = 0,
+    document_date: str = "",
     assignee: str = "",
     assignee_line_user_id: str = "",
     escalation_lead_days: str = "",
@@ -140,6 +142,12 @@ def create_deadline(
             時，配 party_region 查 transit_period 表得在途天數（民訴§162）；查不到→需人工複核、在途暫 0
         party_region: 當事人住居地區域代碼（如 'kinmen'/'overseas_asia'）—— 同上，與 court_region 成對查表
         buffer_days: 內部安全緩衝天數（內部期限=法定期限−buffer，預設 1）
+        stated_period_days: 判決書「上訴教示」所載期間天數（安全網，0=未提供）。律師確認送達日時
+            一併把判決書教示的天數抓回——引擎會與採用的 statutory_days 交叉比對，不符即標需人工複核
+            （反捏造：引擎不靜默蓋過判決書教示；可揪出法定期間判斷有誤或屬特別期間）
+        document_date: 文書作成日（判決/裁定日 YYYY-MM-DD，法版檢核用，空=未提供）。法版適用版本依
+            「文書作成日」而非送達日（舊判決可能修法後才送達）——刑事案件、再審/回復原狀翻出的舊案
+            尤其要帶；未提供則引擎以送達日近似並於 calc_trace 標明
         assignee: 負責律師（空白=沿用案件主辦）
         assignee_line_user_id: 承辦律師 LINE user_id（MVP「全所一份」提醒下不作收件對象、保留供未來 per-assignee 分送；收件人一律走 boss/全所 coalesce）
         escalation_lead_days: T-N 提醒節點 JSON（如「[14,7,3,1,0]」；空白=依 severity 預設）
@@ -162,6 +170,8 @@ def create_deadline(
         court_region=court_region,
         party_region=party_region,
         buffer_days=buffer_days,
+        stated_period_days=stated_period_days,
+        document_date=document_date,
         assignee=assignee,
         assignee_line_user_id=assignee_line_user_id,
         escalation_lead_days=escalation_lead_days,
@@ -224,3 +234,30 @@ def mark_deadline_filed(deadline_id: int, filed_by: str = "") -> str:
         filed_by: 遞交者
     """
     return service.mark_deadline_filed(deadline_id=deadline_id, filed_by=filed_by)
+
+
+@mcp.tool()
+def mark_deadline_calendared(
+    deadline_id: int,
+    calendar_event_id: str,
+    calendar_provider: str = "",
+    marked_by: str = "",
+) -> str:
+    """回填時限的外部行事曆對位（SPEC「寫兩處」：時限確認後寫進事務所慣用行事曆，存回 event_id）。
+
+    calendar-agnostic 流程：時限確認入庫後，agent 用現場配置的行事曆 MCP（Google Calendar 或律所
+    慣用的其他行事曆）建立 event（去識別化：只放「案件代號 + 期限類型 + 日期」、不放當事人名/案由），
+    再用本 tool 把回傳的 event_id 存回時限——供每日彙整去重、後續更新對位。不綁死特定行事曆軟體。
+
+    Args:
+        deadline_id: 時限 ID
+        calendar_event_id: 外部行事曆建立 event 後回傳的 id（必填）
+        calendar_provider: 行事曆來源標記（如 'google'/'internal'）
+        marked_by: 操作者
+    """
+    return service.mark_deadline_calendared(
+        deadline_id=deadline_id,
+        calendar_event_id=calendar_event_id,
+        calendar_provider=calendar_provider,
+        marked_by=marked_by,
+    )

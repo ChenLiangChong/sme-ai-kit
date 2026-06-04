@@ -144,7 +144,9 @@ def get_matter(matter_id: int) -> str:
             return f"ERROR: 找不到案件 #{matter_id}"
         # 機密軸：機密案件非全權限層不可見（同 query_knowledge / get_rule pattern）
         if m["confidential"] and not is_full_access():
-            return f"ERROR: 案件 #{matter_id} 為機密案件，本層無權限檢視"
+            # 機密軸 + 存在性洩漏防護（codex HIGH-2）：受限層對機密案件回「與不存在相同」的泛化錯誤，
+            # 不暴露「該案存在但機密」這一位元（與 not-found 回覆 byte 相同、消除 ID 探測 oracle）。
+            return f"ERROR: 找不到案件 #{matter_id}"
         st = _MATTER_STATUS_ZH.get(m["status"], m["status"])
         dls = repository.list_deadlines(db, matter_id=matter_id, limit=50)
         dl_str = ""
@@ -220,6 +222,8 @@ def create_deadline(
     court_region: str,
     party_region: str,
     buffer_days: int,
+    stated_period_days: int,
+    document_date: str,
     assignee: str,
     assignee_line_user_id: str,
     escalation_lead_days: str,
@@ -274,7 +278,9 @@ def create_deadline(
         # 機密軸（寫入端 gate）：機密案件非全權限層不可建時限（同 get_matter 讀取 gate 訊息風格、
         # migration 006 / query_knowledge pattern）。受限層連母案件都看不到、不該對它寫入或回內容。
         if matter["confidential"] and not is_full_access():
-            return f"ERROR: 案件 #{matter_id} 為機密案件，本層無權限檢視"
+            # 機密軸 + 存在性洩漏防護（codex HIGH-2）：受限層對機密案件回「與不存在相同」的泛化錯誤，
+            # 不暴露「該案存在但機密」這一位元（與 not-found 回覆 byte 相同、消除 ID 探測 oracle）。
+            return f"ERROR: 找不到案件 #{matter_id}"
 
         # has_local_agent：未明確指定（傳 -1）→ 沿用 matter 的設定
         if has_local_agent < 0:
@@ -297,6 +303,8 @@ def create_deadline(
             party_region=party_region or "",
             in_transit_days_override=(in_transit_days if in_transit_days else None),
             buffer_days=buffer_days if buffer_days >= 0 else 1,
+            stated_period_days=(stated_period_days if stated_period_days else None),
+            document_date=document_date or "",
             db=db,
         )
         if "error" in result:
@@ -332,6 +340,8 @@ def create_deadline(
             "statutory_deadline": result["statutory_deadline"],
             "buffer_days": result["buffer_days"],
             "internal_deadline": result["internal_deadline"],
+            "stated_period_days": result["stated_period_days"],
+            "document_date": document_date or None,
             "calc_trace": json.dumps(result["calc_trace"], ensure_ascii=False),
             "needs_manual_review": 1 if result["needs_manual_review"] else 0,
             "status": "pending",
@@ -353,7 +363,7 @@ def create_deadline(
             business_unit=None,
         )
 
-    review = "\n[需人工複核] 送達/在途含不確定因素，請律師確認後再倚賴本期限。" if result["needs_manual_review"] else ""
+    review = "\n[需人工複核] 含不確定因素（送達/在途/法版/教示比對之一），請律師確認後再倚賴本期限。" if result["needs_manual_review"] else ""
     return (
         f"時限 #{deadline_id} 已建立：{description}\n"
         f"- 內部期限（盯這個）：{result['internal_deadline']}\n"
@@ -447,7 +457,9 @@ def get_deadline(deadline_id: int) -> str:
         m = repository.get_matter(db, d["matter_id"])
         # 機密軸：時限隨母案件機密性、機密案件之時限非全權限層不可見
         if m and m["confidential"] and not is_full_access():
-            return f"ERROR: 時限 #{deadline_id} 隸屬機密案件，本層無權限檢視"
+            # 機密軸 + 存在性洩漏防護（codex HIGH-2）：受限層對機密時限回「與不存在相同」的泛化錯誤，
+            # 不暴露「該時限存在但機密」這一位元（與 not-found 回覆 byte 相同、消除 ID 探測 oracle）。
+            return f"ERROR: 找不到時限 #{deadline_id}"
         matter_str = f"{m['matter_no'] or ''} {m['title']}" if m else f"#{d['matter_id']}（案件已刪除）"
 
         try:
@@ -471,7 +483,28 @@ def get_deadline(deadline_id: int) -> str:
         pt = _PERIOD_TYPE_ZH.get(d["period_type"], d["period_type"])
         svc = _SERVICE_TYPE_ZH.get(d["service_type"], d["service_type"])
         sev = _SEVERITY_ZH.get(d["severity"], d["severity"] or "未分級")
-        review = "\n- [需人工複核]：送達/在途含不確定因素、不可全自動倚賴" if d["needs_manual_review"] else ""
+        review = "\n- [需人工複核]：含不確定因素（送達/在途/法版/教示比對）、不可全自動倚賴" if d["needs_manual_review"] else ""
+
+        # 教示比對（安全網）：有抓判決書教示天數才顯示是否與引擎相符
+        stated = d["stated_period_days"]
+        if stated is None:
+            stated_str = ""
+        elif stated == d["statutory_days"]:
+            stated_str = f"\n- 判決書教示：{stated} 日（與引擎採用 {d['statutory_days']} 日相符）"
+        else:
+            stated_str = (
+                f"\n- 判決書教示：{stated} 日（與引擎採用 {d['statutory_days']} 日"
+                f"【不符，已標複核】）"
+            )
+        # 行事曆同步（SPEC「寫兩處」）
+        if d["calendar_event_id"]:
+            cal_str = (
+                f"\n- 行事曆同步：已同步"
+                f"（{d['calendar_provider'] or '行事曆'}:{d['calendar_event_id']}"
+                f"{('@' + d['calendar_synced_at']) if d['calendar_synced_at'] else ''}）"
+            )
+        else:
+            cal_str = "\n- 行事曆同步：未同步"
 
         return (
             f"## 時限 #{deadline_id}：{d['description']}\n"
@@ -483,14 +516,16 @@ def get_deadline(deadline_id: int) -> str:
             f"- 起算事件：{d['trigger_event']}\n"
             f"- 送達類型：{svc}\n"
             f"- 送達基準日：{d['service_base_date']}\n"
+            f"- 文書作成日（法版檢核基準）：{d['document_date'] or '未提供（以送達日近似）'}\n"
             f"- 送達生效日：{d['effective_date']}\n"
             f"- 起算日：{d['start_date']}\n"
             f"- 法定日數：{d['statutory_days']} 日（{d['statutory_basis']}"
-            f"{('·' + d['statutory_basis_version']) if d['statutory_basis_version'] else ''}）\n"
+            f"{('·' + d['statutory_basis_version']) if d['statutory_basis_version'] else ''}）"
+            f"{stated_str}\n"
             f"- 在途：{d['in_transit_days']} 日（{d['in_transit_source'] or '無'}）\n"
             f"- 法定期限（底線，永不退讓）：{d['statutory_deadline']}\n"
             f"- 緩衝：{d['buffer_days']} 天\n"
-            f"- 內部期限（盯這個）：{d['internal_deadline']}\n"
+            f"- 內部期限（盯這個）：{d['internal_deadline']}{cal_str}\n"
             f"- 負責律師：{d['assignee'] or '未指派'}\n"
             f"- 提醒節點：{d['escalation_lead_days']}（已發：{d['reminders_sent']}）\n"
             f"- 遞交：{('已於 ' + d['filed_at'] + ' 由 ' + (d['filed_by'] or '?') + ' 遞交') if d['filed_at'] else '未遞交'}"
@@ -513,7 +548,9 @@ def mark_deadline_filed(deadline_id: int, filed_by: str) -> str:
         # 標遞交（同 get_deadline 讀取 gate 訊息風格）。不執行寫入、不回內容。
         m = repository.get_matter(db, d["matter_id"])
         if m and m["confidential"] and not is_full_access():
-            return f"ERROR: 時限 #{deadline_id} 隸屬機密案件，本層無權限檢視"
+            # 機密軸 + 存在性洩漏防護（codex HIGH-2）：受限層對機密時限回「與不存在相同」的泛化錯誤，
+            # 不暴露「該時限存在但機密」這一位元（與 not-found 回覆 byte 相同、消除 ID 探測 oracle）。
+            return f"ERROR: 找不到時限 #{deadline_id}"
         if d["status"] != "pending":
             cur_st = _DEADLINE_STATUS_ZH.get(d["status"], d["status"])
             return f"ERROR: 時限 #{deadline_id} 目前狀態為「{cur_st}」、非待處理，無法標記遞交"
@@ -530,3 +567,47 @@ def mark_deadline_filed(deadline_id: int, filed_by: str) -> str:
             business_unit=None,
         )
     return f"時限 #{deadline_id}（{d['description']}）已標記為已遞交，cron 不再提醒。"
+
+
+def mark_deadline_calendared(
+    deadline_id: int, calendar_event_id: str, calendar_provider: str, marked_by: str
+) -> str:
+    """落回外部行事曆 event_id（SPEC『寫兩處』：時限確認後寫進事務所慣用行事曆 MCP，回填 event_id）。
+
+    calendar-agnostic：agent 用現場配置的行事曆 MCP（Google 或其他）建好 event 後，把回傳的
+    event_id 用本 tool 存回，供每日彙整去重 / 後續更新對位。不綁死特定行事曆軟體。
+    """
+    if not calendar_event_id or not calendar_event_id.strip():
+        return "ERROR: calendar_event_id（外部行事曆 event id）不可為空"
+
+    from shared.floor_policy import is_full_access
+
+    with transaction() as db:
+        d = repository.get_deadline(db, deadline_id)
+        if not d:
+            return f"ERROR: 找不到時限 #{deadline_id}"
+        # 機密軸（寫入端 gate）：時限隨母案件機密性，機密案件之時限非全權限層不可回填行事曆對位
+        # （同 mark_deadline_filed gate 風格）。
+        m = repository.get_matter(db, d["matter_id"])
+        if m and m["confidential"] and not is_full_access():
+            # 機密軸 + 存在性洩漏防護（codex HIGH-2）：受限層對機密時限回「與不存在相同」的泛化錯誤，
+            # 不暴露「該時限存在但機密」這一位元（與 not-found 回覆 byte 相同、消除 ID 探測 oracle）。
+            return f"ERROR: 找不到時限 #{deadline_id}"
+        rows = repository.mark_calendared(
+            db, deadline_id, calendar_event_id.strip(), calendar_provider or None, _now()
+        )
+        if rows == 0:
+            return f"ERROR: 時限 #{deadline_id} 回填行事曆對位失敗"
+        repository.insert_interaction_log(
+            db,
+            actor=marked_by or "system",
+            action="deadline_calendared",
+            target_type="deadline",
+            target_id=deadline_id,
+            detail=f"{d['description']} 已同步行事曆（{calendar_provider or '?'}:{calendar_event_id.strip()}）",
+            business_unit=None,
+        )
+    return (
+        f"時限 #{deadline_id}（{d['description']}）已回填行事曆對位"
+        f"（{calendar_provider or '行事曆'}:{calendar_event_id.strip()}）。"
+    )

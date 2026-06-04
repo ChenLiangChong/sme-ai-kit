@@ -110,6 +110,20 @@ CREATE INDEX IF NOT EXISTS idx_deadlines_matter ON deadlines(matter_id);
 - 一個 matter 有多筆 deadline（上訴 20 日 + 上訴理由書補提 20 日是**兩條獨立時鐘**，律所最常漏第二條——各建一筆 row）。
 - `documents.deadline_id → deadlines(id)`（legal-admin documents 表）：書狀遞交 → document.status='filed' → 同 tx 關閉對應 deadline（`mark_deadline_filed`）→ cron 不再提醒。
 
+### 1.4 安全網 + 行事曆同步欄（migration 013）
+
+`deadlines` 加四欄（ALTER TABLE，非改 schema.sql；新表/新欄只走 migration）：
+
+| 欄 | 用途 |
+|---|---|
+| `stated_period_days INTEGER` | **教示比對安全網**：判決書「上訴教示」所載天數（NULL=未提供）。`compute_deadline` 與採用的 `statutory_days` 交叉比對，不符 → `needs_manual_review` + calc_trace 記不符（引擎不靜默蓋過判決書教示；揪出 type 選錯或特別期間）。 |
+| `document_date TEXT` | **法版檢核基準**：文書作成日（判決/裁定日，NULL=未提供）。法版適用看文書作成日、非送達日（舊判決可能修法後才送達）。 |
+| `calendar_event_id TEXT` | 外部行事曆 event id（calendar-agnostic，SPEC「寫兩處」回填） |
+| `calendar_provider TEXT` | 行事曆來源標記（'google'/'internal'/…） |
+| `calendar_synced_at TEXT` | 回填時間 |
+
+**法版檢核安全網**（純算、不落欄）：`compute_deadline` 內 `_PERIOD_AMENDMENTS`（regex 精準鎖法別+條號邊界、不裸子字串誤命中如 §349之1）記已查證的期間日數修法施行日（刑訴§349 2021-06-16 由 10→20、刑訴§406 2023-06-21 由 5→10）。**優先比對 `document_date`（文書作成日）**、未提供才以 `service_base_date` 近似並於 calc_trace 誠實標明；該日早於施行日 → `needs_manual_review` + calc_trace 說明，**不臆測重算舊法**（沿革表僅含已查證者、寧缺勿錯；非空 document_date 格式錯誤直接回 error、不靜默落髒資料）。`compute_deadline` 回傳加 `stated_period_days` / `period_match`（match/mismatch/not_provided）。
+
 ---
 
 ## 2. 計算流程（依序、可直接寫成程式）
@@ -328,9 +342,10 @@ OS cron scan_deadlines.py 每日07:00
 1. **DB**：`matters`（精簡：matter_no/title/court/status/lead_attorney/has_local_agent）+ `deadlines`（全欄）+ `office_calendar`（辦公日曆，import DGPA/ruyut JSON）。
 2. **計算引擎 `compute_deadline`**：步驟 1~7 全做，在途支援三條路：`has_local_agent=true → 0`、「手動填 `in_transit_days`」、以及「無當地代理人 + 帶 `court_region`/`party_region` 查 `transit_period` 表」（`create_deadline` 已開這兩個可選參數；查得到→命中、查不到→`needs_manual_review` + 在途暫 0，fail-toward）。表的逐筆建檔/律師覆核留完整版。送達 normal + registered_deposit(+10) 先做；公示送達 public_domestic(+20)/public_foreign(+60) 為法定固定值、自動計算可辯護（**不標** `needs_manual_review`）；**僅囑託送達 commissioned**（依回證完成日、不確定）標 `needs_manual_review`（`_SERVICE_NEEDS_REVIEW` 只含 commissioned）。
 3. **種子資料**：上訴（民/刑/行/家 20日）+ 抗告（10日）+ 上訴理由書補提（20日）+ 訴願（30日）+ 支付命令異議（20日），各附 `statutory_basis` + 版本。
-4. **tools**：`create_matter` / `create_deadline`（呼叫 compute_deadline 落欄）/ `mark_deadline_filed` / `list_deadlines` / `get_deadline`（含 calc_trace）。
+4. **tools**：`create_matter` / `find_matter_by_party` / `create_deadline`（呼叫 compute_deadline 落欄）/ `mark_deadline_filed` / `mark_deadline_calendared`（回填行事曆 event_id）/ `list_deadlines` / `list_upcoming_deadlines` / `get_deadline`（含 calc_trace）。
 5. **system-layer**：`scan_deadlines.py` cron（每日）+ enqueue 接現役 escalation（新增 `deadline_approaching`/`deadline_missed` 事件）。投遞三層**零改動複用**。
-6. **單元測試**：compute_deadline 對照司法院試算工具的 golden cases（含末日順延、寄存+10、始日不算入）。**這段是命脈、必測**。
+6. **單元測試**：compute_deadline 對照司法院試算工具的 golden cases（含末日順延、寄存+10、始日不算入）+ 兩道安全網（法版檢核 / 教示比對）+ 機密軸寫入端 gate。**這段是命脈、必測**。
+7. **runtime skill**：`.claude/skills/legal-admin/`（SKILL.md + references）串起核心 loop（收檔→抽取→HITL 一鍵確認→create_deadline→寫行事曆→每日彙整→查詢）。
 
 ### 完整版（後做）
 7. **在途期間表 `transit_period`**：人工逐筆建 B0010020/A0020097 + 律師覆核 + 版本號，`lookup(court, party_region)` 自動查。

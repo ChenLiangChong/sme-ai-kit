@@ -15,6 +15,7 @@
     → −buffer → 內部 working deadline
 """
 import json
+import re
 from datetime import date, datetime, timedelta
 
 # ── 送達生效加算天數（§2 步驟1）：service_type → 加算日數 + 法條依據 ──
@@ -98,6 +99,29 @@ STATUTORY_PERIODS = {
         "label": "支付命令異議",
     },
 }
+
+# ── 期間「日數」修法沿革（法版檢核：反捏造安全網）──
+# STATUTORY_PERIODS 編的是「現行法」日數。若**文書作成日**（判決/裁定日，非送達日）早於某法條
+# 「期間日數修正施行日」，舊文書可能適用修正前日數（如刑訴§349 上訴 2021-06-16 前 10 日、後 20 日）。
+# compute_deadline 對「statutory_basis 命中此表、且文書日期早於 effective」標 needs_manual_review
+# + calc_trace 說明——「不臆測重算舊法、只擋下請律師確認適用版本與確切施行日」。
+#
+# 比對用 regex 精準鎖「法別 + 條號邊界」（codex MED-3）：避免裸子字串把『刑訴§349之1』（另一條）
+# 誤命中，也涵蓋『刑事訴訟法第349條』『刑訴§349』等寫法。`(?![\d之])` 擋掉 349之1 / 3490 等延伸條號。
+# 日期取「修正公布日」從寬（中央法規標準法§13 未明定者公布日起第3日生效；邊界灰區一律標複核、不漏）。
+# 種子僅含已查證者（刑訴§349 / §406）；其餘法條未編＝不誤報，查證後再擴充（反捏造：寧缺勿錯）。
+_PERIOD_AMENDMENTS = (
+    {
+        "matcher": re.compile(r"刑(?:事訴訟法|訴)\s*(?:§|第)\s*349(?![\d之])"),
+        "effective": "2021-06-16", "prior_days": 10,
+        "note": "刑訴§349 上訴期間 民國110.06.16修正公布由 10 日延長為 20 日",
+    },
+    {
+        "matcher": re.compile(r"刑(?:事訴訟法|訴)\s*(?:§|第)\s*406(?![\d之])"),
+        "effective": "2023-06-21", "prior_days": 5,
+        "note": "刑訴§406 抗告期間 民國112.06.21修正公布由 5 日延長為 10 日",
+    },
+)
 
 
 # ───────────────────────── 日期工具 ─────────────────────────
@@ -222,6 +246,8 @@ def compute_deadline(
     party_region: str = "",
     in_transit_days_override=None,
     buffer_days: int = 1,
+    stated_period_days=None,
+    document_date: str = "",
     db=None,
 ) -> dict:
     """純函式：依 §2 步驟 1~7 算出法定/內部雙日期 + calc_trace + 法條依據。
@@ -239,6 +265,10 @@ def compute_deadline(
         court_region/party_region: 在途查表維度（無當地代理人時用）
         in_transit_days_override: 手動填在途日數（MVP 第二條路；非 None 時優先於查表）
         buffer_days: 內部安全緩衝（hard − buffer = working）
+        stated_period_days: 判決書「上訴教示」所載天數（安全網）；非 None 時與 statutory_days
+            交叉比對，不符 → needs_manual_review + calc_trace 記不符（反捏造：引擎不靜默蓋過教示）
+        document_date: 文書作成日（判決/裁定日 YYYY-MM-DD，法版檢核用）。法版適用版本依「文書作成日」
+            而非送達日（舊判決可能修法後才送達）。未提供 → 以 service_base_date 近似、calc_trace 誠實標明
         db: 可選 read-only 連線（is_holiday / 在途查表共用）
 
     Returns: dict — 含 effective_date / start_date / in_transit_days / in_transit_source /
@@ -274,6 +304,57 @@ def compute_deadline(
         buf = 0
 
     legal_basis.append(statutory_basis)
+
+    # ── 步驟 0a：法版檢核（反捏造安全網）──
+    # STATUTORY_PERIODS 編現行法日數；**文書作成日**（判決/裁定日）早於某法條「期間日數修正施行日」
+    # → 舊文書可能適用修正前日數。法版適用看文書作成日、非送達日（舊判決可能修法後才送達，codex HIGH-1）。
+    # 不臆測重算舊法（無舊法日曆 / 過渡條款判斷易錯），改標 needs_manual_review、請律師確認版本與施行日。
+    # 文書作成日未提供 → 以 service_base_date 近似、trace 誠實標明（不謊稱精確）。
+    _doc_d = None
+    if document_date and str(document_date).strip():
+        try:
+            _doc_d = _parse_date(document_date)
+        except (ValueError, TypeError):
+            # 反捏造：非空 document_date 格式錯誤不可靜默退回送達日近似（會繞過法版檢核、且落欄髒資料）。
+            # 比照 service_base_date 處理——回 error，service 層擋下、不寫入（codex R2 HIGH）。
+            return {"error": f"document_date（文書作成日）格式須為 YYYY-MM-DD，got {document_date!r}"}
+    _check_d = _doc_d if _doc_d is not None else base
+    _check_src = "文書作成日" if _doc_d is not None else "送達日（未提供文書作成日、以送達日近似）"
+    for _amd in _PERIOD_AMENDMENTS:
+        if _amd["matcher"].search(statutory_basis):
+            try:
+                _amd_eff = _parse_date(_amd["effective"])
+            except (ValueError, TypeError):
+                continue
+            if _check_d < _amd_eff:
+                needs_manual_review = True
+                trace.append(
+                    f"法版檢核：{_check_src}{_fmt(_check_d)}早於修法施行日{_amd['effective']}"
+                    f"（{_amd['note']}）；引擎採現行法 {si} 日、舊文書可能適用修正前 {_amd['prior_days']} 日"
+                    f"→ 須人工確認適用版本（不臆測重算舊法）"
+                )
+
+    # ── 步驟 0b：教示比對（反捏造安全網）──
+    # 判決書「上訴教示」常載期間日數（如「得於收受後二十日內上訴」）。與引擎採用的 statutory_days
+    # 交叉比對：不符可能是法定期間判斷有誤、或屬特別期間 → needs_manual_review，引擎不靜默蓋過教示。
+    period_match = "not_provided"
+    spd = None
+    if stated_period_days is not None:
+        try:
+            spd = int(stated_period_days)
+        except (TypeError, ValueError):
+            spd = None
+        if spd is not None:
+            if spd == si:
+                period_match = "match"
+                trace.append(f"教示比對：判決書教示 {spd} 日＝引擎採用 {si} 日（相符）")
+            else:
+                period_match = "mismatch"
+                needs_manual_review = True
+                trace.append(
+                    f"教示比對：判決書教示 {spd} 日 ≠ 引擎採用 {si} 日（不符）"
+                    f"→ 須人工確認（可能法定期間判斷有誤、或屬特別期間）"
+                )
 
     # ── 步驟 1：送達生效日 ──
     add_days, effect_basis = _SERVICE_EFFECT[service_type]
@@ -451,6 +532,8 @@ def compute_deadline(
         "statutory_deadline": _fmt(statutory_deadline),
         "buffer_days": buf,
         "internal_deadline": _fmt(internal),
+        "stated_period_days": spd,
+        "period_match": period_match,
         "calc_trace": trace,
         "needs_manual_review": needs_manual_review,
         "recovery_window": recovery_window,

@@ -220,7 +220,9 @@ CLI session 建立 `create_approval` 後：
 
 ## Skills（技能包）
 
-你有兩個技能包，包含完整的營運知識和操作流程。**遇到對應情境時自動載入**：
+你有多個技能包，包含完整的營運知識和操作流程。**遇到對應情境時自動載入**：
+
+> **本 branch（legal-admin）專屬**：`legal-admin` 技能包 = 律師事務所內部 LINE 法務行政秘書（單一律所、對內專用）。觸發於 LINE 傳判決書/裁定/開庭通知要算時限、上訴/抗告期限、建案件、人名/案號查案、每日彙整、諮詢預約。核心 loop（收檔→抽取→**HITL 一鍵確認才入**→`create_deadline` 確定性算雙日期→寫行事曆→每日彙整→查詢）+ 兩道反捏造安全網（法版檢核 / 教示比對）見 `.claude/skills/legal-admin/SKILL.md` 與 `docs/legal/SPEC.md`。時限天數一律確定性計算附 `statutory_basis`（反捏造、絕不心算、算錯=執業過失）。橫向基建（tasks/knowledge/approvals/attachments/line/escalation）沿用 company-ops。
 
 ### company-ops（公司營運技能包）
 | 模組 | 檔案 | 何時載入 |

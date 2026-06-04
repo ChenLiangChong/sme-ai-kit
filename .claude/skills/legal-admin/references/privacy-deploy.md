@@ -1,0 +1,36 @@
+# 隱私與部署（privacy & deploy）
+
+> 觸發：上線前檢查、隱私問題、cron 設定、每日提醒沒推、辦公日曆未載入、種 boss 收件人。
+> 律師有保密義務，**隱私是本 vertical 的一級設計約束**。權威見 `docs/legal/SPEC.md`〈隱私設計〉。
+
+## 隱私標準檔（定案、預設）
+
+核心原則：**身分與內容留本地，外部只給「時間 + 代號」。** 資料流經四方：本地 `business.db`（最安全）/ Google Calendar / LINE(LY Corp) / Anthropic(Claude)。
+
+1. **訓練關閉（必做、不可省）** —— Claude 訂閱（Free/Pro/Max）預設可能拿對話訓練模型並長期保留；**上線前必關「Help improve Claude」**→ 變成不訓練 + 30 天保留。訂閱方案拿不到 ZDR（零保留需 Enterprise、成本跳級、與走訂閱省成本衝突），故靠下面「去識別 + 最小化」補。
+2. **本地優先** —— 案件帳本（matters/deadlines/當事人對照）只存事務所自己機器/NAS，不進 SaaS 雲（對比全雲端競品的賣點）。
+3. **行事曆去識別化** —— 寫進 Google/外部行事曆的 event 只放「案件代號 + 期限類型 + 日期」，不放當事人名/案由；代號↔真實對照只存本地 DB（見 calendar-sync）。
+4. **最小化送 Claude** —— 完整文件只在「抽送達日」那一次送；確認後存結構化欄位，之後每日摘要/查詢用結構化資料跑、不重複送整份機密。
+
+**升級路（要收緊隨時開）**：每日摘要也代號化（連 LINE 都看不到名）／文件抽取前本地先 OCR + 遮當事人名只送含日期那段／最敏感原始檔走本地上傳不經 LINE／評估 Enterprise ZDR。
+
+> **別把「隱私（對外）」跟「機密層（對內）」搞混**：個人律所沒有對內越權問題（不設 floor）、但**對外隱私照樣全部適用**（見 SKILL〈安全執行模型〉）。
+
+## 部署檢查清單（上線前）
+
+- [ ] **訓練關閉**：Claude 帳號設定關「Help improve Claude」。
+- [ ] **辦公日曆載入**：`office_calendar` 只種了部分年度（MVP 2026）。匯入**當年度 + 次年度**完整國定假日/補班（來源：行政院人事行政總處《政府行政機關辦公日曆表》或 `ruyut/TaiwanCalendar`）。未載入年度的時限，引擎會標 `needs_manual_review`（末日順延算不準）——這是保護、但別讓律師天天踩。
+- [ ] **種 boss 收件人**：每日提醒/逾期上報的收件人走 `resolve_escalation_target`（coalesce 到 boss/全所）。確認有一個可達的收件身份（`company.boss_line_id` 或 floor-map `escalation_target`），否則 enqueue 會留 pending 沒人收。
+- [ ] **cron 設定**：`scan_deadlines.py` 進 crontab（每日 07:00）：
+  ```
+  0 7 * * * SME_DB_PATH=/abs/data/business.db /abs/.venv/bin/python3 /abs/mcp-servers/business-db/scan_deadlines.py >> /abs/data/scan.log 2>&1
+  ```
+  cron 在 host 跑、不受 LINE-runtime sandbox 管（讀得到 DB）。
+- [ ] **行事曆 MCP**：現場確認律所用哪本行事曆、配置對應 MCP（見 calendar-sync）。**用律所自己的 Google 帳號**，不是開發者個人帳號。
+- [ ] **在途期間**：律所自辦（住法院所在地）→ `has_local_agent=1`、在途歸零；常跨區（如金門→台北）才需 `transit_period` 查表資料。
+
+## 失敗情境判讀
+
+- **時限算出來但帶「辦公日曆未載入」** → 該年度沒匯入，補 `office_calendar`（見上）。
+- **enqueue 了但 `list_pending_escalations` 一直 pending/failed** → 收件人解析不到（沒種 boss），或行事曆/LINE 投遞失敗；種好 boss 身份再重跑。
+- **跨年度時限大量標複核** → 次年度日曆沒匯入，部署時一次匯兩年。

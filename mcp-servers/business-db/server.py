@@ -486,6 +486,7 @@ from modules.deadlines.tools import (  # noqa: E402,F401
     list_deadlines,
     list_matters,
     list_upcoming_deadlines,
+    mark_deadline_calendared,
     mark_deadline_filed,
 )
 from modules.hr.tools import (  # noqa: E402,F401

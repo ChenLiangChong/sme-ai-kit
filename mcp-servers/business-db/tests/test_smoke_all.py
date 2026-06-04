@@ -2834,8 +2834,8 @@ try:
         matter_id=_cmid, type="appeal_civil", trigger_event="一審判決送達",
         service_base_date="2026-03-02", service_type="normal", created_by="general層員工",
     )
-    _assert("H1: 受限層 create_deadline 機密案件被擋（回 ERROR 機密）",
-            "ERROR" in _rh1c and "機密" in _rh1c, detail=_rh1c)
+    _assert("H1: 受限層 create_deadline 機密案件被擋（回泛化 not-found、不洩漏機密屬性 codex HIGH-2）",
+            "ERROR" in _rh1c and "機密" not in _rh1c and "無權限" not in _rh1c, detail=_rh1c)
     _assert("H1: 被擋訊息不洩漏計算內容（無內部期限/calc_trace）",
             "內部期限" not in _rh1c and "計算軌跡" not in _rh1c, detail=_rh1c)
     _dbh1c = server.get_db()
@@ -2847,8 +2847,8 @@ try:
 
     # mark_deadline_filed 對機密案件之時限 → 被擋、狀態不變、不洩漏
     _rh1f = server.mark_deadline_filed(_cdid, filed_by="general層員工")
-    _assert("H1: 受限層 mark_deadline_filed 機密案件時限被擋（回 ERROR 機密）",
-            "ERROR" in _rh1f and "機密" in _rh1f, detail=_rh1f)
+    _assert("H1: 受限層 mark_deadline_filed 機密案件時限被擋（回泛化 not-found、不洩漏機密屬性 codex HIGH-2）",
+            "ERROR" in _rh1f and "機密" not in _rh1f and "無權限" not in _rh1f, detail=_rh1f)
     _dbh1f = server.get_db()
     _st_after = _dbh1f.execute(
         "SELECT status FROM deadlines WHERE id=?", (_cdid,)).fetchone()[0]

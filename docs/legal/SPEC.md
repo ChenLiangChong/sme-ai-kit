@@ -63,3 +63,12 @@
 ## 時限計算紀律（不可妥協）
 
 天數一律由 service 層確定性程式碼算、附 `statutory_basis` 法條（反捏造、絕不 LLM 心算）。需資料底：台灣官方辦公日曆（末日順延）；在途期間預設「有住法院所在地律師代理 → 在途=0」、罕見組合標 `needs_manual_review`。核心法定期間種子（民訴§440 上訴 20 日、§487 抗告 10 日、刑訴§349 上訴 20 日…）見 `01-deadline-engine.md`。
+
+**兩道反捏造安全網（引擎自動跑，`compute_deadline` 內）：**
+1. **法版檢核** —— STATUTORY_PERIODS 編現行法日數。**文書作成日**（判決/裁定日 `document_date`，非送達日——舊判決可能修法後才送達）早於某法條「期間日數修正施行日」（如刑訴§349 上訴 2021-06-16 由 10→20、刑訴§406 抗告 2023-06-21 由 5→10）→ 標 `needs_manual_review` + `calc_trace` 說明，**不臆測重算舊法**（沿革表僅含已查證者、寧缺勿錯；條號用 regex 精準比對、不裸子字串誤命中如 §349之1；`document_date` 未提供則以送達日近似並於 trace 誠實標明）。舊判決（再審/回復原狀）特別需要。
+2. **教示比對** —— 建時限帶 `stated_period_days`（判決書「上訴教示」所載天數）→ 與引擎採用的 `statutory_days` 交叉比對，不符即標複核（揪出 type 選錯或屬特別期間）。引擎不靜默蓋過判決書教示。
+
+## 行事曆寫入（calendar-agnostic）與 skill
+
+- **行事曆寫入是 agent 動作、走現場配置的行事曆 MCP**（Google 或律所慣用的其他），非 business-db 內建特定 client。流程：agent 用行事曆 MCP `create_event`（去識別化：只放案件代號 + 期限類型 + 日期）→ `mark_deadline_calendared(deadline_id, calendar_event_id, calendar_provider)` 把回傳 id 存回 `deadlines`（供去重 / 後續對位）。`deadlines` 新增 `calendar_event_id`/`calendar_provider`/`calendar_synced_at` 三欄（migration 013）。
+- **runtime playbook = `.claude/skills/legal-admin/`**：SKILL.md（核心 loop + 鐵律 + 安全執行模型）+ references（deadline-intake / daily-digest / matter-query / calendar-sync / consultation / privacy-deploy）。串起「收檔→抽取→HITL 一鍵確認→`create_deadline`→寫行事曆→每日彙整→查詢」。
