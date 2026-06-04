@@ -46,6 +46,18 @@ ESCALATION_ADMIN_TOOLS = {
     "list_pending_escalations", "mark_escalation_sent",
 }
 
+# legal-admin（律所）案件/時限工具 —— 含當事人名 / calc_trace / 機密案件。
+# SPEC §54：小所「預設不分層、全所共用一個視圖」→ MVP 不把整支工具從受限層移除
+# （移除整支會連非機密案件都看不到、過度收斂）。機密性走「機密軸」列級過濾：
+# matters/deadlines 帶 confidential 欄，read service 在非全權限層過濾 confidential=1
+# （與 query_knowledge migration 006 同 pattern、見 modules/deadlines/service.py）。
+# 此集合保留為未來「需把整支機密工具從特定受限層硬移除」時的掛點（keystone、預設不啟用）。
+LEGAL_CONFIDENTIAL_TOOLS = {
+    "create_matter", "get_matter", "list_matters", "find_matter_by_party",
+    "create_deadline", "get_deadline", "list_deadlines",
+    "list_upcoming_deadlines", "mark_deadline_filed",
+}
+
 # 向後相容引用 + 「financial_visibility=none（預設）」的完整移除集（= 改版前的清單）
 CONFIDENTIAL_ONLY_TOOLS = FINANCIAL_TOOLS | HR_TOOLS
 

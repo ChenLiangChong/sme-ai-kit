@@ -446,6 +446,7 @@ from modules import accounting as _accounting_mod  # noqa: E402,F401
 from modules import approvals as _approvals_mod  # noqa: E402,F401
 from modules import attachments as _attachments_mod  # noqa: E402,F401
 from modules import crm as _crm_mod  # noqa: E402,F401
+from modules import deadlines as _deadlines_mod  # noqa: E402,F401
 from modules import hr as _hr_mod  # noqa: E402,F401
 from modules import inventory as _inventory_mod  # noqa: E402,F401
 from modules import knowledge as _knowledge_mod  # noqa: E402,F401
@@ -475,6 +476,17 @@ from modules.crm.tools import (  # noqa: E402,F401
     get_customer,
     set_customer_entity_terms,
     update_customer,
+)
+from modules.deadlines.tools import (  # noqa: E402,F401
+    create_deadline,
+    create_matter,
+    find_matter_by_party,
+    get_deadline,
+    get_matter,
+    list_deadlines,
+    list_matters,
+    list_upcoming_deadlines,
+    mark_deadline_filed,
 )
 from modules.hr.tools import (  # noqa: E402,F401
     find_partner,

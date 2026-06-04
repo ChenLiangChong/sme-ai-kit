@@ -388,6 +388,94 @@ check("m004: schema_version 含 4", 4 in versions, detail=f"versions={versions}"
 conn.close()
 
 
+# === 9e. Migration 011/012 legal-admin（matters/deadlines/office_calendar/transit_period）===
+
+print("\n=== Migration 011/012: legal-admin tables ===")
+db_path_legal = _mk_db()
+os.environ["SME_DB_PATH"] = db_path_legal
+if "server" in sys.modules:
+    del sys.modules["server"]
+import server  # noqa: F811
+
+server.DB_PATH = db_path_legal
+server.init_db()
+
+conn = sqlite3.connect(db_path_legal)
+conn.execute("PRAGMA foreign_keys=ON")
+ltables = {r[0] for r in conn.execute(
+    "SELECT name FROM sqlite_master WHERE type='table'"
+).fetchall()}
+for t in ("matters", "deadlines", "office_calendar", "transit_period"):
+    check(f"legal: table {t} 已建立", t in ltables, detail=f"tables={ltables}")
+
+# deadlines 的反捏造 CHECK + status enum
+dl_schema = conn.execute(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='deadlines'"
+).fetchone()[0]
+check("legal: deadlines CHECK statutory_basis <> ''（反捏造）",
+      "statutory_basis <> ''" in dl_schema)
+check("legal: deadlines CHECK period_type enum",
+      "peremptory" in dl_schema and "court_set" in dl_schema)
+check("legal: deadlines CHECK status enum",
+      "pending" in dl_schema and "filed" in dl_schema and "missed" in dl_schema)
+
+# index 落地（含 partial WHERE status='pending'）
+lindexes = {r[0] for r in conn.execute(
+    "SELECT name FROM sqlite_master WHERE type='index'"
+).fetchall()}
+for idx in ("idx_deadlines_pending", "idx_deadlines_matter",
+            "idx_matters_status", "idx_transit_period_lookup"):
+    check(f"legal: index {idx} 已建立", idx in lindexes, detail=f"indexes={lindexes}")
+idx_pending_sql = conn.execute(
+    "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_deadlines_pending'"
+).fetchone()
+check("legal: idx_deadlines_pending 是 partial（WHERE status='pending'）",
+      idx_pending_sql and "status" in (idx_pending_sql[0] or "") and "pending" in (idx_pending_sql[0] or ""))
+
+# parties 表「不存在」是 build contract §0 釘死的契約點
+check("legal: parties 表不存在（MVP 用 client_name 內嵌、不加 FK）",
+      "parties" not in ltables)
+matter_fks = conn.execute("PRAGMA foreign_key_list(matters)").fetchall()
+check("legal: matters 無 FK（client_party_id 不加 constraint）",
+      len(matter_fks) == 0, detail=f"fks={matter_fks}")
+
+# deadlines → matters ON DELETE CASCADE
+dl_fks = conn.execute("PRAGMA foreign_key_list(deadlines)").fetchall()
+check("legal: deadlines 有 1 條 FK 指向 matters（CASCADE）",
+      len(dl_fks) == 1 and dl_fks[0][2] == "matters" and dl_fks[0][6] == "CASCADE",
+      detail=f"fks={dl_fks}")
+
+# office_calendar 種子有落地（2026 元旦）
+oc_jan1 = conn.execute(
+    "SELECT is_holiday FROM office_calendar WHERE date='2026-01-01'"
+).fetchone()
+check("legal: office_calendar 種子 2026-01-01=假日", oc_jan1 is not None and oc_jan1[0] == 1)
+oc_makeup = conn.execute(
+    "SELECT is_holiday FROM office_calendar WHERE date='2026-02-07'"
+).fetchone()
+check("legal: office_calendar 補班日 2026-02-07=上班日(0)", oc_makeup is not None and oc_makeup[0] == 0)
+
+# 反捏造 CHECK 實測：空 statutory_basis 應被擋
+_basis_blocked = False
+try:
+    conn.execute("INSERT INTO matters (title, status) VALUES ('擋測', 'open')")
+    mid_t = conn.execute("SELECT id FROM matters WHERE title='擋測'").fetchone()[0]
+    conn.execute(
+        "INSERT INTO deadlines (matter_id, type, description, period_type, trigger_event, "
+        "service_type, service_base_date, statutory_days, statutory_basis, status) "
+        "VALUES (?, 'custom', 'x', 'peremptory', '送達', 'normal', '2026-06-01', 20, '', 'pending')",
+        (mid_t,))
+except sqlite3.IntegrityError:
+    _basis_blocked = True
+conn.rollback()
+check("legal: deadlines 空 statutory_basis 被 CHECK 擋下（反捏造生效）", _basis_blocked)
+
+versions = {r[0] for r in conn.execute("SELECT version FROM schema_version").fetchall()}
+check("legal: schema_version 含 11 與 12", 11 in versions and 12 in versions,
+      detail=f"versions={versions}")
+conn.close()
+
+
 # === 9c. Pre-003 backward — 既有 approved approval migration 後仍可用一次（P2.13 LOW F）===
 
 print("\n=== Migration 003: pre-003 backward behavior ===")

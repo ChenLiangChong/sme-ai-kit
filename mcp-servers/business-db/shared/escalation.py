@@ -36,6 +36,9 @@ DEFAULT_ENABLED_EVENTS = frozenset({
     "transaction_deleted",
     "employee_permissions_changed",
     "qc_failed",
+    # legal-admin：時間驅動（cron scan_deadlines.py 每日掃 → enqueue），投遞三層零改動複用
+    "deadline_approaching",                   # T-N 將至（按 escalation_lead_days 觸發）★律所命脈
+    "deadline_missed",                        # 已逾期（最高優先、每日推 + 升級合夥人/boss）
 })
 # 已知但「預設關」的高頻事件（onboarding 想開要自行加進 settings、並接受洗版風險 / 未來補 dedup）。
 DEFAULT_DISABLED_EVENTS = frozenset({"cross_bu_access"})
@@ -433,6 +436,8 @@ ESCALATION_LABELS = {
     "qc_failed": "品檢不合格",
     "employee_permissions_changed": "員工權限/事業體/在職變更",
     "cross_bu_access": "跨事業體越權存取",
+    "deadline_approaching": "時限將至",
+    "deadline_missed": "時限已逾期",
 }
 
 
