@@ -60,6 +60,21 @@
 - 文件抽取後的「請確認」提醒走即時層 / LINE reply。
 - 把 `pending_escalations` 泛化成 `pending_notifications`（加 `kind`），投遞三層幾乎零改動。
 
+## 靜默失敗哨兵（#H1/#H2，「漏不掉」的兩道補強）
+
+HITL + cron 自帶兩個結構盲區，補上才稱得上「漏不掉」：
+
+1. **#H1 系統健康哨兵** —— `scan_deadlines.py` 若靜默掛掉，時限停止倒數且沒人知＝漏期根因。
+   - 掃描器每次成功跑完落一筆 `deadline_scan` heartbeat（`interaction_log`，零時限也寫＝證明在跑）。
+   - 第二支極小 cron `scan_heartbeat.py`（watchdog、互為 dead-man）：落自身 heartbeat 自證活著 + 偵測掃描器失聯（heartbeat 過期 `SCAN_STALE_HOURS`，或從未跑但已有待處理時限）→ enqueue `scan_stalled` 上報（時間驅動、人沒開 Claude 也跑、同失聯期 `SCAN_REALERT_HOURS` 內 dedup）。
+   - 全權限開機 readout（`get_context_summary`）把「掃描失聯 / watchdog 失聯」列在最前。門檻常數集中於 `shared/deadlines.py`、cross-file guard 綁死。
+
+2. **#H2 未確認到期日跟催** —— 核心 loop「一鍵確認才入」刻意把人擋中間；副作用＝丟了檔、AI 推確認、人忘了回 → 時限沒進 `deadlines` → 一般掃描掃不到 → 隱形漏掉。
+   - 抽取當下 `stage_deadline_intake` 把事實暫存進 `pending_intakes`（migration 014；**結構上不放任何 computed deadline 欄**＝待確認階段引擎還沒算、不可能洩權威日期，反捏造的結構性保證）。
+   - cron `scan_unconfirmed_intake.py` 跟催「M 件待確認、最久 X 小時」（提醒只列送達日/文書類型/等待時數）。
+   - 確認入庫走 `create_deadline(confirm_intake_id=)` 同 tx 關閉 backlog；不算了 `resolve_deadline_intake(id,'discarded')`。
+   - 開機 readout 露「待確認時限 N 件」。
+
 ## 時限計算紀律（不可妥協）
 
 天數一律由 service 層確定性程式碼算、附 `statutory_basis` 法條（反捏造、絕不 LLM 心算）。需資料底：台灣官方辦公日曆（末日順延）；在途期間預設「有住法院所在地律師代理 → 在途=0」、罕見組合標 `needs_manual_review`。核心法定期間種子（民訴§440 上訴 20 日、§487 抗告 10 日、刑訴§349 上訴 20 日…）見 `01-deadline-engine.md`。

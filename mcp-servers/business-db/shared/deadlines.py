@@ -137,6 +137,26 @@ def _fmt(d: date) -> str:
     return d.strftime("%Y-%m-%d")
 
 
+def _to_dt(now) -> datetime:
+    """容錯把 now（None / datetime / date / 'YYYY-MM-DD[ HH:MM:SS]' 字串）→ datetime。
+    供健康哨兵 / 待確認跟催做時間差（可測試注入）。"""
+    if now is None:
+        return datetime.now()
+    if isinstance(now, datetime):
+        return now
+    if isinstance(now, date):
+        return datetime(now.year, now.month, now.day)
+    s = str(now)
+    try:
+        return datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return datetime.strptime(s[:10], "%Y-%m-%d")
+
+
+def _fmt_dt(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
 def is_holiday(d, db=None) -> bool:
     """某日是否「非上班日」（末日順延 §122 用）。
 
@@ -581,6 +601,219 @@ def _workdays_between(start_d: date, end_d: date, db) -> int:
     return count
 
 
+# ── 系統健康哨兵（#H1）+ 待確認跟催（#H2）的常數與 heartbeat action 名 ──
+# heartbeat 走 interaction_log（cross-cutting audit sink、既有表、無需新 migration）。
+HEARTBEAT_SCAN = "deadline_scan_heartbeat"        # scan_deadlines.py 每次成功掃描落一筆
+HEARTBEAT_WATCHDOG = "health_watchdog_heartbeat"  # scan_heartbeat.py（watchdog）每次跑落一筆（自證活著）
+# 失聯門檻（cross-file 單一真相：開機 readout 與 watchdog 都 import 本常數、test_smoke_all 綁死、勿在他處寫死）。
+SCAN_STALE_HOURS = 26       # scan_deadlines 建議 cron 每日 07:00；+2h grace、超過視為失聯
+WATCHDOG_STALE_HOURS = 6    # watchdog 建議 cron 每 1~2h；>6h 視為連監看本身都失聯
+SCAN_REALERT_HOURS = 24     # 同一失聯期 scan_stalled 最多每 24h 再上報一次（防洗版）
+# 待確認跟催等待節點（小時）：丟了檔、AI 推確認、人忘了回 → 時限沒入庫 = 隱形漏掉。
+INTAKE_REMINDER_HOURS = (4, 24, 72)
+
+
+def _record_heartbeat(db, kind: str, detail: str = "") -> None:
+    """落一筆 heartbeat 到 interaction_log（caller-managed-tx）。created_at 走 schema 預設
+    datetime('now','localtime')、與其他 interaction_log 一致。"""
+    db.execute(
+        "INSERT INTO interaction_log (actor, action, target_type, target_id, detail, business_unit) "
+        "VALUES (?,?,?,?,?,?)",
+        ("系統·cron", kind, "system", None, detail, None),
+    )
+
+
+def _heartbeat_at(db, kind: str):
+    """最近一筆該類 heartbeat 的 created_at 字串（無→None）。"""
+    row = db.execute(
+        "SELECT created_at FROM interaction_log WHERE action=? ORDER BY id DESC LIMIT 1",
+        (kind,),
+    ).fetchone()
+    return row["created_at"] if row and row["created_at"] else None
+
+
+def _heartbeat_age_hours(db, kind: str, now: datetime):
+    """距最近一筆該類 heartbeat 幾小時（無紀錄→None）。"""
+    at = _heartbeat_at(db, kind)
+    if not at:
+        return None
+    try:
+        ts = datetime.strptime(str(at)[:19], "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return None
+    return max(0.0, (now - ts).total_seconds() / 3600.0)
+
+
+def _recently_alerted(db, event_type: str, window_hours: float, now: datetime) -> bool:
+    """該 event_type 是否在 window_hours 內已上報過（讀 enqueue_escalation 落的稽核鏡像
+    action='escalation_<event_type>'）。用來讓 watchdog 同一失聯期不重複洗版。"""
+    row = db.execute(
+        "SELECT created_at FROM interaction_log WHERE action=? ORDER BY id DESC LIMIT 1",
+        (f"escalation_{event_type}",),
+    ).fetchone()
+    if not row or not row["created_at"]:
+        return False
+    try:
+        ts = datetime.strptime(str(row["created_at"])[:19], "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return False
+    return (now - ts).total_seconds() < window_hours * 3600
+
+
+def check_scan_health(db, now=None) -> dict:
+    """純讀：回掃描器 / watchdog 的健康狀態（給開機 readout 與 watchdog 共用、不寫入）。
+
+    granular 旗標（讓 caller 自己決定怎麼呈現 / 是否告警）：
+    - scan_never：從未落過 scan heartbeat（全新系統 / cron 沒部署）
+    - scan_overdue：曾掃過但距今 > SCAN_STALE_HOURS（曾在跑、停了＝最該警覺的失聯）
+    - watchdog_never / watchdog_overdue：同義、針對 watchdog 自身
+    - pending_deadlines：目前待處理時限數（scan_never 時用來判斷「有東西要掃卻沒掃」）
+    """
+    now = _to_dt(now)
+    scan_age = _heartbeat_age_hours(db, HEARTBEAT_SCAN, now)
+    wd_age = _heartbeat_age_hours(db, HEARTBEAT_WATCHDOG, now)
+    pending = db.execute(
+        "SELECT COUNT(*) c FROM deadlines WHERE status='pending'"
+    ).fetchone()["c"]
+    return {
+        "now": _fmt_dt(now),
+        "pending_deadlines": pending,
+        "last_scan_at": _heartbeat_at(db, HEARTBEAT_SCAN),
+        "scan_age_hours": scan_age,
+        "scan_never": scan_age is None,
+        "scan_overdue": scan_age is not None and scan_age > SCAN_STALE_HOURS,
+        "last_watchdog_at": _heartbeat_at(db, HEARTBEAT_WATCHDOG),
+        "watchdog_age_hours": wd_age,
+        "watchdog_never": wd_age is None,
+        "watchdog_overdue": wd_age is not None and wd_age > WATCHDOG_STALE_HOURS,
+        "stale_threshold_hours": SCAN_STALE_HOURS,
+    }
+
+
+def scan_health_and_alert(now=None) -> dict:
+    """watchdog cron（scan_heartbeat.py）本體：時間驅動、獨立極小進程（人沒開 Claude 也照跑）。
+    兩件事：(1) 落自身 heartbeat＝自證活著（boot readout 才能反過來偵測 watchdog 死掉）；
+    (2) scan 失聯（曾掃過卻停了，或從未掃過但已有待處理時限）→ enqueue scan_stalled 上報，
+    接現役三層投遞推給老闆。同一失聯期最多每 SCAN_REALERT_HOURS 告警一次。"""
+    from shared.db import transaction
+    from shared.escalation import enqueue_escalation
+
+    now = _to_dt(now)
+    stats = {"watchdog": "alive", "scan_overdue": False, "scan_never": False,
+             "scan_age_hours": None, "alerted": False}
+    with transaction() as db:
+        _record_heartbeat(db, HEARTBEAT_WATCHDOG, "watchdog alive")
+        health = check_scan_health(db, now=now)
+        stats["scan_overdue"] = health["scan_overdue"]
+        stats["scan_never"] = health["scan_never"]
+        stats["scan_age_hours"] = health["scan_age_hours"]
+        # 告警條件：曾掃過但停了，或從未掃過但已有待處理時限（掃描器沒部署/沒在跑、卻有東西在倒數）。
+        should_alert = health["scan_overdue"] or (health["scan_never"] and health["pending_deadlines"] > 0)
+        if should_alert and not _recently_alerted(db, "scan_stalled", SCAN_REALERT_HOURS, now):
+            if health["scan_never"]:
+                age_txt = "從未成功執行"
+                last_txt = "無紀錄"
+            else:
+                age_txt = f"約 {health['scan_age_hours']:.0f} 小時未執行"
+                last_txt = health["last_scan_at"] or "無紀錄"
+            enqueue_escalation(
+                db,
+                event_type="scan_stalled",
+                summary=(
+                    f"【系統異常·時限掃描失聯】時限掃描器{age_txt}"
+                    f"（上次成功掃描：{last_txt}；目前 {health['pending_deadlines']} 筆待處理時限）。"
+                    f"時限可能已停止倒數，請立即人工巡一次未結時限（list_upcoming_deadlines）、"
+                    f"並檢查 scan_deadlines.py 的 cron 是否在跑。"
+                ),
+                detail={
+                    "kind": "scan_stalled",
+                    "last_scan_at": str(last_txt),
+                    "scan_age_hours": ("" if health["scan_age_hours"] is None
+                                       else f"{health['scan_age_hours']:.1f}"),
+                    "pending_deadlines": str(health["pending_deadlines"]),
+                },
+                actor_user_id="",
+                actor_label="系統·健康哨兵",
+                business_unit="",
+                channel_id=None,
+            )
+            stats["alerted"] = True
+    return stats
+
+
+def scan_and_enqueue_unconfirmed_intakes(now=None) -> dict:
+    """cron（scan_unconfirmed_intake.py）掃 pending_intakes status='awaiting' → 命中等待節點
+    即 enqueue intake_unconfirmed 跟催。補核心 loop「一鍵確認才入」的結構盲區：丟了檔、AI 推確認、
+    人忘了回 → 時限沒進 deadlines 表 → 一般掃描（WHERE status='pending'）掃不到 → 隱形漏掉。
+
+    鐵律（反捏造）：提醒文字只列『送達日 + 文書類型 + 等待時數』等「抽出的事實」，
+    絕不端出引擎 computed deadline——待確認階段 create_deadline 根本還沒跑、權威日期尚不存在。
+    reminders_sent 冪等鑰：同一等待節點不重推。"""
+    from shared.db import transaction
+    from shared.escalation import enqueue_escalation
+
+    now = _to_dt(now)
+    stats = {"awaiting": 0, "reminded": 0, "skipped": 0}
+    with transaction() as db:
+        rows = db.execute(
+            "SELECT p.*, m.matter_no AS m_no, m.title AS m_title "
+            "FROM pending_intakes p LEFT JOIN matters m ON m.id = p.matter_id "
+            "WHERE p.status='awaiting'"
+        ).fetchall()
+        for r in rows:
+            stats["awaiting"] += 1
+            try:
+                created = datetime.strptime(str(r["created_at"])[:19], "%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                stats["skipped"] += 1
+                continue
+            waited_h = max(0.0, (now - created).total_seconds() / 3600.0)
+            try:
+                sent = set(json.loads(r["reminders_sent"] or "[]"))
+            except (json.JSONDecodeError, TypeError):
+                sent = set()
+            # 只推「目前該推的最高未提醒節點」（一次補推多筆無意義、徒增洗版）
+            due_nodes = [h for h in INTAKE_REMINDER_HOURS if waited_h >= h and h not in sent]
+            if not due_nodes:
+                continue
+            node = max(due_nodes)
+            label = (r["matter_label"] or r["m_no"] or r["m_title"] or "（未指定案件）")
+            doc = r["doc_type"] or "文書"
+            svc = r["service_base_date"] or "未填"
+            stated = r["stated_period_days"]
+            stated_txt = f"、教示{stated}日" if stated else ""
+            submitter = (r["submitted_by"] or "").strip()
+            by_txt = f"、提交：{submitter}" if submitter else ""
+            enqueue_escalation(
+                db,
+                event_type="intake_unconfirmed",
+                summary=(
+                    f"【待確認時限】{label} {doc} 送達日{svc}{stated_txt}"
+                    f"，已等待約 {waited_h:.0f} 小時未確認入庫{by_txt}。"
+                    f"請確認後走時限收件流程 create_deadline（帶 confirm_intake_id={r['id']}），"
+                    f"或 resolve_deadline_intake({r['id']}, action='discarded') 標示捨棄。"
+                ),
+                detail={
+                    "kind": "intake_unconfirmed",
+                    "intake_id": str(r["id"]),
+                    "service_base_date": str(svc),
+                    "doc_type": str(doc),
+                    "waited_hours": f"{waited_h:.1f}",
+                },
+                actor_user_id="",
+                actor_label="系統·待確認跟催",
+                business_unit="",
+                channel_id=None,
+            )
+            sent.add(node)
+            db.execute(
+                "UPDATE pending_intakes SET reminders_sent=? WHERE id=?",
+                (json.dumps(sorted(sent)), r["id"]),
+            )
+            stats["reminded"] += 1
+    return stats
+
+
 def scan_and_enqueue_due_reminders(today=None) -> dict:
     """cron 每日掃 pending deadlines → 命中 escalation_lead_days 節點即 enqueue（接現役三層投遞）。
 
@@ -716,5 +949,10 @@ def scan_and_enqueue_due_reminders(today=None) -> dict:
                     "UPDATE deadlines SET reminders_sent = ? WHERE id = ?",
                     (json.dumps(sorted(sent)), d["id"]),
                 )
+
+        # 健康哨兵 heartbeat（#H1）：掃描跑完落一筆「活著」憑證（與本次 enqueue 同原子 commit、
+        # 零 deadline 也照寫＝證明掃描器真的有在跑）。watchdog（scan_heartbeat.py）/ 全權限開機
+        # readout 據此判斷掃描器是否失聯（時限是否仍在倒數）——靜默掛掉=漏期=執業過失的根因。
+        _record_heartbeat(db, HEARTBEAT_SCAN, json.dumps(stats, ensure_ascii=False))
 
     return stats

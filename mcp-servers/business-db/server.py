@@ -485,9 +485,12 @@ from modules.deadlines.tools import (  # noqa: E402,F401
     get_matter,
     list_deadlines,
     list_matters,
+    list_pending_intakes,
     list_upcoming_deadlines,
     mark_deadline_calendared,
     mark_deadline_filed,
+    resolve_deadline_intake,
+    stage_deadline_intake,
 )
 from modules.hr.tools import (  # noqa: E402,F401
     find_partner,

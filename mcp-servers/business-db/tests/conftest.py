@@ -15,4 +15,5 @@ collect_ignore = [
     "test_migration_safety.py",
     "test_deadline_engine.py",
     "test_office_calendar_import.py",
+    "test_health_intake.py",
 ]

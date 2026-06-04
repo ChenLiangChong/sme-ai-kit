@@ -112,6 +112,7 @@ def create_deadline(
     assignee_line_user_id: str = "",
     escalation_lead_days: str = "",
     created_by: str = "",
+    confirm_intake_id: int = 0,
 ) -> str:
     """建立時限（deadline）並由 service 層確定性計算法定/內部雙日期。
 
@@ -152,6 +153,9 @@ def create_deadline(
         assignee_line_user_id: 承辦律師 LINE user_id（MVP「全所一份」提醒下不作收件對象、保留供未來 per-assignee 分送；收件人一律走 boss/全所 coalesce）
         escalation_lead_days: T-N 提醒節點 JSON（如「[14,7,3,1,0]」；空白=依 severity 預設）
         created_by: 建立者
+        confirm_intake_id: 對應的「待確認暫存」id（先 stage_deadline_intake 暫存、人確認後入庫時帶回）。
+            >0 時本次入庫成功會同 tx 關閉該待確認跟催 backlog（不再被 scan_unconfirmed_intake 催）；
+            0=不對位（無暫存的直接入庫）。查無/已非待確認不擋入庫、僅在回覆註記
     """
     return service.create_deadline(
         matter_id=matter_id,
@@ -176,6 +180,7 @@ def create_deadline(
         assignee_line_user_id=assignee_line_user_id,
         escalation_lead_days=escalation_lead_days,
         created_by=created_by,
+        confirm_intake_id=confirm_intake_id,
     )
 
 
@@ -261,3 +266,80 @@ def mark_deadline_calendared(
         calendar_provider=calendar_provider,
         marked_by=marked_by,
     )
+
+
+@mcp.tool()
+def stage_deadline_intake(
+    extracted_summary: str,
+    matter_id: int = 0,
+    matter_label: str = "",
+    doc_type: str = "",
+    service_base_date: str = "",
+    stated_period_days: int = 0,
+    document_date: str = "",
+    submitted_by: str = "",
+) -> str:
+    """把『抽出但尚未確認』的時限事實暫存成可掃描的待確認 backlog（時限收件流程步驟2：把抽出的事實
+    推回 LINE 請人一鍵確認的「當下」呼叫，不要等人回了才存）。
+
+    為什麼要存：核心 loop 刻意「一鍵確認才入」把人擋中間（律師業必須人擋中間）。副作用＝丟了檔、
+    AI 推確認、人忘了回 → 時限沒進 deadlines → 一般掃描掃不到 → 隱形漏掉（漏期＝執業過失）。
+    本暫存讓「待確認」變成 scan_unconfirmed_intake.py 能跟催的 backlog、不再靜默漏掉。
+
+    只存事實、不算天數、不建 deadline。人確認後請呼叫 create_deadline(..., confirm_intake_id=<本 id>)
+    入庫（引擎才確定性算雙日期）；確定不算了用 resolve_deadline_intake(<id>, action='discarded')。
+
+    Args:
+        extracted_summary: 一行人話摘要（推回 LINE 請人確認的那條，如「王案一審民事判決 6/1 送達、教示20日」）（必填）
+        matter_id: 所屬案件 ID（0=案件還沒建、可之後補；給了會驗存在 + 機密軸 gate）
+        matter_label: 顯示用案件標籤快照（案號 / 案件代號 / 案由；去識別化、勿放當事人姓名）
+        doc_type: 文書類型（人話或 create_deadline 的 type 代碼，如 appeal_civil）
+        service_base_date: 抽出的送達日 YYYY-MM-DD（事實、未經引擎計算）
+        stated_period_days: 判決書上訴教示所載天數（事實；0=未提供）
+        document_date: 文書作成日（裁判日 YYYY-MM-DD；空=未提供）
+        submitted_by: 誰丟的檔 / 誰要算（逾時跟催時點名回頭催誰）
+    """
+    return service.stage_deadline_intake(
+        matter_id=matter_id,
+        matter_label=matter_label,
+        doc_type=doc_type,
+        service_base_date=service_base_date,
+        stated_period_days=stated_period_days,
+        document_date=document_date,
+        extracted_summary=extracted_summary,
+        submitted_by=submitted_by,
+    )
+
+
+@mcp.tool()
+def resolve_deadline_intake(
+    intake_id: int, action: str = "discarded", note: str = "", resolved_by: str = ""
+) -> str:
+    """收掉待確認暫存（停止 scan_unconfirmed_intake 跟催）。
+
+    一般「確認入庫」請改走 create_deadline(confirm_intake_id=...) 自動關閉、不必呼叫本工具；
+    本工具給「不入庫就收掉」用：action='discarded'（誤判 / 重複 / 不算了）或
+    'confirmed'（已用別的途徑入庫、僅標記關閉、不連 deadline）。
+
+    Args:
+        intake_id: 待確認暫存 ID
+        action: 'discarded'（捨棄、預設）或 'confirmed'（已另行入庫）
+        note: 收掉原因備註（落稽核 log）
+        resolved_by: 操作者
+    """
+    return service.resolve_deadline_intake(
+        intake_id=intake_id, action=action, note=note, resolved_by=resolved_by
+    )
+
+
+@mcp.tool()
+def list_pending_intakes(limit: int = 50) -> str:
+    """列出待確認（尚未入庫）的時限暫存（最舊在前、附等待時數），供律師主動查 backlog。
+
+    只列抽出的事實（送達日 / 文書類型 / 教示天數 / 等待時數）——刻意不端出引擎 computed deadline
+    （待確認階段根本還沒算、不存在權威日期）。確認入庫請帶 create_deadline(confirm_intake_id=)。
+
+    Args:
+        limit: 最多顯示幾筆（預設 50）
+    """
+    return service.list_pending_intakes(limit=limit)

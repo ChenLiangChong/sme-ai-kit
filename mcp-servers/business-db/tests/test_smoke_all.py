@@ -2934,6 +2934,68 @@ _assert("H2: detail 也帶 assignee 欄（全字串、供稽核）",
         detail=_eh2["detail"] if _eh2 else "None")
 
 
+# === #H1/#H2 靜默失敗哨兵：cross-file 常數 guard + 接線 smoke ===
+# （行為細節在 standalone tests/test_health_intake.py；此處守跨檔不變量與註冊、防漂移）
+
+_section("#H1/#H2 健康哨兵 + 待確認跟催")
+
+from shared.deadlines import (  # noqa: E402
+    SCAN_STALE_HOURS as _SS, WATCHDOG_STALE_HOURS as _WS, SCAN_REALERT_HOURS as _SR,
+    INTAKE_REMINDER_HOURS as _IRH, HEARTBEAT_SCAN as _HBS,
+    scan_and_enqueue_due_reminders as _scan_dl,
+    scan_health_and_alert as _scan_hb,  # noqa: F401  確保 watchdog 進入點存在
+    scan_and_enqueue_unconfirmed_intakes as _scan_iu,  # noqa: F401
+    check_scan_health as _csh,  # noqa: F401
+)
+from shared.escalation import (  # noqa: E402
+    DEFAULT_ENABLED_EVENTS as _DEE, ESCALATION_LABELS as _ELAB,
+)
+
+# 常數不變量（單一真相、勿在他處寫死）：scan 門檻 > 一日（24h）+ grace；watchdog 門檻 < scan 門檻；
+# 再告警間隔 >= 1h。常數值改動需同步改本 guard（cross-file 綁死、防有人在 readout 端另寫一個數字）。
+_assert("#H1(guard): SCAN_STALE_HOURS > 24（日掃 + grace）", _SS > 24, detail=str(_SS))
+_assert("#H1(guard): WATCHDOG_STALE_HOURS < SCAN_STALE_HOURS（監看比被監看更敏感）",
+        0 < _WS < _SS, detail=f"{_WS}/{_SS}")
+_assert("#H1(guard): SCAN_REALERT_HOURS >= 1（dedup 窗 > 0）", _SR >= 1, detail=str(_SR))
+_assert("#H2(guard): INTAKE_REMINDER_HOURS 遞增且 > 0", list(_IRH) == sorted(_IRH) and _IRH[0] > 0,
+        detail=str(_IRH))
+
+# 新事件預設啟用 + 有人話 label（否則 enqueue 會被 is_escalation_enabled 擋成 no-op、靜默不報）
+_assert("#H1/#H2(guard): scan_stalled / intake_unconfirmed 預設啟用",
+        "scan_stalled" in _DEE and "intake_unconfirmed" in _DEE)
+_assert("#H1/#H2(guard): 兩事件都有 ESCALATION_LABELS",
+        _ELAB.get("scan_stalled") and _ELAB.get("intake_unconfirmed"))
+
+# 開機 readout（knowledge/service.py）必須 import shared 常數、不可在 readout 端硬寫門檻數字（防漂移）
+_ks_src = ""
+try:
+    with open(os.path.join(os.path.dirname(__file__), "..", "modules", "knowledge", "service.py"),
+              encoding="utf-8") as _f:
+        _ks_src = _f.read()
+except OSError:
+    pass
+_assert("#H1(guard): readout import SCAN_STALE_HOURS（單一真相、非硬寫）",
+        "SCAN_STALE_HOURS" in _ks_src and "WATCHDOG_STALE_HOURS" in _ks_src)
+_assert("#H1(guard): readout 未硬寫門檻數字（無 '> 26' 之類 magic number）",
+        ("> 26" not in _ks_src) and ("26h" not in _ks_src))
+
+# 接線 smoke：scan_deadlines 跑完落 heartbeat（即使此刻有/無時限）
+_hb_before = server.get_db()
+try:
+    _n_before = _hb_before.execute(
+        "SELECT COUNT(*) c FROM interaction_log WHERE action=?", (_HBS,)).fetchone()["c"]
+finally:
+    _hb_before.close()
+_scan_dl()
+_hb_after = server.get_db()
+try:
+    _n_after = _hb_after.execute(
+        "SELECT COUNT(*) c FROM interaction_log WHERE action=?", (_HBS,)).fetchone()["c"]
+finally:
+    _hb_after.close()
+_assert("#H1(smoke): scan_and_enqueue_due_reminders 落一筆 HEARTBEAT_SCAN", _n_after == _n_before + 1)
+
+
 # === Schema version check ===
 
 _section("Migration runner")

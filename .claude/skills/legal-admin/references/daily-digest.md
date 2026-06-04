@@ -43,6 +43,7 @@
 
 ## 失敗情境判讀
 
-- **cron 沒推但時限明明快到** → 查 `scan_deadlines.py` 是否在跑（crontab）、`deadlines.escalation_lead_days` 提醒節點是否含當前 days_left、`reminders_sent` 是否已記過該節點（同節點不重推）。
+- **cron 沒推但時限明明快到** → 查 `scan_deadlines.py` 是否在跑（crontab）、`deadlines.escalation_lead_days` 提醒節點是否含當前 days_left、`reminders_sent` 是否已記過該節點（同節點不重推）。**不用自己猜 cron 死沒死**：哨兵會主動報——全權限開機 readout（`get_context_summary`）若出現「[時限掃描失聯]」紅字，即掃描器 heartbeat 過期（`scan_deadlines.py` 沒跑 / 報錯）、時限恐停止倒數，立刻人工 `list_upcoming_deadlines` 巡一次並修 cron（哨兵機制見 SKILL〈靜默失敗哨兵〉、privacy-deploy）。
+- **抽了時限卻沒入庫、也沒提醒** → 八成是步驟2 `stage_deadline_intake` 後人忘了回「確認」。開機 readout 的「待確認時限 N 件」或 `list_pending_intakes` 會列出來；`scan_unconfirmed_intake.py` 也會逾時跟催（只列送達日/文書類型/等待時數、不端權威日期——此時還沒算）。
 - **enqueue 了但沒送達** → `list_pending_escalations` 看 `failed`/逾期未送；收件人 coalesce 失敗（查無 boss）會留 pending、提醒維護者種 boss 身份（見 privacy-deploy）。
 - **行事曆有庭期但系統沒提醒** → 那筆只在行事曆、沒進 `deadlines`。把它補建（庭期見 deadline-intake「開庭通知」）或靠 cron 讀行事曆交叉補上。

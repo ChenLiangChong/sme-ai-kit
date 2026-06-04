@@ -228,10 +228,15 @@ def create_deadline(
     assignee_line_user_id: str,
     escalation_lead_days: str,
     created_by: str,
+    confirm_intake_id: int = 0,
 ) -> str:
     """建立時限。天數一律由 shared.deadlines.compute_deadline 確定性計算落欄。
 
     若 type 在 STATUTORY_PERIODS 種子內、且未自帶 statutory_days/basis/period_type → 自動回填。
+
+    confirm_intake_id（#H2）：>0 時，本次入庫成功同 tx 把對應 pending_intakes 待確認暫存標 confirmed
+    並連到本時限（關閉「待確認跟催」backlog、不再被 scan_unconfirmed_intake 催）。查無 / 非 awaiting
+    不報錯（避免擋下正常入庫），但回覆會註記未對位、供操作者察覺。
     """
     # ── 種子回填（未自帶時）──
     seed = STATUTORY_PERIODS.get(type)
@@ -363,6 +368,39 @@ def create_deadline(
             business_unit=None,
         )
 
+        # #H2：關閉「待確認跟催」backlog（同 tx）。先驗可見性 + 同案對位（codex#H 高）：
+        # 受限層不可藉「公開案件建 deadline + 猜 intake id」關掉機密 intake（anti-oracle），
+        # 也不可把別案的暫存錯連到本時限（resolved_deadline_id 完整性）。所有「未對位」情形
+        # （查無 / 機密不可見 / 屬他案 / 已非待確認）回 byte 相同的 _NOMATCH、不動任何 row
+        # ——成功路徑只在「可見 + 同案(或未建案的 NULL→本案) + awaiting」時發生，故機密 intake
+        # 對受限層永不產生「成功」回覆＝無存在性 oracle。查無/未對位都不擋入庫（時限本身已建好）。
+        intake_note = ""
+        if confirm_intake_id:
+            _NOMATCH = (
+                f"\n（注意：待確認暫存 #{confirm_intake_id} 未對位；時限本身已建立，"
+                f"請用 list_pending_intakes 核對 backlog）"
+            )
+            intake = repository.get_pending_intake(db, confirm_intake_id)
+            if (not intake) or (intake["matter_confidential"] and not is_full_access()):
+                intake_note = _NOMATCH  # 查無 / 機密不可見：同一則回覆、消除存在性 oracle
+            elif intake["matter_id"] is not None and intake["matter_id"] != matter_id:
+                intake_note = _NOMATCH  # 屬其他案件：不跨案連結
+            elif intake["status"] != "awaiting":
+                intake_note = _NOMATCH  # 已非待確認：不重複關閉
+            else:
+                closed = repository.resolve_pending_intake(
+                    db,
+                    intake_id=confirm_intake_id,
+                    status="confirmed",
+                    resolved_at=_now(),
+                    resolved_by=created_by or "system",
+                    resolved_deadline_id=deadline_id,
+                )
+                intake_note = (
+                    f"\n（已確認入庫待確認暫存 #{confirm_intake_id}、跟催關閉）"
+                    if closed else _NOMATCH
+                )
+
     review = "\n[需人工複核] 含不確定因素（送達/在途/法版/教示比對之一），請律師確認後再倚賴本期限。" if result["needs_manual_review"] else ""
     return (
         f"時限 #{deadline_id} 已建立：{description}\n"
@@ -371,6 +409,7 @@ def create_deadline(
         f"- 緩衝：{result['buffer_days']} 天\n"
         f"- 計算軌跡：\n  " + "\n  ".join(result["calc_trace"])
         + review
+        + intake_note
     )
 
 
@@ -611,3 +650,155 @@ def mark_deadline_calendared(
         f"時限 #{deadline_id}（{d['description']}）已回填行事曆對位"
         f"（{calendar_provider or '行事曆'}:{calendar_event_id.strip()}）。"
     )
+
+
+# ───────────────────────── pending_intakes（#H2 待確認跟催）─────────────────────────
+
+def stage_deadline_intake(
+    matter_id: int,
+    matter_label: str,
+    doc_type: str,
+    service_base_date: str,
+    stated_period_days: int,
+    document_date: str,
+    extracted_summary: str,
+    submitted_by: str,
+) -> str:
+    """把『抽出但尚未確認』的時限事實暫存成可掃描的待確認 row（核心 loop 步驟2：推回 LINE 請人
+    一鍵確認的當下呼叫）。只存事實、不算天數、不建 deadline——確認後才走 create_deadline。
+
+    補 HITL 結構盲區：讓「人忘了回確認」變成 scan_unconfirmed_intake.py 能跟催的 backlog、不再隱形漏掉。
+    確認入庫請帶 create_deadline(confirm_intake_id=<本 id>) 自動關閉跟催；確定不算了用
+    resolve_deadline_intake(id, action='discarded')。
+    """
+    if not extracted_summary or not extracted_summary.strip():
+        return "ERROR: extracted_summary（一行人話摘要）不可為空"
+
+    from shared.floor_policy import is_full_access
+
+    with transaction() as db:
+        mid = matter_id if matter_id else None
+        if mid:
+            m = repository.get_matter(db, mid)
+            if not m:
+                return f"ERROR: 找不到案件 #{matter_id}"
+            # 機密軸 + 存在性洩漏防護（codex HIGH-2）：機密案件對非全權限層回「與不存在相同」的泛化錯誤
+            if m["confidential"] and not is_full_access():
+                return f"ERROR: 找不到案件 #{matter_id}"
+        fields = {
+            "matter_id": mid,
+            "matter_label": (matter_label or "").strip() or None,
+            "doc_type": (doc_type or "").strip() or None,
+            "service_base_date": (service_base_date or "").strip() or None,
+            "stated_period_days": (stated_period_days if stated_period_days else None),
+            "document_date": (document_date or "").strip() or None,
+            "extracted_summary": extracted_summary.strip(),
+            "submitted_by": (submitted_by or "").strip() or None,
+            "status": "awaiting",
+            "reminders_sent": "[]",
+        }
+        intake_id = repository.insert_pending_intake(db, fields)
+        repository.insert_interaction_log(
+            db,
+            actor=submitted_by or "system",
+            action="intake_staged",
+            target_type="pending_intake",
+            target_id=intake_id,
+            detail=extracted_summary.strip(),
+            business_unit=None,
+        )
+    return (
+        f"待確認暫存 #{intake_id} 已建立（尚未入庫、未計算任何期限）。\n"
+        f"- 摘要：{extracted_summary.strip()}\n"
+        f"請人確認後呼叫 create_deadline(..., confirm_intake_id={intake_id}) 入庫並算雙日期，"
+        f"或 resolve_deadline_intake({intake_id}, action='discarded') 標示不算。\n"
+        f"（逾時未確認 scan_unconfirmed_intake.py 會主動跟催、不會靜默漏掉）"
+    )
+
+
+def resolve_deadline_intake(intake_id: int, action: str, note: str, resolved_by: str) -> str:
+    """收掉待確認暫存：action='discarded'（不算了 / 誤判 / 重複）或 'confirmed'（已另行入庫）。
+    一般確認入庫請改走 create_deadline(confirm_intake_id=...) 自動關閉；本函式給「不入庫就收掉」用。"""
+    act = (action or "").strip().lower()
+    if act not in ("discarded", "confirmed"):
+        return "ERROR: action 必須是 'discarded'（不算了）或 'confirmed'（已另行入庫）"
+
+    from shared.floor_policy import is_full_access
+
+    with transaction() as db:
+        intake = repository.get_pending_intake(db, intake_id)
+        if not intake:
+            return f"ERROR: 找不到待確認暫存 #{intake_id}"
+        # 機密軸：暫存隨母案件機密性（matter_id 為 NULL=未建案、視為非機密、可收）
+        if intake["matter_confidential"] and not is_full_access():
+            return f"ERROR: 找不到待確認暫存 #{intake_id}"
+        rows = repository.resolve_pending_intake(
+            db,
+            intake_id=intake_id,
+            status=act,
+            resolved_at=_now(),
+            resolved_by=resolved_by or None,
+            resolved_deadline_id=None,
+        )
+        if rows == 0:
+            cur = intake["status"]
+            return f"ERROR: 待確認暫存 #{intake_id} 目前狀態為「{cur}」、非待確認，無法收掉"
+        repository.insert_interaction_log(
+            db,
+            actor=resolved_by or "system",
+            action=f"intake_{act}",
+            target_type="pending_intake",
+            target_id=intake_id,
+            detail=(note or intake["extracted_summary"] or ""),
+            business_unit=None,
+        )
+    zh = {"discarded": "已標示不算（捨棄）", "confirmed": "已標示確認（另行入庫）"}[act]
+    return f"待確認暫存 #{intake_id} {zh}，scan_unconfirmed_intake 不再跟催。"
+
+
+def list_pending_intakes(limit: int) -> str:
+    """列出待確認（awaiting）暫存時限（最舊在前、附等待時數）。供開機 readout / 律師主動查。
+    機密軸：機密案件的暫存非全權限層不列（matter_id 為 NULL=未建案、視為非機密、顯示）。"""
+    from datetime import datetime
+
+    from shared.floor_policy import is_full_access
+    fa = is_full_access()
+
+    db = get_db()
+    try:
+        # 機密軸過濾下推到 SQL（codex#中）：非全權限層在 LIMIT 之前就排除機密母案件的暫存，
+        # 否則前 N 筆剛好都機密時，可見 backlog 會被靜默吞成「空」。
+        rows = repository.list_awaiting_intakes(
+            db, limit=(limit if limit and limit > 0 else 50), include_confidential=fa
+        )
+    finally:
+        db.close()
+
+    if not rows:
+        return "目前沒有待確認的時限暫存（待確認跟催 backlog 為空）。"
+
+    now = datetime.now()
+    lines = ["## 待確認時限（尚未入庫、scan_unconfirmed_intake 跟催中）"]
+    for r in rows:
+        try:
+            created = datetime.strptime(str(r["created_at"])[:19], "%Y-%m-%d %H:%M:%S")
+            waited = f"{max(0.0, (now - created).total_seconds() / 3600.0):.0f}h"
+        except (ValueError, TypeError):
+            waited = "?"
+        label = (r["matter_label"] or r["matter_no"] or r["matter_title"] or "（未指定案件）")
+        doc = r["doc_type"] or "文書"
+        svc = r["service_base_date"] or "未填"
+        stated = r["stated_period_days"]
+        stated_txt = f"、教示{stated}日" if stated else ""
+        by = (r["submitted_by"] or "").strip()
+        by_txt = f"、提交：{by}" if by else ""
+        # 只列抽出的事實 + 等待時數——絕不端出未經引擎確認的權威期限（此時根本還沒算）
+        lines.append(
+            f"- [#{r['id']}] {label} {doc} 送達日{svc}{stated_txt}"
+            f"（已等待 {waited}{by_txt}）"
+        )
+    lines.append(
+        "\n→ 確認入庫：create_deadline(..., confirm_intake_id=<id>)；"
+        "不算了：resolve_deadline_intake(<id>, action='discarded')"
+    )
+    return "\n".join(lines)

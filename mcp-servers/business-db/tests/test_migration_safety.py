@@ -405,8 +405,22 @@ conn.execute("PRAGMA foreign_keys=ON")
 ltables = {r[0] for r in conn.execute(
     "SELECT name FROM sqlite_master WHERE type='table'"
 ).fetchall()}
-for t in ("matters", "deadlines", "office_calendar", "transit_period"):
+for t in ("matters", "deadlines", "office_calendar", "transit_period", "pending_intakes"):
     check(f"legal: table {t} 已建立", t in ltables, detail=f"tables={ltables}")
+
+# #H2 pending_intakes：結構性反捏造——只存抽出的事實、不得有任何 computed deadline 欄
+# （待確認階段引擎還沒算、表上若有權威日期欄就可能被誤當已確認洩出去）
+pi_schema = conn.execute(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='pending_intakes'"
+).fetchone()[0]
+pi_cols = {r[1] for r in conn.execute("PRAGMA table_info(pending_intakes)").fetchall()}
+_pi_forbidden = {"internal_deadline", "statutory_deadline", "start_date", "effective_date", "calc_trace"}
+check("legal(#H2): pending_intakes 無任何 computed deadline 欄（結構性不可洩權威日期）",
+      not (pi_cols & _pi_forbidden), detail=str(pi_cols & _pi_forbidden))
+check("legal(#H2): pending_intakes CHECK status enum（awaiting/confirmed/discarded）",
+      "awaiting" in pi_schema and "confirmed" in pi_schema and "discarded" in pi_schema)
+check("legal(#H2): pending_intakes CHECK extracted_summary <> ''（不可空摘要）",
+      "extracted_summary <> ''" in pi_schema)
 
 # deadlines 的反捏造 CHECK + status enum
 dl_schema = conn.execute(

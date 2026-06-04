@@ -27,11 +27,16 @@
   ```
   整年逐日匯入、idempotent 可重跑、來源記在 `source` 欄。**務必與人事行政總處官方對賬**（反捏造：填錯假日＝算錯期限）。未載入年度的時限引擎會標 `needs_manual_review`（末日順延算不準）——這是保護、但別讓律師天天踩，每年初記得補次年度。
 - [ ] **種 boss 收件人**：每日提醒/逾期上報的收件人走 `resolve_escalation_target`（coalesce 到 boss/全所）。確認有一個可達的收件身份（`company.boss_line_id` 或 floor-map `escalation_target`），否則 enqueue 會留 pending 沒人收。
-- [ ] **cron 設定**：`scan_deadlines.py` 進 crontab（每日 07:00）：
+- [ ] **cron 設定（三支、缺一個都會留靜默失敗破口）**：進 crontab、分鐘數錯開避免同時搶鎖；cron 在 host 跑、不受 LINE-runtime sandbox 管（讀得到 DB）：
   ```
-  0 7 * * * SME_DB_PATH=/abs/data/business.db /abs/.venv/bin/python3 /abs/mcp-servers/business-db/scan_deadlines.py >> /abs/data/scan.log 2>&1
+  # 主：每日掃 pending 時限 → 命中提醒節點/逾期即上報（同時落 heartbeat 證明在跑）
+  0  7   * * *  SME_DB_PATH=/abs/data/business.db /abs/.venv/bin/python3 /abs/mcp-servers/business-db/scan_deadlines.py        >> /abs/data/scan.log 2>&1
+  # 哨兵 watchdog（#H1）：每 2h 自證活著 + 偵測上面那支失聯 → scan_stalled 上報（人沒開 Claude 也跑）
+  17 */2  * * *  SME_DB_PATH=/abs/data/business.db /abs/.venv/bin/python3 /abs/mcp-servers/business-db/scan_heartbeat.py       >> /abs/data/heartbeat.log 2>&1
+  # 待確認跟催（#H2）：每 4h 催「抽出但人忘了確認入庫」的 stage_deadline_intake 暫存
+  37 */4  * * *  SME_DB_PATH=/abs/data/business.db /abs/.venv/bin/python3 /abs/mcp-servers/business-db/scan_unconfirmed_intake.py >> /abs/data/intake.log 2>&1
   ```
-  cron 在 host 跑、不受 LINE-runtime sandbox 管（讀得到 DB）。
+  **為何要 `scan_heartbeat.py`（第二支極小 cron）**：`scan_deadlines.py` 若靜默掛掉，時限停止倒數且沒人知＝漏期根因。watchdog 是另一支幾乎不會自己壞的進程，互為 dead-man：被監看的掛了→watchdog 上報；watchdog 掛了→全權限開機 readout 反過來標「watchdog 失聯」（門檻常數 `SCAN_STALE_HOURS`/`WATCHDOG_STALE_HOURS` 在 `shared/deadlines.py`、勿在他處另寫）。`flush_escalations.py`（每 2 分、投遞保證層）見 CLAUDE.md〈上報（escalation）機制〉。
 - [ ] **行事曆 MCP**：現場確認律所用哪本行事曆、配置對應 MCP（見 calendar-sync）。**用律所自己的 Google 帳號**，不是開發者個人帳號。
 - [ ] **在途期間**：律所自辦（住法院所在地）→ `has_local_agent=1`、在途歸零；常跨區（如金門→台北）才需 `transit_period` 查表資料。
 
@@ -40,3 +45,6 @@
 - **時限算出來但帶「辦公日曆未載入」** → 該年度沒匯入，補 `office_calendar`（見上）。
 - **enqueue 了但 `list_pending_escalations` 一直 pending/failed** → 收件人解析不到（沒種 boss），或行事曆/LINE 投遞失敗；種好 boss 身份再重跑。
 - **跨年度時限大量標複核** → 次年度日曆沒匯入，部署時一次匯兩年。
+- **開機 readout 出現「時限掃描失聯」紅字** → `scan_deadlines.py` cron 沒在跑 / 報錯（看 `data/scan.log`）。時限可能已停止倒數，先人工 `list_upcoming_deadlines` 巡一次未結時限，再修 cron。
+- **開機 readout 出現「監看 watchdog 失聯/未部署」** → `scan_heartbeat.py` cron 沒設或掛了；時限本身仍在數，但時間驅動的失聯告警下線、補上 cron。
+- **「待確認時限 N 件尚未入庫」一直在** → 有人丟了檔、AI 推了確認、人忘了回。用 `list_pending_intakes` 查、確認走 `create_deadline(confirm_intake_id=)`、確定不算了用 `resolve_deadline_intake(id, 'discarded')`。

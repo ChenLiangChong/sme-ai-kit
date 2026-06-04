@@ -40,7 +40,26 @@ LINE 訊息含 `[圖片]` 路徑或 PDF → 用 Read 工具看內容。抽出這
 回「確認」即入庫並寫行事曆；要改回我哪裡不對。
 ```
 
-對方回「確認」→ 才進步驟 3。對方修正 → 改完再確認。**這一關不可省**（SPEC 核心：律師業必須人擋在中間）。
+**推這條確認訊息的「當下」同時呼叫 `stage_deadline_intake`** 把抽出的事實暫存成可掃描的待確認 backlog（只存事實、不算天數、不建 deadline）：
+
+```
+stage_deadline_intake(
+  extracted_summary="王案一審民事判決 2026-06-01 送達、教示20日",  # 推回確認的那條摘要
+  matter_id=<案件ID 或 0（還沒建案）>,
+  matter_label="王案一審民事判決",      # 去識別化、勿放當事人姓名
+  doc_type="appeal_civil",
+  service_base_date="2026-06-01",
+  stated_period_days=20,
+  document_date="2026-05-28",
+  submitted_by="<丟檔的人>",
+)
+```
+
+回傳的 `#intake_id` 記著、步驟 3 入庫時帶回。
+
+**為什麼一定要 stage**：核心 loop 刻意把人擋中間，副作用＝對方忘了回「確認」→ 時限沒入庫 → 一般掃描掃不到 → **隱形漏掉**（漏期＝執業過失）。暫存讓「待確認」變成 `scan_unconfirmed_intake.py` 能跟催的 backlog（逾 4h/24h/72h 主動提醒「有 M 件待確認、最久 X 小時」），人忘了回不會靜默漏掉。
+
+對方回「確認」→ 才進步驟 3。對方修正 → 改完再確認。確定不是時限（誤傳/重複）→ `resolve_deadline_intake(intake_id, action='discarded')` 收掉、停止跟催。**這一關不可省**（SPEC 核心：律師業必須人擋在中間）。
 
 ## 步驟 3：create_deadline（引擎確定性計算，你絕不心算天數）
 
@@ -58,6 +77,7 @@ create_deadline(
   buffer_days=3,                   # 內部緩衝（老闆的「19天」概念 = 20−1；可設更保守）
   has_local_agent=-1,              # -1=沿用案件設定
   created_by="<操作者>",
+  confirm_intake_id=<步驟2的 intake_id>,  # 帶回步驟2暫存 id → 同 tx 關閉待確認跟催 backlog
 )
 ```
 

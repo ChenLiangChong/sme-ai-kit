@@ -202,6 +202,68 @@ def mark_calendared(
     return cur.rowcount
 
 
+# ───────────────────────── pending_intakes（#H2 待確認跟催）─────────────────────────
+
+def insert_pending_intake(db: sqlite3.Connection, fields: dict) -> int:
+    cols = list(fields.keys())
+    placeholders = ",".join("?" for _ in cols)
+    cursor = db.execute(
+        f"INSERT INTO pending_intakes ({','.join(cols)}) VALUES ({placeholders})",
+        [fields[c] for c in cols],
+    )
+    return cursor.lastrowid
+
+
+def get_pending_intake(db: sqlite3.Connection, intake_id: int) -> sqlite3.Row | None:
+    return db.execute(
+        "SELECT p.*, m.matter_no AS matter_no, m.title AS matter_title, "
+        "       m.confidential AS matter_confidential "
+        "FROM pending_intakes p LEFT JOIN matters m ON m.id = p.matter_id "
+        "WHERE p.id = ?",
+        (intake_id,),
+    ).fetchone()
+
+
+def list_awaiting_intakes(
+    db: sqlite3.Connection, limit: int = 50, include_confidential: bool = True
+) -> list[sqlite3.Row]:
+    """待確認（status='awaiting'）的暫存時限，最舊在前（等最久的最該催）。
+
+    機密軸過濾在 SQL 端（codex#中）：非全權限層傳 include_confidential=False，機密母案件的暫存
+    在 LIMIT 之前就排除——否則「先 LIMIT 再 Python 過濾」會被前面的機密列吃掉配額、把可見 backlog
+    靜默吞成「空」。NULL matter（未建案）視為非機密、一律保留。
+    """
+    query = (
+        "SELECT p.*, m.matter_no AS matter_no, m.title AS matter_title, "
+        "       m.confidential AS matter_confidential "
+        "FROM pending_intakes p LEFT JOIN matters m ON m.id = p.matter_id "
+        "WHERE p.status = 'awaiting'"
+    )
+    if not include_confidential:
+        query += " AND (m.confidential IS NULL OR m.confidential = 0)"
+    query += " ORDER BY p.created_at ASC, p.id ASC LIMIT ?"
+    return db.execute(query, (limit,)).fetchall()
+
+
+def resolve_pending_intake(
+    db: sqlite3.Connection,
+    intake_id: int,
+    status: str,
+    resolved_at: str,
+    resolved_by: str | None,
+    resolved_deadline_id: int | None,
+) -> int:
+    """把待確認 row 收掉（confirmed / discarded）。只在 status='awaiting' 時生效（rowcount guard
+    防重複收 / 防把已收的再改）。回 rowcount。"""
+    cur = db.execute(
+        "UPDATE pending_intakes "
+        "SET status=?, resolved_at=?, resolved_by=?, resolved_deadline_id=? "
+        "WHERE id=? AND status='awaiting'",
+        (status, resolved_at, resolved_by, resolved_deadline_id, intake_id),
+    )
+    return cur.rowcount
+
+
 # ───────────────────────── interaction_log ─────────────────────────
 
 def insert_interaction_log(

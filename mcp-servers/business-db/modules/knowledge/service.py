@@ -830,6 +830,67 @@ def get_context_summary(scope: str) -> str:
                     f"\n## 主管上報\n- {esc_pending} 筆待送出（flusher 投遞中）"
                 )
 
+        # legal-admin 靜默失敗哨兵（#H1 時限掃描失聯 / #H2 待確認久未入庫）：全權限層開機第一眼看到。
+        # 非律所場景（無時限、無待確認暫存）會自然全靜默、不污染一般 company-ops 開機。整段 try 包覆：
+        # 哨兵是補強區、任何意外都不可拖垮核心儀表板。常數 SCAN_STALE_HOURS/WATCHDOG_STALE_HOURS 由
+        # shared.deadlines 單一真相 import（不在此寫死、cross-file guard 綁死）。
+        try:
+            from shared.deadlines import (
+                SCAN_STALE_HOURS,
+                WATCHDOG_STALE_HOURS,
+                check_scan_health,
+            )
+            health = check_scan_health(db)
+            health_lines = []
+            if health["scan_overdue"]:
+                health_lines.append(
+                    f"- [時限掃描失聯] 上次成功掃描 {health['last_scan_at'] or '無紀錄'}"
+                    f"（已逾 {health['scan_age_hours']:.0f} 小時、超過 {SCAN_STALE_HOURS}h 門檻）。"
+                    f"時限可能已停止倒數——請立即人工巡未結時限（list_upcoming_deadlines）、"
+                    f"並檢查 scan_deadlines.py 的 cron 是否在跑"
+                )
+            elif health["scan_never"] and health["pending_deadlines"] > 0:
+                health_lines.append(
+                    f"- [時限掃描未啟用] 已有 {health['pending_deadlines']} 筆待處理時限卻無任何掃描紀錄。"
+                    f"請部署 scan_deadlines.py cron（見 privacy-deploy）、否則時限不會自動倒數提醒"
+                )
+            if health["watchdog_overdue"]:
+                health_lines.append(
+                    f"- [監看 watchdog 失聯] 上次 {health['last_watchdog_at']}"
+                    f"（已逾 {health['watchdog_age_hours']:.0f}h、超過 {WATCHDOG_STALE_HOURS}h）。"
+                    f"時間驅動失聯告警可能失靈、請檢查 scan_heartbeat.py 的 cron"
+                )
+            elif health["watchdog_never"] and (
+                health["pending_deadlines"] > 0 or not health["scan_never"]
+            ):
+                health_lines.append(
+                    "- [監看 watchdog 未部署] 時間驅動失聯告警（scan_heartbeat.py）無執行紀錄、"
+                    "建議補上 cron 以防掃描器靜默掛掉沒人知"
+                )
+            if health_lines:
+                sections.append("\n## 時限系統健康（需處理）")
+                sections.extend(health_lines)
+
+            # #H2 待確認 backlog：抽出但人還沒一鍵確認入庫的時限（久未確認＝隱形漏掉風險）
+            intake = db.execute(
+                "SELECT COUNT(*) c, MIN(created_at) oldest "
+                "FROM pending_intakes WHERE status='awaiting'"
+            ).fetchone()
+            if intake and intake["c"]:
+                wait_txt = ""
+                try:
+                    o = datetime.strptime(str(intake["oldest"])[:19], "%Y-%m-%d %H:%M:%S")
+                    wait_txt = f"、最久已等 {max(0.0, (datetime.now() - o).total_seconds() / 3600.0):.0f} 小時"
+                except (ValueError, TypeError):
+                    pass
+                sections.append(
+                    f"\n## 待確認時限（{intake['c']} 件尚未入庫{wait_txt}）"
+                    f"\n- 抽出後還沒一鍵確認入庫的時限；久未確認可能漏掉。用 list_pending_intakes 查看，"
+                    f"確認走 create_deadline(confirm_intake_id=)、不算了用 resolve_deadline_intake"
+                )
+        except Exception:
+            pass  # 哨兵補強區失敗不影響核心儀表板
+
         # 待處理任務
         pending = db.execute(
             "SELECT id, title, assignee, priority, due_date FROM tasks "

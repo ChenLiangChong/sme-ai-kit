@@ -39,6 +39,9 @@ DEFAULT_ENABLED_EVENTS = frozenset({
     # legal-admin：時間驅動（cron scan_deadlines.py 每日掃 → enqueue），投遞三層零改動複用
     "deadline_approaching",                   # T-N 將至（按 escalation_lead_days 觸發）★律所命脈
     "deadline_missed",                        # 已逾期（最高優先、每日推 + 升級合夥人/boss）
+    # legal-admin 靜默失敗哨兵（時間驅動 cron、補既有設計的兩個盲區）
+    "scan_stalled",                           # #H1：時限掃描器失聯（heartbeat 過期）→ 時限恐停止倒數
+    "intake_unconfirmed",                     # #H2：抽出待確認的時限久未入庫（HITL 結構盲區）
 })
 # 已知但「預設關」的高頻事件（onboarding 想開要自行加進 settings、並接受洗版風險 / 未來補 dedup）。
 DEFAULT_DISABLED_EVENTS = frozenset({"cross_bu_access"})
@@ -438,6 +441,8 @@ ESCALATION_LABELS = {
     "cross_bu_access": "跨事業體越權存取",
     "deadline_approaching": "時限將至",
     "deadline_missed": "時限已逾期",
+    "scan_stalled": "時限掃描器失聯",
+    "intake_unconfirmed": "待確認時限久未入庫",
 }
 
 
