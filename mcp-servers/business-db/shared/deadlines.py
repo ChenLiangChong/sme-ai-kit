@@ -174,19 +174,12 @@ def is_holiday(d, db=None) -> bool:
     return d.weekday() >= 5
 
 
-def calendar_year_loaded(year: int, db=None) -> bool:
-    """該年度的 office_calendar 是否「有任何紀錄」（部署安全偵測，BUG2）。
+def _is_leap(year: int) -> bool:
+    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
 
-    office_calendar 只種了部分年度（MVP 種 2026）。若某年完全無紀錄，is_holiday 會靜默退回
-    「只看週末」規則 → 國定假日 / 補班全抓不到、末日順延與內部期限可能誤算。compute_deadline
-    對所需日期的「年份完全無紀錄」改標 needs_manual_review（保留週末規則為最後 fallback、但
-    必有 review 旗標），而非靜默誤算。
 
-    Args:
-        year: 西元年
-        db: 可選連線；不給則自開
-    Returns: True=該年至少有一筆 office_calendar / False=完全無紀錄（須人工複核）
-    """
+def _office_calendar_year_count(year: int, db=None) -> int:
+    """該年 office_calendar 的列數（calendar_year_loaded 與 calc_trace 共用、避免「完全無紀錄」謊報）。"""
     own_db = False
     if db is None:
         from shared.db import get_db
@@ -194,13 +187,31 @@ def calendar_year_loaded(year: int, db=None) -> bool:
         own_db = True
     try:
         row = db.execute(
-            "SELECT 1 FROM office_calendar WHERE date >= ? AND date < ? LIMIT 1",
+            "SELECT COUNT(*) FROM office_calendar WHERE date >= ? AND date < ?",
             (f"{year:04d}-01-01", f"{year + 1:04d}-01-01"),
         ).fetchone()
     finally:
         if own_db:
             db.close()
-    return row is not None
+    return row[0] if row else 0
+
+
+def calendar_year_loaded(year: int, db=None) -> bool:
+    """該年度的 office_calendar 是否「**逐日完整載入**」（部署安全偵測，BUG2 + codex r4 HIGH）。
+
+    office_calendar 是末日順延的命脈。**半套年度比完全沒有更危險**：若某年只有幾天（如舊版 migration
+    的部分種子、或半套匯入），is_holiday 會對「沒紀錄的那些天」靜默退回只看週末 → 缺的國定假日全抓不到、
+    末日順延誤算。故「已載入」定義改為「該年列數達整年天數（365/366）」——**非「有任何一筆」**。
+    未達 → compute_deadline 標 needs_manual_review（fail-toward），逼人跑 import_office_calendar.py
+    把整年灌齊（匯入器同樣強制單一年度逐日完整、雙重把關）。
+
+    Args:
+        year: 西元年
+        db: 可選連線；不給則自開
+    Returns: True=該年逐日完整載入 / False=未載入或半套（須人工複核）
+    """
+    expected = 366 if _is_leap(year) else 365
+    return _office_calendar_year_count(year, db) >= expected
 
 
 def lookup_transit_days(court_region: str, party_region: str, db=None):
@@ -446,22 +457,24 @@ def compute_deadline(
         )
         legal_basis.append("民法§122")
 
-    # ── 步驟 5b：辦公日曆載入偵測（部署安全，BUG2）──
-    # 末日順延（步驟5）與內部線對齊（步驟6）皆讀 office_calendar；若所需日期落在「完全無
-    # 紀錄的年度」，is_holiday 會靜默退回只看週末規則 → 國定假日 / 補班全抓不到、可能誤算。
-    # 檢查 start_date → statutory_deadline 區間涵蓋的每個年度是否載入（內部線對齊不會退到
-    # start 之前，故此區間已涵蓋所有 holiday-sensitive 日）。任一年未載入 → needs_manual_review。
-    _missing_years = [
-        y for y in range(start.year, statutory_deadline.year + 1)
-        if not calendar_year_loaded(y, db=db)
-    ]
+    # ── 步驟 5b：辦公日曆完整載入偵測（部署安全，BUG2 + codex r4/r5）──
+    # 末日順延（步驟5）與內部線對齊（步驟6）皆讀 office_calendar；若所需日期落在「未逐日完整
+    # 載入的年度」，is_holiday 會對缺漏日靜默退回只看週末規則 → 國定假日 / 補班抓不到、可能誤算。
+    # 檢查 start_date → statutory_deadline 區間涵蓋的每個年度是否「完整」載入（達 365/366）。
+    # 反捏造：trace 據實標「未完整載入（current/expected）」、不謊稱「完全無紀錄」（半套也算未載入）。
+    _missing_years = []  # (year, count, expected)
+    for _y in range(start.year, statutory_deadline.year + 1):
+        if not calendar_year_loaded(_y, db=db):
+            _missing_years.append(
+                (_y, _office_calendar_year_count(_y, db=db), 366 if _is_leap(_y) else 365)
+            )
     if _missing_years:
         needs_manual_review = True
-        _yrs = "/".join(str(y) for y in _missing_years)
+        _yrs = "、".join(f"{y}（{c}/{e} 天）" for y, c, e in _missing_years)
         trace.append(
-            f"辦公日曆未載入：所需年度 {_yrs} 在 office_calendar 完全無紀錄"
-            f"（僅退回週末預設、抓不到國定假日 / 補班）→ 無法確定末日順延、須人工複核"
-            f"（內部 / 法定末日為週末預設下的估值）"
+            f"辦公日曆未完整載入：所需年度 {_yrs} 在 office_calendar 未達整年"
+            f"（缺漏日會退回週末預設、抓不到國定假日 / 補班）→ 無法確定末日順延、須人工複核"
+            f"（內部 / 法定末日為週末預設下的估值；請跑 import_office_calendar.py 灌完整年度）"
         )
 
     # ── 步驟 6：內部期限（working = hard − buffer）──

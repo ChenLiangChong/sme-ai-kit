@@ -445,15 +445,14 @@ check("legal: deadlines 有 1 條 FK 指向 matters（CASCADE）",
       len(dl_fks) == 1 and dl_fks[0][2] == "matters" and dl_fks[0][6] == "CASCADE",
       detail=f"fks={dl_fks}")
 
-# office_calendar 種子有落地（2026 元旦）
-oc_jan1 = conn.execute(
-    "SELECT is_holiday FROM office_calendar WHERE date='2026-01-01'"
+# office_calendar：migration 建空表、**不種任何半套年度種子**（codex r4 HIGH：半套被當已載入＝陷阱）。
+# 辦公日曆一律由 import_office_calendar.py 整年逐日匯入（見 012 註解 / privacy-deploy）。
+oc_exists = conn.execute(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='office_calendar'"
 ).fetchone()
-check("legal: office_calendar 種子 2026-01-01=假日", oc_jan1 is not None and oc_jan1[0] == 1)
-oc_makeup = conn.execute(
-    "SELECT is_holiday FROM office_calendar WHERE date='2026-02-07'"
-).fetchone()
-check("legal: office_calendar 補班日 2026-02-07=上班日(0)", oc_makeup is not None and oc_makeup[0] == 0)
+check("legal: office_calendar 表存在", oc_exists is not None)
+oc_count = conn.execute("SELECT COUNT(*) FROM office_calendar").fetchone()[0]
+check("legal: office_calendar migration 後為空（不種半套年度、避免被誤判已載入）", oc_count == 0)
 
 # 反捏造 CHECK 實測：空 statutory_basis 應被擋
 _basis_blocked = False

@@ -19,7 +19,13 @@
 ## 部署檢查清單（上線前）
 
 - [ ] **訓練關閉**：Claude 帳號設定關「Help improve Claude」。
-- [ ] **辦公日曆載入**：`office_calendar` 只種了部分年度（MVP 2026）。匯入**當年度 + 次年度**完整國定假日/補班（來源：行政院人事行政總處《政府行政機關辦公日曆表》或 `ruyut/TaiwanCalendar`）。未載入年度的時限，引擎會標 `needs_manual_review`（末日順延算不準）——這是保護、但別讓律師天天踩。
+- [ ] **辦公日曆載入（部署必做、否則時限全標人工複核）**：`office_calendar` migration **不種任何資料**（避免半套年度被誤判已載入）。部署用 `import_office_calendar.py` 灌**當年度 + 次年度**完整日曆（末日順延 民法§122 的資料底；匯入器強制單一年度逐日完整、`calendar_year_loaded` 也要求該年達 365/366 才算載入）：
+  ```
+  curl -sO https://raw.githubusercontent.com/ruyut/TaiwanCalendar/master/data/2026.json
+  curl -sO https://raw.githubusercontent.com/ruyut/TaiwanCalendar/master/data/2027.json   # 次年公告後再補
+  SME_DB_PATH=/abs/data/business.db /abs/.venv/bin/python3 mcp-servers/business-db/import_office_calendar.py 2026.json 2027.json
+  ```
+  整年逐日匯入、idempotent 可重跑、來源記在 `source` 欄。**務必與人事行政總處官方對賬**（反捏造：填錯假日＝算錯期限）。未載入年度的時限引擎會標 `needs_manual_review`（末日順延算不準）——這是保護、但別讓律師天天踩，每年初記得補次年度。
 - [ ] **種 boss 收件人**：每日提醒/逾期上報的收件人走 `resolve_escalation_target`（coalesce 到 boss/全所）。確認有一個可達的收件身份（`company.boss_line_id` 或 floor-map `escalation_target`），否則 enqueue 會留 pending 沒人收。
 - [ ] **cron 設定**：`scan_deadlines.py` 進 crontab（每日 07:00）：
   ```

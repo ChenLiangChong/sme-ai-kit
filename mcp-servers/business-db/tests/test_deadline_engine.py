@@ -46,6 +46,16 @@ import server  # noqa: E402
 server.DB_PATH = DB_PATH
 server.init_db()
 
+# 辦公日曆改由匯入器灌真實整年檔（migration 不再種半套年度、見 012 / codex r4 HIGH）。
+# 末日順延 golden case 依賴 2026 真實假日 → 在 setup 匯入 2025+2026 完整 fixture（各 365 天）。
+import import_office_calendar as _impcal  # noqa: E402
+from shared.db import transaction as _txn0  # noqa: E402
+
+_FIXTURES = os.path.join(HERE, "fixtures")
+with _txn0() as _db0:
+    _impcal.import_file(_db0, os.path.join(_FIXTURES, "taiwan_calendar_2025.json"))
+    _impcal.import_file(_db0, os.path.join(_FIXTURES, "taiwan_calendar_2026.json"))
+
 from shared.db import get_db  # noqa: E402
 from shared.deadlines import compute_deadline, is_holiday, STATUTORY_PERIODS  # noqa: E402
 
@@ -77,10 +87,29 @@ def _calc(**kw):
 print("\n=== is_holiday ===")
 _assert("is_holiday: 2026-01-01 元旦（種子平日國定假日）=True", is_holiday("2026-01-01", db) is True)
 _assert("is_holiday: 2026-06-19 端午（種子）=True", is_holiday("2026-06-19", db) is True)
-_assert("is_holiday: 2026-02-07 補班（種子 is_holiday=0、週六仍上班）=False",
-        is_holiday("2026-02-07", db) is False)
 _assert("is_holiday: 2026-06-20 週六（無種子→預設週末）=True", is_holiday("2026-06-20", db) is True)
 _assert("is_holiday: 2026-06-22 週一（無種子→平日）=False", is_holiday("2026-06-22", db) is False)
+# 補班分支（週末 + is_holiday=0 → 上班日）以 synthetic fixture 覆核——migration 不再硬種錯誤的
+# 2026 補班（2026 經 ruyut 對賬全年無補班；原 2026-02-07 補班為臆測已移除）。日期用程式算下一個
+# 週六/週一、不硬猜星期，明標 test fixture（非真實 DGPA 資料）。
+import datetime as _dt0  # noqa: E402
+_b0 = _dt0.date(2099, 1, 1)
+_syn_sat = (_b0 + _dt0.timedelta(days=(5 - _b0.weekday()) % 7)).isoformat()
+_syn_mon = (_dt0.date.fromisoformat(_syn_sat) + _dt0.timedelta(days=2)).isoformat()
+db.execute(
+    "INSERT OR REPLACE INTO office_calendar (date,is_holiday,description,source) VALUES (?,?,?,?)",
+    (_syn_sat, 0, "synthetic 補班（測試 fixture）", "test"))
+db.execute(
+    "INSERT OR REPLACE INTO office_calendar (date,is_holiday,description,source) VALUES (?,?,?,?)",
+    (_syn_mon, 1, "synthetic 平日國定假日（測試 fixture）", "test"))
+db.commit()
+_assert("is_holiday: synthetic 補班（週六+is_holiday=0）→False（office_calendar 覆寫週末預設）",
+        is_holiday(_syn_sat, db) is False)
+_assert("is_holiday: synthetic 平日國定假日（週一+is_holiday=1）→True（覆寫平日預設）",
+        is_holiday(_syn_mon, db) is True)
+# 2026-02-07（週六、移除錯誤補班後無種子）→ 退回週末預設＝True（與 ruyut 2026 一致）
+_assert("is_holiday: 2026-02-07 週六（已移除錯誤補班、退週末預設）=True",
+        is_holiday("2026-02-07", db) is True)
 
 
 # === 1. Golden Case 1：民事上訴 normal、翌日起算 + 末日週末順延 ===
@@ -302,8 +331,8 @@ _assert("bug2: 無 error", "error" not in r12, detail=str(r12.get("error")))
 _assert("bug2: 末日落 2027（跨年）", r12["statutory_deadline"][:4] == "2027",
         detail=r12["statutory_deadline"])
 _assert("bug2: 2027 日曆未載入 → needs_manual_review=True", r12["needs_manual_review"] is True)
-_assert("bug2: calc_trace 誠實標明『辦公日曆未載入』+ 須人工複核",
-        any("辦公日曆未載入" in t and "人工複核" in t for t in r12["calc_trace"]),
+_assert("bug2: calc_trace 誠實標明『辦公日曆未完整載入(0/365)』+ 須人工複核",
+        any("辦公日曆未完整載入" in t and "0/365" in t and "人工複核" in t for t in r12["calc_trace"]),
         detail=str(r12["calc_trace"]))
 # 2026 全程（不跨年）不應誤觸日曆未載入
 r12b = _calc(
@@ -311,6 +340,24 @@ r12b = _calc(
     service_type="normal", service_base_date="2026-06-01", has_local_agent=True, buffer_days=1,
 )
 _assert("bug2: 2026 全程不誤觸日曆未載入複核", r12b["needs_manual_review"] is False)
+
+# 半套年度（legacy DB 殘留）：trace 須據實標「未完整載入（n/365）」、不可謊稱「完全無紀錄」（codex r5 MED）
+import datetime as _dt12  # noqa: E402
+for _i in range(5):  # 只塞 5 天 2031（半套）
+    _d = _dt12.date(2031, 3, 1) + _dt12.timedelta(days=_i)
+    db.execute(
+        "INSERT OR REPLACE INTO office_calendar (date,is_holiday,description,source) VALUES (?,?,?,?)",
+        (_d.isoformat(), 1 if _d.weekday() >= 5 else 0, "", "synthetic-partial"))
+db.commit()
+r12c = _calc(
+    period_type="peremptory", statutory_days=20, statutory_basis="民訴§440",
+    service_type="normal", service_base_date="2031-03-10", has_local_agent=True, buffer_days=1,
+)
+_assert("bug2: 半套 2031 → needs_manual_review=True", r12c["needs_manual_review"] is True)
+_assert("bug2: 半套年度 trace 標『未完整載入(5/365)』、不謊稱『完全無紀錄』(反捏造)",
+        any("未完整載入" in t and "5/365" in t for t in r12c["calc_trace"])
+        and not any("完全無紀錄" in t for t in r12c["calc_trace"]),
+        detail=str([t for t in r12c["calc_trace"] if "辦公日曆" in t]))
 
 
 # === 13. 不變量：凡 calc_trace 聲稱為上班日的日期、用 is_holiday 斷言確實非假日 ===

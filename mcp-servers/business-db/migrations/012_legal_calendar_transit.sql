@@ -47,30 +47,12 @@ CREATE TABLE IF NOT EXISTS transit_period (
 CREATE INDEX IF NOT EXISTS idx_transit_period_lookup
     ON transit_period(court_region, party_region);
 
--- === office_calendar 種子：2026 台灣國定假日（一小批、供測試與末日順延）===
--- TODO（deploy 步驟）：完整年度日曆 import DGPA《政府行政機關辦公日曆表》或 ruyut/TaiwanCalendar JSON
---   （含補班/調移/颱風假）；本批僅種「跨假日不停止計算」與「末日順延」測試需要的關鍵日。
--- 來源：行政院人事行政總處 115 年（2026）政府行政機關辦公日曆表。
-INSERT OR IGNORE INTO office_calendar (date, is_holiday, description, source) VALUES
-    ('2026-01-01', 1, '中華民國開國紀念日', 'DGPA 2026 辦公日曆表'),
-    ('2026-02-14', 1, '農曆除夕前彈性放假（調整放假）', 'DGPA 2026 辦公日曆表'),
-    ('2026-02-16', 1, '農曆除夕', 'DGPA 2026 辦公日曆表'),
-    ('2026-02-17', 1, '春節（初一）', 'DGPA 2026 辦公日曆表'),
-    ('2026-02-18', 1, '春節（初二）', 'DGPA 2026 辦公日曆表'),
-    ('2026-02-19', 1, '春節（初三）', 'DGPA 2026 辦公日曆表'),
-    ('2026-02-20', 1, '春節（初四，調整放假）', 'DGPA 2026 辦公日曆表'),
-    ('2026-02-27', 1, '和平紀念日彈性放假（調整放假）', 'DGPA 2026 辦公日曆表'),
-    ('2026-02-28', 1, '和平紀念日', 'DGPA 2026 辦公日曆表'),
-    ('2026-04-03', 1, '兒童節及民族掃墓節彈性放假', 'DGPA 2026 辦公日曆表'),
-    ('2026-04-04', 1, '兒童節', 'DGPA 2026 辦公日曆表'),
-    ('2026-04-06', 1, '民族掃墓節補假', 'DGPA 2026 辦公日曆表'),
-    ('2026-05-01', 1, '勞動節', 'DGPA 2026 辦公日曆表'),
-    ('2026-06-19', 1, '端午節', 'DGPA 2026 辦公日曆表'),
-    ('2026-09-25', 1, '中秋節', 'DGPA 2026 辦公日曆表'),
-    ('2026-10-09', 1, '國慶日彈性放假（調整放假）', 'DGPA 2026 辦公日曆表'),
-    ('2026-10-10', 1, '國慶日', 'DGPA 2026 辦公日曆表');
-
--- 補班日範例（週末要上班、不順延）：對應上方某次調整放假的補班。
--- 2026-02-07（六）補 02-20（春節初四）的班 → is_holiday=0（週末但仍是上班日、末日落此不順延）。
-INSERT OR IGNORE INTO office_calendar (date, is_holiday, description, source) VALUES
-    ('2026-02-07', 0, '補班（補 02-20 春節調整放假）', 'DGPA 2026 辦公日曆表');
+-- === office_calendar 不在 migration 種任何資料（codex r4 HIGH：避免半套年度陷阱）===
+-- 為何不種：calendar_year_loaded 已改為「該年逐日完整（365/366）才算已載入」。若 migration 種「部分
+-- 年度」（如舊版僅種 ~17 天 2026 假日），會落入「半套被當已載入、缺的國定假日靜默退回週末預設＝
+-- 末日順延誤算」的陷阱（且舊版 2026-02-07 補班還是錯誤臆測）。故 migration 只建「空表 + index」。
+-- 正解：辦公日曆一律由 import_office_calendar.py 吃官方來源 JSON（行政院人事行政總處辦公日曆 /
+--   ruyut TaiwanCalendar）**整年逐日**匯入（匯入器強制單一年度逐日完整、雙重把關）。
+--   部署步驟見 .claude/skills/legal-admin/references/privacy-deploy.md；
+--   測試以 tests/fixtures/taiwan_calendar_<年>.json 真實整年檔匯入（test_deadline_engine.py）。
+-- 未載入任何完整年度時，compute_deadline 對該年期限一律標 needs_manual_review（fail-toward、不靜默誤算）。

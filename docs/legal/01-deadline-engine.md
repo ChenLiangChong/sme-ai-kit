@@ -339,7 +339,7 @@ OS cron scan_deadlines.py 每日07:00
 ## 6. MVP vs 完整版 切割
 
 ### MVP（先做 — 證明「漏不掉」的核心價值）
-1. **DB**：`matters`（精簡：matter_no/title/court/status/lead_attorney/has_local_agent）+ `deadlines`（全欄）+ `office_calendar`（辦公日曆，import DGPA/ruyut JSON）。
+1. **DB**：`matters`（精簡：matter_no/title/court/status/lead_attorney/has_local_agent）+ `deadlines`（全欄）+ `office_calendar`（辦公日曆，部署用 `import_office_calendar.py` 吃 DGPA/ruyut TaiwanCalendar JSON **整年逐日**匯入、idempotent、強制單一年度完整覆蓋；migration 只建空表不種半套年度——半套會被 `calendar_year_loaded` 誤判已載入而靜默誤算，故「已載入＝該年列數達 365/366」）。
 2. **計算引擎 `compute_deadline`**：步驟 1~7 全做，在途支援三條路：`has_local_agent=true → 0`、「手動填 `in_transit_days`」、以及「無當地代理人 + 帶 `court_region`/`party_region` 查 `transit_period` 表」（`create_deadline` 已開這兩個可選參數；查得到→命中、查不到→`needs_manual_review` + 在途暫 0，fail-toward）。表的逐筆建檔/律師覆核留完整版。送達 normal + registered_deposit(+10) 先做；公示送達 public_domestic(+20)/public_foreign(+60) 為法定固定值、自動計算可辯護（**不標** `needs_manual_review`）；**僅囑託送達 commissioned**（依回證完成日、不確定）標 `needs_manual_review`（`_SERVICE_NEEDS_REVIEW` 只含 commissioned）。
 3. **種子資料**：上訴（民/刑/行/家 20日）+ 抗告（10日）+ 上訴理由書補提（20日）+ 訴願（30日）+ 支付命令異議（20日），各附 `statutory_basis` + 版本。
 4. **tools**：`create_matter` / `find_matter_by_party` / `create_deadline`（呼叫 compute_deadline 落欄）/ `mark_deadline_filed` / `mark_deadline_calendared`（回填行事曆 event_id）/ `list_deadlines` / `list_upcoming_deadlines` / `get_deadline`（含 calc_trace）。
