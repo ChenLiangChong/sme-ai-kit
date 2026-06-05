@@ -7,7 +7,9 @@
 
 ```
 丟檔案 → 你讀檔抽取（送達日+文書類型+教示天數）→ 推回 LINE 給人一鍵確認
-   → 確認後 create_deadline（引擎確定性算雙日期）→ 寫行事曆（去識別化）→ 回報
+   → 確認後 create_deadline（引擎確定性算雙日期）→ [需複核項] 律師 mark_deadline_reviewed
+   → screen_calendar_text 去識別化自檢 → 寫行事曆 → mark_deadline_calendared → 回報
+（事後發現填錯 → amend_deadline 重算+留痕，絕不手動改日期）
 ```
 
 ## 步驟 1：讀檔抽取（你做、但只抽事實、不算天數）
@@ -87,7 +89,12 @@ create_deadline(
 - **無當地代理人又要算在途** → 帶 `court_region` + `party_region`（如 `court_region="taipei"`, `party_region="kinmen"`）查在途表；查不到引擎標複核。
 - 回傳含 `internal_deadline`（盯這個）/ `statutory_deadline`（底線）/ `calc_trace`（逐步軌跡）。**回報給人時兩個日期都講、叫他盯內部期限。**
 
-入庫成功後 → 進 [calendar-sync.md](calendar-sync.md) 寫行事曆（去識別化）+ `mark_deadline_calendared` 回填 event_id。
+入庫成功後 → 進 [calendar-sync.md](calendar-sync.md) 寫行事曆（去識別化、寫前先 `screen_calendar_text` 自檢）+ `mark_deadline_calendared` 回填 event_id。
+
+## 步驟 4：律師覆核 + 事後修正（信任/稽核）
+
+- **`[需人工複核]` 的時限 → 律師看 `get_deadline` 的 `calc_trace` 確認無誤後 `mark_deadline_reviewed(deadline_id, reviewed_by="<律師>", note="<確認了什麼>")`**：解除複核旗標、轉成權威倒數（scan 不再標「未複核·非權威」）。逐筆具名、不可一鍵過；覆核（確認計算）≠ 遞交（`mark_deadline_filed`，書狀已送出）。
+- **送達日填錯 / 裁定天數讀錯 → `amend_deadline(deadline_id, reason="<為何改>", amended_by="<律師>", service_base_date=/statutory_days=/...)`**：引擎確定性重算雙日期、寫 `deadline_audit`（before/after 留痕）、自動通報主持律師、並**作廢原覆核**（改過要重新覆核）。只對未遞交（pending）時限有效。**絕不手動改日期、一律走 amend 重算**（反捏造）。查歷程用 `get_deadline_audit(deadline_id)`。
 
 ## 開庭通知（期日、不是期間）
 

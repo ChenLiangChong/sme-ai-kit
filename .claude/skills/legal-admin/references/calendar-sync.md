@@ -13,9 +13,11 @@
 
 **行事曆寫入是 agent 動作、走「現場配置的行事曆 MCP」**，不是 business-db 內建一個 Google client：
 
-1. 看現場配置了哪個行事曆 MCP（Google Calendar MCP？律所慣用的其他？）→ 用它的 `create_event` 建 event。
+1. 看現場配置了哪個行事曆 MCP（Google Calendar MCP？律所慣用的其他？）→ **建 event 前先呼叫 `screen_calendar_text(matter_id, proposed_text="<打算寫進 event 的標題+內文>", screened_by="<操作者>")` 做去識別化自檢**（命中當事人名→改用案件代號重寫；回「無法自檢·不可視為安全」→ client_name 空、人工確認後再寫）→ 通過後再用行事曆 MCP 的 `create_event`。
 2. 建完拿回傳的 `event_id` → `mark_deadline_calendared(deadline_id, calendar_event_id="<回傳id>", calendar_provider="google", marked_by="<操作者>")` 存回 `deadlines`，供每日彙整去重 / 後續更新對位。
 3. **現場沒有數位行事曆** → 退回只記內部 `deadlines` 表（系統內建行事曆視圖），等之後接 adapter。
+
+> **`screen_calendar_text` 是 advisory 不是保證**：外部行事曆 MCP 的實際寫入在我方 sandbox 外、本檢查攔不到，只能「比對已知當事人名 + 留底」。**絕不可向律師宣稱「保證不外流 / 不可能外流」**；寫前仍須自己確認文字已去識別化。事後可用 `privacy_audit(within_days, limit)` 掃我方 `interaction_log` 有無當事人名漏進紀錄（同樣只證我方紀錄、不證外部）。
 
 > **現場第一件事 = 確認律所實際用什麼行事曆**（Google？其他軟體？紙本/白板？）。核心 loop（文件→抽取→確認→deadlines 表→查詢→每日彙整）**不依賴**特定行事曆；行事曆只是「另一處顯示」。
 
