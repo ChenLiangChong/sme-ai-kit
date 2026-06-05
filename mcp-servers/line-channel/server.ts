@@ -17,7 +17,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { createHmac, randomBytes } from 'crypto'
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto'
 import { homedir } from 'os'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs'
 import { join } from 'path'
@@ -259,8 +259,12 @@ async function lineGetProfile(channelId: string, userId: string): Promise<{ disp
 }
 
 function verifySignature(body: string, signature: string, channelSecret: string): boolean {
+  // constant-time compare（codex 全專案審 LOW）：避免用 === 對簽章做提早返回的時序比較。
   const hash = createHmac('SHA256', channelSecret).update(body).digest('base64')
-  return hash === signature
+  const a = Buffer.from(hash)
+  const b = Buffer.from(signature || '')
+  if (a.length !== b.length) return false  // timingSafeEqual 要求等長；長度不符直接拒
+  return timingSafeEqual(a, b)
 }
 
 // === MCP Server（Channel 模式）===
@@ -373,7 +377,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           const d = getDb()
           const col = isGroup ? 'group_id' : 'user_id'
           d.run(
-            `UPDATE line_messages SET status = 'replied', reply_content = ? WHERE ${col} = ? AND channel_id = ? AND direction = 'inbound' AND status IN ('queued', 'processed')`,
+            // per-message ack（codex 全專案審 MED）：只結清「最舊一筆」pending inbound（FIFO、
+            // agent 序列處理先進先出），不再一次標掉全部——避免把同聊天室稍後到、尚未處理的訊息
+            // 被前一次回覆提前標成 replied 而漏處理。
+            `UPDATE line_messages SET status = 'replied', reply_content = ? WHERE id = (
+               SELECT id FROM line_messages WHERE ${col} = ? AND channel_id = ?
+               AND direction = 'inbound' AND status IN ('queued', 'processed')
+               ORDER BY id ASC LIMIT 1)`,
             [text.slice(0, 200), chatId, chId]
           )
         } catch (e) {
@@ -401,7 +411,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           const d = getDb()
           const col = isGroupFlex ? 'group_id' : 'user_id'
           d.run(
-            `UPDATE line_messages SET status = 'replied' WHERE ${col} = ? AND channel_id = ? AND direction = 'inbound' AND status IN ('queued', 'processed')`,
+            // per-message ack（codex 全專案審 MED）：FIFO 只結清最舊一筆 pending inbound
+            `UPDATE line_messages SET status = 'replied' WHERE id = (
+               SELECT id FROM line_messages WHERE ${col} = ? AND channel_id = ?
+               AND direction = 'inbound' AND status IN ('queued', 'processed')
+               ORDER BY id ASC LIMIT 1)`,
             [chatId, chId]
           )
         } catch (e) {
@@ -440,8 +454,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           const d = getDb()
           const isGroupMark = chatId.startsWith('C') || chatId.startsWith('R')
           const col = isGroupMark ? 'group_id' : 'user_id'
+          // per-message ack（codex 全專案審 MED）：FIFO 只結清最舊一筆 queued（agent 每回合處理
+          // 一則訊息、以 reply 或 mark_read 結束之），不掃掉處理期間新到、尚未看過的訊息。
           const result = d.run(
-            `UPDATE line_messages SET status = 'processed' WHERE ${col} = ? AND channel_id = ? AND direction = 'inbound' AND status = 'queued'`,
+            `UPDATE line_messages SET status = 'processed' WHERE id = (
+               SELECT id FROM line_messages WHERE ${col} = ? AND channel_id = ?
+               AND direction = 'inbound' AND status = 'queued'
+               ORDER BY id ASC LIMIT 1)`,
             [chatId, chId]
           )
           clearActiveRequest()
@@ -597,13 +616,14 @@ async function notifyAll(notification: { method: string; params: Record<string, 
 
 const profileCache = new Map<string, string>()
 
-if (portAlreadyInUse) {
-  // 另一個 instance 已有 webhook server，連上它的 IPC broadcast
-  process.stderr.write(`line-channel: port ${WEBHOOK_PORT} 已有另一個 instance，連線 IPC 接收廣播\n`)
-
-  let ipcBuffer = ''
-
-  function connectIpc(): void {
+// IPC client：連到 owner 的 broadcast socket 接收 webhook 事件。兩條路會用到——
+// ① 啟動時偵測 port 已被佔（portAlreadyInUse）；② owner 選舉 TOCTOU：本以為沒人、Bun.serve
+// 綁 port 卻失敗（被別 instance 搶先），退回當 client、不再 stranding（codex 全專案審 MED）。
+let ipcBuffer = ''
+let ipcConnected = false
+function connectIpc(): void {
+  if (ipcConnected) return
+  ipcConnected = true
     Bun.connect({
       unix: IPC_SOCKET_PATH,
       socket: {
@@ -632,6 +652,7 @@ if (portAlreadyInUse) {
         },
         close(socket) {
           process.stderr.write('line-channel: IPC 斷線，3 秒後重連\n')
+          ipcConnected = false
           setTimeout(connectIpc, 3000)
         },
         error(socket, err) {
@@ -640,10 +661,13 @@ if (portAlreadyInUse) {
       },
     }).catch(() => {
       process.stderr.write('line-channel: IPC 連線失敗，3 秒後重試\n')
+      ipcConnected = false
       setTimeout(connectIpc, 3000)
     })
-  }
+}
 
+if (portAlreadyInUse) {
+  process.stderr.write(`line-channel: port ${WEBHOOK_PORT} 已有另一個 instance，連線 IPC 接收廣播\n`)
   connectIpc()
 } else {
   try {

@@ -26,26 +26,82 @@ THREADS_API = "https://graph.threads.net/v1.0"
 
 
 # ── Helpers ─────────────────────────────────────────────
+# 統一的請求逾時（秒）；上游卡住時不讓單一 tool 阻塞整個 MCP。
+_HTTP_TIMEOUT = 12
+
+
+def _platform_error(platform: str) -> dict:
+    """產生不含 token / URL / 英文底層訊息的中文 business error。"""
+    return {"error": f"{platform} 連線失敗，請稍後再試或確認帳號授權狀態。"}
+
+
+def _do_request(platform, method, url, params, json_data=None):
+    """送出請求並把 transport / 非 JSON / HTTP 錯誤正規化成中文 business error。
+
+    回傳 dict：成功時為上游 JSON，失敗時為 {"error": "中文訊息"}。
+    一律不外露 token、URL 或底層英文例外字串。
+    """
+    try:
+        r = requests.request(
+            method, url, params=params, json=json_data, timeout=_HTTP_TIMEOUT
+        )
+    except requests.RequestException:
+        # timeout / 連線中斷 / DNS 等：不外露底層細節
+        return _platform_error(platform)
+
+    # HTTP 失敗（4xx / 5xx）：嘗試從上游取錯誤碼當安全標籤，不外露原文
+    if r.status_code >= 400:
+        code = None
+        try:
+            body = r.json()
+            if isinstance(body, dict):
+                err = body.get("error")
+                if isinstance(err, dict):
+                    code = err.get("code")
+        except ValueError:
+            pass
+        if code is not None:
+            return {"error": f"{platform} 請求失敗（錯誤碼 {code}），請確認帳號授權或參數。"}
+        return {"error": f"{platform} 請求失敗（HTTP {r.status_code}），請稍後再試。"}
+
+    # 非 JSON 回應
+    try:
+        body = r.json()
+    except ValueError:
+        return _platform_error(platform)
+
+    # 上游回 2xx 但帶 error 物件（部分 Graph API 行為）
+    if isinstance(body, dict) and isinstance(body.get("error"), dict):
+        code = body["error"].get("code")
+        if code is not None:
+            return {"error": f"{platform} 回報錯誤（錯誤碼 {code}），請確認帳號授權或參數。"}
+        return {"error": f"{platform} 回報錯誤，請確認帳號授權或參數。"}
+
+    return body
+
+
+def _is_error(data) -> bool:
+    """判斷 helper 回傳是否為正規化後的錯誤（用來阻止合成假數據）。"""
+    return isinstance(data, dict) and "error" in data
+
+
 def _fb_request(method, endpoint, params=None, json_data=None):
     params = params or {}
     params["access_token"] = FB_TOKEN
     url = f"{FB_API}/{endpoint}"
-    r = requests.request(method, url, params=params, json=json_data)
-    return r.json()
+    return _do_request("Facebook", method, url, params, json_data)
 
 def _ig_request(method, endpoint, params=None, json_data=None):
     params = params or {}
     params["access_token"] = IG_TOKEN
     url = f"{IG_API}/{endpoint}"
-    r = requests.request(method, url, params=params, json=json_data)
-    return r.json()
+    return _do_request("Instagram", method, url, params, json_data)
 
 def _threads_request(method, endpoint, params=None):
     params = params or {}
     params["access_token"] = THREADS_TOKEN
     url = f"{THREADS_API}/{endpoint}"
-    r = requests.request(method, url, params=params)
-    return r.json()
+    return _do_request("Threads", method, url, params)
 
 
 # ═══════════════════════════════════════════════════════
@@ -56,24 +112,26 @@ def _threads_request(method, endpoint, params=None):
 def get_all_profiles() -> dict:
     """一次取得 Facebook、Instagram、Threads 三個平台的個人資料。"""
     result = {}
+    # helper 已把所有錯誤正規化成中文 business error dict；
+    # 仍以 try/except 兜底任何非預期例外，避免單一平台拖垮整個工具。
     try:
         result["facebook"] = _fb_request("GET", FB_PAGE_ID, {
             "fields": "id,name,about,description,website,phone,emails,category,fan_count,followers_count,cover,picture"
         })
-    except Exception as e:
-        result["facebook"] = {"error": str(e)}
+    except Exception:
+        result["facebook"] = _platform_error("Facebook")
     try:
         result["instagram"] = _ig_request("GET", IG_ACCOUNT_ID, {
             "fields": "id,username,name,biography,website,profile_picture_url,followers_count,follows_count,media_count"
         })
-    except Exception as e:
-        result["instagram"] = {"error": str(e)}
+    except Exception:
+        result["instagram"] = _platform_error("Instagram")
     try:
         result["threads"] = _threads_request("GET", "me", {
             "fields": "id,username,name,threads_profile_picture_url,threads_biography"
         })
-    except Exception as e:
-        result["threads"] = {"error": str(e)}
+    except Exception:
+        result["threads"] = _platform_error("Threads")
     return result
 
 
@@ -81,25 +139,27 @@ def get_all_profiles() -> dict:
 def get_all_posts() -> dict:
     """一次取得 Facebook、Instagram、Threads 三個平台的最新貼文。"""
     result = {}
+    # helper 已把所有錯誤正規化成中文 business error dict；
+    # 仍以 try/except 兜底任何非預期例外，避免單一平台拖垮整個工具。
     try:
         result["facebook"] = _fb_request("GET", f"{FB_PAGE_ID}/posts", {
             "fields": "id,message,created_time,full_picture,permalink_url"
         })
-    except Exception as e:
-        result["facebook"] = {"error": str(e)}
+    except Exception:
+        result["facebook"] = _platform_error("Facebook")
     try:
         result["instagram"] = _ig_request("GET", f"{IG_ACCOUNT_ID}/media", {
             "fields": "id,media_type,media_url,permalink,caption,timestamp,like_count,comments_count",
             "limit": "25"
         })
-    except Exception as e:
-        result["instagram"] = {"error": str(e)}
+    except Exception:
+        result["instagram"] = _platform_error("Instagram")
     try:
         result["threads"] = _threads_request("GET", "me/threads", {
             "fields": "id,text,timestamp,media_type,shortcode,permalink,is_quote_post"
         })
-    except Exception as e:
-        result["threads"] = {"error": str(e)}
+    except Exception:
+        result["threads"] = _platform_error("Threads")
     return result
 
 
@@ -213,18 +273,25 @@ def fb_get_comments(post_id: str) -> dict:
 def fb_get_likes(post_id: str) -> dict:
     """取得貼文按讚數。"""
     data = _fb_request("GET", post_id, {"fields": "likes.summary(true)"})
+    if _is_error(data):
+        return data
     return {"count": data.get("likes", {}).get("summary", {}).get("total_count", 0)}
 
 @mcp.tool()
 def fb_get_shares(post_id: str) -> dict:
     """取得貼文分享數。"""
     data = _fb_request("GET", post_id, {"fields": "shares"})
+    if _is_error(data):
+        return data
+    # 注意：貼文無分享時 Graph API 不回 shares 欄位，視為 0（與上游錯誤區分）
     return {"count": data.get("shares", {}).get("count", 0)}
 
 @mcp.tool()
 def fb_get_fan_count() -> dict:
     """取得粉絲專頁粉絲數。"""
     data = _fb_request("GET", FB_PAGE_ID, {"fields": "fan_count"})
+    if _is_error(data):
+        return data
     return {"fan_count": data.get("fan_count", 0)}
 
 # @mcp.tool()
