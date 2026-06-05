@@ -181,27 +181,46 @@ else
     ok "非 git repo 或 .githooks 目錄不存在、跳過"
 fi
 
-# ── 8. 上報投遞保證層（cron flusher、決策 #177）───────────
-# 主管上報「品質層」是 business-db commit 後即時起的 claude -p；此 cron 是「保證層」：
-# 每 2 分確定性掃 pending_escalations 補送 claude -p 漏的/掛的（status 協調、retry/failed 終態）。
+# ── 8. cron：上報保證層 + 律所時限「漏不掉」三支（缺一支都留靜默失敗破口）──────
+# 上報「品質層」是 business-db commit 後即時起的 claude -p；以下 cron 是「保證層 / 時間驅動」：
+#   - flush_escalations：每 2 分確定性掃 pending_escalations 補送 claude -p 漏的/掛的。
+#   - scan_deadlines：每日掃 pending 時限 → 命中提醒節點/逾期即上報（同時落 heartbeat 證明在跑）。
+#   - scan_heartbeat（#H1 watchdog）：每 2h 自證活著 + 偵測 scan_deadlines 失聯 → scan_stalled 上報。
+#   - scan_unconfirmed_intake（#H2）：每 4h 跟催「抽出但人忘了確認入庫」的待確認暫存。
+# 後三支是「漏期=執業過失」的核心防線；以前只在 privacy-deploy.md 當手動 crontab、操作者易漏 → 改自動裝。
 
-step "安裝上報投遞保證層（cron flusher）"
+step "安裝 cron（上報保證層 + 時限掃描/哨兵/跟催）"
 
-FLUSH_MARKER="SME-AI-Kit escalation flusher"
-FLUSH_LINE="*/2 * * * * SME_DB_PATH=$DB $VENV/bin/python3 $ROOT/mcp-servers/business-db/flush_escalations.py >> $ROOT/data/flush.log 2>&1"
-if command -v crontab >/dev/null 2>&1; then
-    if crontab -l 2>/dev/null | grep -q "$FLUSH_MARKER"; then
-        ok "cron flusher 已存在、不重複加"
-    elif ( crontab -l 2>/dev/null; echo "# === $FLUSH_MARKER（保證層）：每 2 分掃 pending_escalations 確定性投遞 ==="; echo "$FLUSH_LINE" ) | crontab -; then
-        ok "cron flusher 已安裝（每 2 分、log: data/flush.log）"
+# 冪等安裝一行 cron（marker 出現在註解行、用來去重；重跑不重複加）。
+add_cron() {
+    local marker="$1" line="$2" desc="$3"
+    if crontab -l 2>/dev/null | grep -qF "$marker"; then
+        ok "$desc 已存在、不重複加"
+    elif ( crontab -l 2>/dev/null; echo "# === $marker ==="; echo "$line" ) | crontab -; then
+        ok "$desc 已安裝"
     else
-        err "crontab 寫入失敗、請手動加一行：$FLUSH_LINE"
+        err "crontab 寫入失敗、請手動加一行：$line"
     fi
+}
+
+if command -v crontab >/dev/null 2>&1; then
+    add_cron "SME-AI-Kit escalation flusher" \
+        "*/2 * * * * SME_DB_PATH=$DB $VENV/bin/python3 $ROOT/mcp-servers/business-db/flush_escalations.py >> $ROOT/data/flush.log 2>&1" \
+        "上報投遞保證層 flusher（每 2 分、log: data/flush.log）"
+    add_cron "SME-AI-Kit deadline scanner" \
+        "0 7 * * * SME_DB_PATH=$DB $VENV/bin/python3 $ROOT/mcp-servers/business-db/scan_deadlines.py >> $ROOT/data/scan.log 2>&1" \
+        "時限掃描 scan_deadlines（每日 07:00、落 heartbeat、log: data/scan.log）"
+    add_cron "SME-AI-Kit deadline heartbeat watchdog" \
+        "17 */2 * * * SME_DB_PATH=$DB $VENV/bin/python3 $ROOT/mcp-servers/business-db/scan_heartbeat.py >> $ROOT/data/heartbeat.log 2>&1" \
+        "健康哨兵 watchdog scan_heartbeat（每 2 小時、#H1、log: data/heartbeat.log）"
+    add_cron "SME-AI-Kit unconfirmed intake reminder" \
+        "37 */4 * * * SME_DB_PATH=$DB $VENV/bin/python3 $ROOT/mcp-servers/business-db/scan_unconfirmed_intake.py >> $ROOT/data/intake.log 2>&1" \
+        "待確認跟催 scan_unconfirmed_intake（每 4 小時、#H2、log: data/intake.log）"
     if [[ "$IS_LINUX" == true ]] && ! pgrep -x cron >/dev/null 2>&1 && ! pgrep -x crond >/dev/null 2>&1; then
-        err "cron daemon 沒在跑 → 保證層不會觸發。啟動：sudo service cron start（WSL 建議 systemctl enable --now cron）"
+        err "cron daemon 沒在跑 → 上述 cron 全不會觸發（時限不會自動倒數、哨兵也不會報）。啟動：sudo service cron start（WSL 建議 systemctl enable --now cron）"
     fi
 else
-    err "找不到 crontab → 上報只剩 claude -p 品質層、無確定性保證層；請手動定時跑 mcp-servers/business-db/flush_escalations.py"
+    err "找不到 crontab → 上報保證層 + 時限掃描/哨兵/跟催都不會自動跑；請手動定時跑 mcp-servers/business-db/{flush_escalations,scan_deadlines,scan_heartbeat,scan_unconfirmed_intake}.py"
 fi
 
 # ── 完成 ──────────────────────────────────────────────

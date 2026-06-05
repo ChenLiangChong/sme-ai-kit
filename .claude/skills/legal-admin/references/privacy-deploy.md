@@ -27,13 +27,17 @@
   ```
   整年逐日匯入、idempotent 可重跑、來源記在 `source` 欄。**務必與人事行政總處官方對賬**（反捏造：填錯假日＝算錯期限）。未載入年度的時限引擎會標 `needs_manual_review`（末日順延算不準）——這是保護、但別讓律師天天踩，每年初記得補次年度。
 - [ ] **種 boss 收件人**：每日提醒/逾期上報的收件人走 `resolve_escalation_target`（coalesce 到 boss/全所）。確認有一個可達的收件身份（`company.boss_line_id` 或 floor-map `escalation_target`），否則 enqueue 會留 pending 沒人收。
-- [ ] **cron 設定（三支、缺一個都會留靜默失敗破口）**：進 crontab、分鐘數錯開避免同時搶鎖；cron 在 host 跑、不受 LINE-runtime sandbox 管（讀得到 DB）：
+- [ ] **cron 設定（`install.sh` 已自動裝四支、缺一支都留靜默失敗破口）**：`install.sh` §8 用 `add_cron` 冪等裝 `flush_escalations`（每 2 分）+ `scan_deadlines`（每日 07:00）+ `scan_heartbeat`（#H1、每 2h）+ `scan_unconfirmed_intake`（#H2、每 4h），分鐘數已錯開、重跑不重複。cron 在 host 跑、不受 LINE-runtime sandbox 管（讀得到 DB）。**部署只需確認 cron daemon 有在跑**（`install.sh` 會 `pgrep` 檢查、沒跑會 err）：
   ```
-  # 主：每日掃 pending 時限 → 命中提醒節點/逾期即上報（同時落 heartbeat 證明在跑）
+  # 確認已裝（4 行 SME-AI-Kit 標記）：
+  crontab -l | grep SME-AI-Kit
+  # WSL 啟動 cron daemon（沒跑則上述 cron 全不觸發）：
+  sudo service cron start    # 或 systemctl enable --now cron
+  ```
+  手動 fallback（`crontab` 不可用 / 要自訂時段時，路徑換絕對路徑）：
+  ```
   0  7   * * *  SME_DB_PATH=/abs/data/business.db /abs/.venv/bin/python3 /abs/mcp-servers/business-db/scan_deadlines.py        >> /abs/data/scan.log 2>&1
-  # 哨兵 watchdog（#H1）：每 2h 自證活著 + 偵測上面那支失聯 → scan_stalled 上報（人沒開 Claude 也跑）
   17 */2  * * *  SME_DB_PATH=/abs/data/business.db /abs/.venv/bin/python3 /abs/mcp-servers/business-db/scan_heartbeat.py       >> /abs/data/heartbeat.log 2>&1
-  # 待確認跟催（#H2）：每 4h 催「抽出但人忘了確認入庫」的 stage_deadline_intake 暫存
   37 */4  * * *  SME_DB_PATH=/abs/data/business.db /abs/.venv/bin/python3 /abs/mcp-servers/business-db/scan_unconfirmed_intake.py >> /abs/data/intake.log 2>&1
   ```
   **為何要 `scan_heartbeat.py`（第二支極小 cron）**：`scan_deadlines.py` 若靜默掛掉，時限停止倒數且沒人知＝漏期根因。watchdog 是另一支幾乎不會自己壞的進程，互為 dead-man：被監看的掛了→watchdog 上報；watchdog 掛了→全權限開機 readout 反過來標「watchdog 失聯」（門檻常數 `SCAN_STALE_HOURS`/`WATCHDOG_STALE_HOURS` 在 `shared/deadlines.py`、勿在他處另寫）。`flush_escalations.py`（每 2 分、投遞保證層）見 CLAUDE.md〈上報（escalation）機制〉。
