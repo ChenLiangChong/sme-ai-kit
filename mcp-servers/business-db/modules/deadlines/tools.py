@@ -113,6 +113,8 @@ def create_deadline(
     escalation_lead_days: str = "",
     created_by: str = "",
     confirm_intake_id: int = 0,
+    period_unit: str = "day",
+    period_value: int = 0,
 ) -> str:
     """建立時限（deadline）並由 service 層確定性計算法定/內部雙日期。
 
@@ -128,6 +130,14 @@ def create_deadline(
     觸發語，但 statutory_days **絕不回填**——裁定期間是法院在裁定當下載明（「於本裁定送達後 ○ 日內補正」），
     律師必須讀裁定填 ○ 日；statutory_basis 填補正裁定文號（非法條）。凡最終 period_type=court_set 一律
     強制 needs_manual_review（天數純人讀、無固定法定種子可交叉驗證＝反捏造風險最高，須律師覆核）。
+
+    消滅時效類（type='limitation' 或 statute_125/126/127/197_2y/197_10y、period_unit='year'/'month'）：
+    與訴訟期間根本不同——期間是「年/月」（用 period_value 非 statutory_days）、依民§121 曆法（相當日
+    之前一日/無相當日→該月末日）+ §123 連續依曆，**不可硬轉天數**（閏年）；起算點是民§128「請求權可
+    行使時」＝法律判斷（非送達日這種確定事實）→ service_base_date 填「請求權可行使日」、**一律強制人工
+    複核**；無在途、無送達加算、不適用回復原狀。§197 侵權是「雙時鐘」（知悉起2年 statute_197_2y + 行為
+    時起10年 statute_197_10y）→ 各建一筆、各帶不同起算日（不自動雙建）。statute_* 種子自動回填
+    period_unit/period_value/period_type/basis/描述；起算日仍須律師給。
 
     Args:
         matter_id: 所屬案件 ID（必填）
@@ -161,6 +171,10 @@ def create_deadline(
         confirm_intake_id: 對應的「待確認暫存」id（先 stage_deadline_intake 暫存、人確認後入庫時帶回）。
             >0 時本次入庫成功會同 tx 關閉該待確認跟催 backlog（不再被 scan_unconfirmed_intake 催）；
             0=不對位（無暫存的直接入庫）。查無/已非待確認不擋入庫、僅在回覆註記
+        period_unit: 期間單位 day（預設、日數路徑、讀 statutory_days）/ year / month（消滅時效曆法路徑、
+            讀 period_value、依民§121）。statute_* 種子會自動帶；自訂消滅時效須明確指定 year/month
+        period_value: 年/月期間數（period_unit=year/month 時必填且 > 0，如 §125=15、§126=5、§127/§197=2）。
+            period_unit=day 時忽略（期間數仍讀 statutory_days）
     """
     return service.create_deadline(
         matter_id=matter_id,
@@ -186,6 +200,8 @@ def create_deadline(
         escalation_lead_days=escalation_lead_days,
         created_by=created_by,
         confirm_intake_id=confirm_intake_id,
+        period_unit=period_unit,
+        period_value=period_value,
     )
 
 

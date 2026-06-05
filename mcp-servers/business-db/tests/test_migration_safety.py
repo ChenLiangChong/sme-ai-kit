@@ -432,6 +432,12 @@ check("legal: deadlines CHECK period_type enum",
       "peremptory" in dl_schema and "court_set" in dl_schema)
 check("legal: deadlines CHECK status enum",
       "pending" in dl_schema and "filed" in dl_schema and "missed" in dl_schema)
+# 消滅時效（migration 015）：period_unit/period_value 兩欄（ALTER ADD COLUMN，不在 CREATE sql 文字、
+# 用 PRAGMA table_info 驗）。year/month 期間走 §121 曆法、day 維持讀 statutory_days（向後相容）。
+_dl_cols = {r[1] for r in conn.execute("PRAGMA table_info(deadlines)")}
+check("legal(消滅時效): deadlines 有 period_unit + period_value 欄（migration 015）",
+      "period_unit" in _dl_cols and "period_value" in _dl_cols,
+      detail=str(sorted(_dl_cols)))
 
 # index 落地（含 partial WHERE status='pending'）
 lindexes = {r[0] for r in conn.execute(

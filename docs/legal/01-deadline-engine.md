@@ -126,6 +126,8 @@ CREATE INDEX IF NOT EXISTS idx_deadlines_matter ON deadlines(matter_id);
 
 **裁定期間強制複核安全網**（`COURT_SET_PERIODS`，與固定天數種子 `STATUTORY_PERIODS` 分開的獨立表）：限期補正（`type='correction'`）等裁定期間，天數由法院在裁定當下載明、**非法定固定值**——`COURT_SET_PERIODS` 只登記 `period_type='court_set'` / `severity` / 描述 / 觸發語 / 裁定文號提示，**絕不含 `statutory_days`**（律師必讀裁定填、引擎不回填不預設；上訴 20 日寫死在法律可回填，補正期間是法院個案訂的、回填＝臆測）。`create_deadline` 凡最終 `period_type='court_set'` 一律強制 `needs_manual_review`：裁定天數純人輸入、無固定法定種子可交叉驗證，是反捏造風險最高一類，calc_trace 留「裁定所定期間強制複核」理由。缺天數 / 裁定文號 → 給「讀裁定」針對性提示擋下、不以 0 硬算。漏補正＝駁回起訴，小所最高頻時限之一。
 
+**消滅時效（年/月期間，`type='limitation'` / `LIMITATION_PERIODS`，migration 015 加 `period_unit`/`period_value`）**：與訴訟「日數」期間根本不同。期間是「年」（民§125=15 / §126=5 / §127=2 / §197=2+10），依民§121「以年/月定期間→以最後之年/月與起算日『相當日之前一日』為末日；無相當日（閏日/月末）→該月末日」+ §123「連續計算依曆」，**不可硬轉天數**（閏年會差、反捏造；自實作 `_statute_period_end`、不引入 dateutil）。`compute_deadline` 走獨立 year/month 分支：無在途、無送達加算（民§128 自請求權可行使時直接起算）、不適用回復原狀。起算點是民§128「請求權可行使時」＝**法律判斷**（非送達日這種確定事實；§197 侵權還含主觀「知悉時」）→ `create_deadline` 對 `period_unit in (year, month)` 一律強制 `needs_manual_review`、起算日（`service_base_date`）由律師輸入。§122 末日順延於消滅時效見解分歧 → 引擎不臆測順延、依曆末日為準（爭議包進強制複核、律師個案決定）。§197 雙時鐘（知悉2年 `statute_197_2y` + 行為10年 `statute_197_10y`）各建一筆、不自動雙建（避免系統替律師判斷「知悉時」）。`period_type` 仍用 `statutory`（不改既有 CHECK），靠 `period_unit` 觸發曆法分支。
+
 ---
 
 ## 2. 計算流程（依序、可直接寫成程式）

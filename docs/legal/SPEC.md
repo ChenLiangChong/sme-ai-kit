@@ -84,6 +84,8 @@ HITL + cron 自帶兩個結構盲區，補上才稱得上「漏不掉」：
 2. **教示比對** —— 建時限帶 `stated_period_days`（判決書「上訴教示」所載天數）→ 與引擎採用的 `statutory_days` 交叉比對，不符即標複核（揪出 type 選錯或屬特別期間）。引擎不靜默蓋過判決書教示。
 3. **裁定期間強制複核** —— 限期補正（`type='correction'`）等裁定期間，天數由法院在裁定當下載明、非法定固定值（獨立 `COURT_SET_PERIODS` 表只登記 court_set/severity/描述/裁定文號提示，**絕不含 statutory_days**、律師必讀裁定填）。`create_deadline` 凡 `period_type='court_set'` 一律強制 `needs_manual_review`（純人輸入、無固定法定種子可交叉驗證＝風險最高）；缺天數/裁定文號給「讀裁定」針對性提示擋下、不以 0 硬算。漏補正＝駁回起訴、小所最高頻時限之一。
 
+**消滅時效（請求權時效，`type='limitation'` / `statute_125/126/127/197_2y/197_10y`）**：與訴訟期間根本不同——期間是「年」（§125=15/§126=5/§127=2/§197=2+10），依民§121 曆法（相當日之前一日、無相當日→該月末日）+ §123 連續依曆、**不可硬轉天數**；起算點是民§128「請求權可行使時」＝法律判斷（非送達日這種確定事實）→ 一律強制人工複核、起算日（請求權可行使時/侵權知悉時）律師輸入；無在途、無送達加算、不適用回復原狀。§197 侵權是雙時鐘（知悉起2年 + 行為時起10年）各建一筆。引擎加 `period_unit`/`period_value`（migration 015）走 year/month 分支；§122 末日順延於消滅時效見解分歧 → 引擎不臆測、依曆末日為準（包進強制複核）。
+
 ## 行事曆寫入（calendar-agnostic）與 skill
 
 - **行事曆寫入是 agent 動作、走現場配置的行事曆 MCP**（Google 或律所慣用的其他），非 business-db 內建特定 client。流程：agent 用行事曆 MCP `create_event`（去識別化：只放案件代號 + 期限類型 + 日期）→ `mark_deadline_calendared(deadline_id, calendar_event_id, calendar_provider)` 把回傳 id 存回 `deadlines`（供去重 / 後續對位）。`deadlines` 新增 `calendar_event_id`/`calendar_provider`/`calendar_synced_at` 三欄（migration 013）。

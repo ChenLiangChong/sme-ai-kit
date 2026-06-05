@@ -956,6 +956,240 @@ _rok = _svcSN.mark_deadline_calendared(
 _assert("機密: 全權限層回填正常(gate 不誤擋全權限)", "已回填行事曆對位" in _rok)
 
 
+# === 消滅時效（type=limitation / period_unit=year/month）：民§121 曆法 + §128 起算點法律判斷 ===
+# 與訴訟期間根本不同：期間是「年/月」（依民§121 相當日之前一日/無相當日月末、§123 連續依曆、不可硬轉
+# 天數＝閏年）、起算點是民§128「請求權可行使時」＝法律判斷 → 一律強制複核；無在途、無送達加算、不適用
+# 回復原狀。§197 侵權雙時鐘（知悉2年 + 行為10年）。§122 末日順延於消滅時效見解分歧→引擎不臆測順延。
+print("\n=== 消滅時效：年/月期間 民§121 曆法 ===")
+import datetime as _dtL  # noqa: E402
+from shared.deadlines import _statute_period_end, LIMITATION_PERIODS, limitation_type  # noqa: E402
+
+# (純函式) §121 相當日之前一日 / 無相當日→該月末日（但書）
+_assert("§121: 2010-01-02+15年→相當日前一日 2025-01-01",
+        _statute_period_end(_dtL.date(2010, 1, 2), "year", 15) == (_dtL.date(2025, 1, 1), False))
+_assert("§121但書: 2008-02-29(閏)+1年→無相當日→月末 2009-02-28",
+        _statute_period_end(_dtL.date(2008, 2, 29), "year", 1) == (_dtL.date(2009, 2, 28), True))
+_assert("§121但書: 2010-01-31+1月→無相當日→月末 2010-02-28",
+        _statute_period_end(_dtL.date(2010, 1, 31), "month", 1) == (_dtL.date(2010, 2, 28), True))
+_assert("§121: 2026-06-15+5年→相當日前一日 2031-06-14",
+        _statute_period_end(_dtL.date(2026, 6, 15), "year", 5) == (_dtL.date(2031, 6, 14), False))
+
+# (compute 純函式) §125 15年 golden + 消滅時效特性
+_lim125 = compute_deadline(
+    period_type="statutory", statutory_days=0, statutory_basis="民法§125",
+    service_type="normal", service_base_date="2010-01-01", has_local_agent=True,
+    period_unit="year", period_value=15, db=db)
+_assert("§125: 無 error", "error" not in _lim125, detail=str(_lim125.get("error")))
+_assert("§125: 起算2010-01-02(§120翌日)、末日2025-01-01(§121相當日前一日)",
+        _lim125["start_date"] == "2010-01-02" and _lim125["statutory_deadline"] == "2025-01-01")
+_assert("§125: 強制 needs_manual_review（§128 起算點法律判斷）", _lim125["needs_manual_review"] is True)
+_assert("§125: 無在途（§128 直接起算）", _lim125["in_transit_days"] == 0)
+_assert("§125: 不適用回復原狀（recovery_window 空）", _lim125["recovery_window"] == {})
+_assert("§125: period_unit/value 回傳 year/15",
+        _lim125["period_unit"] == "year" and _lim125["period_value"] == 15)
+_assert("§125: calc_trace 含§121 + §122見解分歧 + §128法律判斷",
+        any("§121" in t for t in _lim125["calc_trace"])
+        and any("§122" in t and "見解分歧" in t for t in _lim125["calc_trace"])
+        and any("§128" in t for t in _lim125["calc_trace"]))
+
+# §122 不自動順延：末日落週六仍依曆、不推次一上班日（消滅時效見解分歧→不臆測）
+# 2010-01-04→start 2010-01-05、+15年→相當日2025-01-05、前一日2025-01-04（週六）
+_lim_wkend = compute_deadline(
+    period_type="statutory", statutory_days=0, statutory_basis="民法§125",
+    service_type="normal", service_base_date="2010-01-04", has_local_agent=True,
+    period_unit="year", period_value=15, db=db)
+_assert("§122不自動順延: 末日落週六2025-01-04 仍依曆、不順延至下週一",
+        _lim_wkend["statutory_deadline"] == "2025-01-04", detail=_lim_wkend["statutory_deadline"])
+
+# 種子完整性 + 三表零重疊
+_assert("種子: §126=5年 §127=2年 §197雙=2+10",
+        LIMITATION_PERIODS["statute_126"]["period_value"] == 5
+        and LIMITATION_PERIODS["statute_127"]["period_value"] == 2
+        and LIMITATION_PERIODS["statute_197_2y"]["period_value"] == 2
+        and LIMITATION_PERIODS["statute_197_10y"]["period_value"] == 10)
+_assert("種子: 消滅時效 period_unit 皆 year、period_type 皆 statutory",
+        all(v["period_unit"] == "year" and v["period_type"] == "statutory"
+            for v in LIMITATION_PERIODS.values()))
+_assert("種子: LIMITATION 與 STATUTORY/COURT_SET 三表零重疊",
+        not (set(LIMITATION_PERIODS) & set(STATUTORY_PERIODS))
+        and not (set(LIMITATION_PERIODS) & set(_CSP)))
+
+# (service 端到端) §125 種子回填 + 落欄
+_midL = db.execute(
+    "INSERT INTO matters (matter_no, title, status, has_local_agent, confidential) "
+    "VALUES ('2026-lim-001', '消滅時效案', 'open', 1, 0)").lastrowid
+db.commit()
+_rL = _svcSN.create_deadline(
+    matter_id=_midL, type="statute_125", description="", trigger_event="請求權可行使",
+    service_base_date="2010-01-01", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=-1, in_transit_days=0,
+    court_region="", party_region="", buffer_days=30, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="王律師")
+_assert("§125端到端: 建立成功 + 需人工複核提示", "已建立" in _rL and "需人工複核" in _rL, detail=_rL[:120])
+_dL = db.execute(
+    "SELECT type,period_unit,period_value,statutory_days,period_type,severity,"
+    "statutory_deadline,needs_manual_review,in_transit_days,recovery_window "
+    "FROM deadlines WHERE matter_id=? ORDER BY id DESC LIMIT 1", (_midL,)).fetchone()
+_assert("§125端到端: period_unit=year/period_value=15/period_type=statutory 落欄",
+        _dL and _dL["period_unit"] == "year" and _dL["period_value"] == 15
+        and _dL["period_type"] == "statutory")
+_assert("§125端到端: 末日2025-01-01、強制複核、無在途、recovery空",
+        _dL and _dL["statutory_deadline"] == "2025-01-01" and _dL["needs_manual_review"] == 1
+        and _dL["in_transit_days"] == 0 and _dL["recovery_window"] == "{}")
+
+# §197 雙時鐘：2年(知悉)+10年(行為) 各建一筆、不同起算日
+_svcSN.create_deadline(
+    matter_id=_midL, type="statute_197_2y", description="", trigger_event="知有損害",
+    service_base_date="2024-03-01", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=-1, in_transit_days=0,
+    court_region="", party_region="", buffer_days=14, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="王律師")
+_svcSN.create_deadline(
+    matter_id=_midL, type="statute_197_10y", description="", trigger_event="侵權行為時",
+    service_base_date="2020-05-10", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=-1, in_transit_days=0,
+    court_region="", party_region="", buffer_days=30, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="王律師")
+_d197 = db.execute(
+    "SELECT type,period_value,service_base_date,statutory_deadline FROM deadlines "
+    "WHERE matter_id=? AND type LIKE 'statute_197%' ORDER BY id", (_midL,)).fetchall()
+_assert("§197雙時鐘: 建出兩筆(2年+10年)、起算日不同",
+        len(_d197) == 2 and {r["period_value"] for r in _d197} == {2, 10}
+        and len({r["service_base_date"] for r in _d197}) == 2,
+        detail=str([dict(r) for r in _d197]))
+_d197_map = {r["type"]: r["statutory_deadline"] for r in _d197}
+_assert("§197雙時鐘: 2年末日2026-03-01(start2024-03-02+2y前一日)、10年末日2030-05-10",
+        _d197_map.get("statute_197_2y") == "2026-03-01"
+        and _d197_map.get("statute_197_10y") == "2030-05-10", detail=str(_d197_map))
+
+# 防呆：limitation 改標 period_type → 拒；自訂 limitation 缺 period_value → 拒
+_rBadPt = _svcSN.create_deadline(
+    matter_id=_midL, type="statute_125", description="", trigger_event="x",
+    service_base_date="2010-01-01", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="peremptory", severity="", has_local_agent=-1,
+    in_transit_days=0, court_region="", party_region="", buffer_days=0, stated_period_days=0,
+    document_date="", assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="x")
+_assert("防呆: statute_125 被改標 peremptory → ERROR（消滅時效法律性質固定）",
+        "ERROR" in _rBadPt, detail=_rBadPt[:80])
+_rNoPv = _svcSN.create_deadline(
+    matter_id=_midL, type="limitation", description="自訂時效", trigger_event="可行使",
+    service_base_date="2020-01-01", service_type="normal", statutory_days=0, statutory_basis="民法§125",
+    statutory_basis_version="", period_type="statutory", severity="", has_local_agent=-1,
+    in_transit_days=0, court_region="", party_region="", buffer_days=0, stated_period_days=0,
+    document_date="", assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="x",
+    period_unit="year", period_value=0)
+_assert("防呆: 自訂 limitation 缺 period_value → ERROR", "ERROR" in _rNoPv, detail=_rNoPv[:80])
+
+# 向後相容：日數路徑（上訴 day）完全不受 period_unit 影響（預設 day、走原邏輯）
+_compat = compute_deadline(
+    period_type="peremptory", statutory_days=20, statutory_basis="民訴§440",
+    service_type="normal", service_base_date="2026-03-02", has_local_agent=True, buffer_days=1, db=db)
+_assert("向後相容: day 路徑 statutory_days=20 仍走原邏輯（末日2026-03-23、period_unit=day）",
+        _compat["statutory_deadline"] == "2026-03-23" and _compat["period_unit"] == "day"
+        and _compat["period_value"] is None, detail=_compat["statutory_deadline"])
+
+# === 消滅時效 codex HIGH/MED 修補回歸 ===
+print("\n=== 消滅時效 codex 修補回歸 ===")
+# (HIGH-1) generic type='limitation' 不可走 day 路徑 → ERROR（否則消滅時效被當訴訟期間算成 N 日）
+_rGenDay = _svcSN.create_deadline(
+    matter_id=_midL, type="limitation", description="自訂時效", trigger_event="可行使",
+    service_base_date="2020-01-01", service_type="normal", statutory_days=20, statutory_basis="民法§125",
+    statutory_basis_version="", period_type="statutory", severity="", has_local_agent=-1,
+    in_transit_days=0, court_region="", party_region="", buffer_days=0, stated_period_days=0,
+    document_date="", assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="x")
+_assert("修補HIGH1: generic limitation + period_unit=day → ERROR（不可走日數路徑）",
+        "ERROR" in _rGenDay and "year" in _rGenDay, detail=_rGenDay[:90])
+
+# (HIGH-2) seed period_unit/period_value 不可竄改：statute_125 改 month / 改 5 → ERROR
+_rTamperU = _svcSN.create_deadline(
+    matter_id=_midL, type="statute_125", description="", trigger_event="可行使",
+    service_base_date="2020-01-01", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=-1, in_transit_days=0,
+    court_region="", party_region="", buffer_days=0, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="x",
+    period_unit="month", period_value=0)
+_assert("修補HIGH2: statute_125 period_unit 改 month → ERROR", "ERROR" in _rTamperU, detail=_rTamperU[:80])
+_rTamperV = _svcSN.create_deadline(
+    matter_id=_midL, type="statute_125", description="", trigger_event="可行使",
+    service_base_date="2020-01-01", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=-1, in_transit_days=0,
+    court_region="", party_region="", buffer_days=0, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="x",
+    period_unit="year", period_value=5)
+_assert("修補HIGH2: statute_125 period_value 改 5 → ERROR", "ERROR" in _rTamperV, detail=_rTamperV[:80])
+
+# (HIGH-3) limitation 不吃 service_type 加算：純函式 public_domestic 應被忽略（末日不+20）
+_lim_svc = compute_deadline(
+    period_type="statutory", statutory_days=0, statutory_basis="民法§125",
+    service_type="public_domestic", service_base_date="2020-01-01", has_local_agent=True,
+    period_unit="year", period_value=15, db=db)
+_assert("修補HIGH3: 純函式 limitation 不吃 service_type 加算（public_domestic→末日仍2035-01-01）",
+        _lim_svc["statutory_deadline"] == "2035-01-01", detail=_lim_svc["statutory_deadline"])
+_svcSN.create_deadline(
+    matter_id=_midL, type="statute_127", description="", trigger_event="可行使",
+    service_base_date="2024-06-01", service_type="public_foreign", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=-1, in_transit_days=0,
+    court_region="", party_region="", buffer_days=0, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="x")
+_dSvc = db.execute(
+    "SELECT service_type FROM deadlines WHERE matter_id=? AND type='statute_127' ORDER BY id DESC LIMIT 1",
+    (_midL,)).fetchone()
+_assert("修補HIGH3: service 端 limitation 強制 service_type=normal 落欄（不留 public_foreign）",
+        _dSvc and _dSvc["service_type"] == "normal", detail=str(dict(_dSvc)) if _dSvc else "None")
+
+# (HIGH-4) statutory_days 不重載期間數 + get_deadline 顯示「N 年」非「N 日」
+_dSD = db.execute(
+    "SELECT id,statutory_days,period_value FROM deadlines WHERE matter_id=? AND type='statute_125' "
+    "ORDER BY id LIMIT 1", (_midL,)).fetchone()
+_assert("修補HIGH4: §125 statutory_days 不被重載成15（year 路徑留0、period_value=15）",
+        _dSD and _dSD["statutory_days"] == 0 and _dSD["period_value"] == 15,
+        detail=str(dict(_dSD)) if _dSD else "None")
+_getL = _svcSN.get_deadline(_dSD["id"])
+_assert("修補HIGH4: get_deadline 顯示「法定期間：15 年」、不出現「15 日」",
+        "15 年" in _getL and "15 日" not in _getL,
+        detail=str([l for l in _getL.split(chr(10)) if "法定期間" in l]))
+
+# (MED-5) §197 建立回覆含「另一本時鐘」提醒
+_r197note = _svcSN.create_deadline(
+    matter_id=_midL, type="statute_197_2y", description="", trigger_event="知悉",
+    service_base_date="2025-01-01", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=-1, in_transit_days=0,
+    court_region="", party_region="", buffer_days=0, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="x")
+_assert("修補MED5: §197_2y 回覆提醒另一本10年時鐘（雙時鐘防漏）",
+        "statute_197_10y" in _r197note and "雙時鐘" in _r197note, detail=_r197note[-120:])
+
+# (MED-6) month 路徑端到端（§121但書：1/31+1月→無相當日→該月末日）
+_lim_month = compute_deadline(
+    period_type="statutory", statutory_days=0, statutory_basis="自訂月期間",
+    service_type="normal", service_base_date="2026-01-30", has_local_agent=True,
+    period_unit="month", period_value=1, db=db)
+_assert("修補MED6: month 路徑 2026-01-30→start01-31+1月→無相當日→月末2026-02-28（§121但書）",
+        _lim_month["statutory_deadline"] == "2026-02-28", detail=_lim_month["statutory_deadline"])
+
+# (R2-HIGH) generic limitation 不可改標 period_type（消滅時效必 statutory、非 peremptory/directory）
+_rGenPt = _svcSN.create_deadline(
+    matter_id=_midL, type="limitation", description="自訂時效", trigger_event="可行使",
+    service_base_date="2020-01-01", service_type="normal", statutory_days=0, statutory_basis="民法§125",
+    statutory_basis_version="", period_type="peremptory", severity="", has_local_agent=-1,
+    in_transit_days=0, court_region="", party_region="", buffer_days=0, stated_period_days=0,
+    document_date="", assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="x",
+    period_unit="year", period_value=15)
+_assert("修補R2-HIGH: generic limitation 改標 peremptory → ERROR（消滅時效 period_type 必 statutory）",
+        "ERROR" in _rGenPt and "statutory" in _rGenPt, detail=_rGenPt[:90])
+
+# (R2-MED) period_value 非數字 → 正規化後可審計 ERROR（不炸 ValueError）
+_rBadPv = _svcSN.create_deadline(
+    matter_id=_midL, type="limitation", description="自訂時效", trigger_event="可行使",
+    service_base_date="2020-01-01", service_type="normal", statutory_days=0, statutory_basis="民法§125",
+    statutory_basis_version="", period_type="statutory", severity="", has_local_agent=-1,
+    in_transit_days=0, court_region="", party_region="", buffer_days=0, stated_period_days=0,
+    document_date="", assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="x",
+    period_unit="year", period_value="abc")
+_assert("修補R2-MED: period_value 非數字 → 正規化後可審計 ERROR（不炸 ValueError）",
+        "ERROR" in _rBadPv, detail=_rBadPv[:80])
+
+
 db.close()
 
 
