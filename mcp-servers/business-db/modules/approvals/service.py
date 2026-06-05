@@ -36,6 +36,7 @@ def create_in_tx(
     business_unit: str = "",
     ttl_hours: int = _APPROVAL_TTL_HOURS,
     escalate: bool = True,
+    actor_user_id: str = "",
 ) -> int:
     """Caller-managed-tx 版的 create approval。回傳 approval_id。
 
@@ -68,7 +69,7 @@ def create_in_tx(
                 "requester": requester or "system",
                 "business_unit": business_unit or None,
             },
-            actor_user_id="",
+            actor_user_id=actor_user_id,
             business_unit=business_unit,
         )
     return approval_id
@@ -161,6 +162,17 @@ def gate_check(
             return GateResult(
                 error=f"ERROR: 審核 #{approved_id} 不存在、未核准或已使用"
             )
+        # 過期保護（HITL 契約）：已核准但逾 expires_at 者不可消費。expires_at 為
+        # NULL = 永不過期。逾期者同 tx 標成 'expired'（caller-managed tx、本 helper
+        # 不開 tx）並 fail-closed 回中文錯誤，避免「過期 approval 仍被 gate 放行」。
+        if _is_expired(approval["expires_at"]):
+            repository.mark_expired(db, approved_id)
+            return GateResult(
+                error=(
+                    f"ERROR: 審核 #{approved_id} 已過期"
+                    f"（{approval['expires_at']}），請重新建立審核請求"
+                )
+            )
         mismatch = verify_resume_params(approval, expected_action, verify_fields)
         if mismatch:
             return GateResult(error=mismatch)
@@ -195,6 +207,19 @@ def gate_consume(
         )
 
 
+def _is_expired(expires_at, now: datetime | None = None) -> bool:
+    """expires_at 是否已過。NULL / 空 = 永不過期（回 False）；無法解析的時戳
+    保守視為「未過期」（回 False、不誤殺合法 approval、過期判定寧鬆勿冤殺、真正
+    的 gate 仍有 resume_params + consumed_at 把關）。"""
+    if not expires_at:
+        return False
+    try:
+        expires_dt = datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return False
+    return (now or datetime.now()) > expires_dt
+
+
 def expire_stale_approvals(db) -> int:
     """過期 waiting approvals：超過 expires_at 仍 waiting → 改 status='expired'。
 
@@ -219,14 +244,28 @@ def resolve(approval_id: int, decision: str, decided_by: str) -> str:
     if decision not in ("approved", "rejected"):
         return "ERROR: decision 必須是 approved 或 rejected"
 
-    with transaction() as db:
+    # mode='immediate'（#race）：簽核是 read-then-write（先 SELECT waiting、再 UPDATE）。
+    # 預設 deferred 下兩個簽核人可同時讀到 waiting、後者覆寫前者＝雙重簽核 / 狀態漂移 /
+    # 稽核不可信。開頭搶 write lock 序列化簽核；mark_decided 再以 CAS WHERE 收口、確保
+    # 即使搶過 lock 也只有第一筆命中。
+    with transaction(mode="immediate") as db:
         # 簽核權限（#24）：非全權限層（部門 session）必須由 line-channel 驗證過的 manager 以上
         # 操作者執行——防部門基層員工冒名核准財務/敏感審核。actor 走 active-request（agent 不可
-        # 偽造）、查不到當前 LINE 脈絡 → __unverified__ → _check_permission 擋下。全權限層
+        # 偽造）、查不到當前 LINE 脈絡 → __unverified__ → writer_or_error 擋下。全權限層
         # （confidential / operator＝老闆自己的可信 session）放行、不卡終端機直打的核准。
         from shared.floor_policy import is_full_access
         if not is_full_access():
-            from shared.auth import _check_permission
+            # actor fail-closed：非全權限層忽略 caller 傳入的 decided_by，改用 line-channel
+            # verified 員工名（writer_or_error 回傳）寫進 approver 與 interaction_log，
+            # 防 manager 冒充「老闆」完成簽核與審計（#audit）。
+            from shared.auth import _check_permission, writer_or_error
+            verified_by, actor_err = writer_or_error(db, "")
+            if actor_err:
+                return (
+                    f"ERROR: 無權簽核審核 #{approval_id}"
+                    f"（{actor_err.removeprefix('ERROR: ')}）。"
+                    "簽核需 manager 以上、且須由本人 LINE 操作。"
+                )
             perm_err = _check_permission(db, "", "manager")
             if perm_err:
                 return (
@@ -234,6 +273,9 @@ def resolve(approval_id: int, decision: str, decided_by: str) -> str:
                     f"（{perm_err.removeprefix('ERROR: ')}）。"
                     "簽核需 manager 以上、且須由本人 LINE 操作。"
                 )
+            # 受限層：簽核身份一律用 verified 名、忽略 agent / caller 傳入
+            decided_by = verified_by
+
         approval = repository.get_waiting(db, approval_id)
         if not approval:
             expired = repository.get_expired(db, approval_id)
@@ -241,19 +283,17 @@ def resolve(approval_id: int, decision: str, decided_by: str) -> str:
                 return f"ERROR: 審核 #{approval_id} 已過期，請重新建立審核請求"
             return f"ERROR: 找不到待審核項目 #{approval_id}"
 
-        if approval["expires_at"]:
-            try:
-                expires_dt = datetime.strptime(approval["expires_at"], "%Y-%m-%d %H:%M:%S")
-                if datetime.now() > expires_dt:
-                    repository.mark_expired(db, approval_id)
-                    return (
-                        f"ERROR: 審核 #{approval_id} 已過期（{approval['expires_at']}），"
-                        f"請重新建立審核請求"
-                    )
-            except (ValueError, TypeError):
-                pass
+        if _is_expired(approval["expires_at"]):
+            repository.mark_expired(db, approval_id)
+            return (
+                f"ERROR: 審核 #{approval_id} 已過期（{approval['expires_at']}），"
+                f"請重新建立審核請求"
+            )
 
-        repository.mark_decided(db, approval_id, decision, decided_by, _now())
+        # CAS：WHERE status='waiting' AND decided_at IS NULL，rowcount=0 表已被別人處理
+        rowcount = repository.mark_decided(db, approval_id, decision, decided_by, _now())
+        if rowcount == 0:
+            return f"ERROR: 審核 #{approval_id} 已被處理"
         repository.insert_interaction_log(
             db,
             actor=decided_by,

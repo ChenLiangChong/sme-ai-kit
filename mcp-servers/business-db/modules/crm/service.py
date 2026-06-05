@@ -2,6 +2,8 @@
 
 層次邊界：transaction ownership 在這層，repository 不 commit。
 """
+import sqlite3
+
 from shared.business_units import _validate_business_unit
 from shared.db import get_db, transaction
 
@@ -217,50 +219,49 @@ def set_entity_terms(
     discount_rate: float,
     payment_terms: str,
 ) -> str:
+    # business_unit 是 customer_entity_terms 的唯一鍵之一、空字串會寫出懸空覆寫規則 →
+    # 寫入前 fail-closed 擋下（空 BU / 不存在的 BU 一律回 ERROR、不靜默寫入）。
+    business_unit = (business_unit or "").strip()
+    if not business_unit:
+        return "ERROR: 事業體條件必須指定 business_unit（不可為空）"
+
     with transaction() as db:
         cust = repository.get_customer_name(db, customer_id)
         if not cust:
             return f"ERROR: 找不到客戶 #{customer_id}"
 
+        entity = db.execute(
+            "SELECT id FROM business_entities WHERE id = ?", (business_unit,)
+        ).fetchone()
+        if not entity:
+            return (
+                f"ERROR: 事業體 '{business_unit}' 未登錄"
+                f"（請先 register_business_entity），不可建立懸空的事業體條件"
+            )
+
         existing = repository.get_entity_terms(db, customer_id, business_unit)
+        dr = discount_rate if discount_rate >= 0 else (
+            existing["discount_rate"] if existing else 0
+        )
+        pt = payment_terms or (existing["payment_terms"] if existing else "net30")
 
-        if existing:
-            updates: list[str] = []
-            params: list = []
-            if discount_rate >= 0:
-                updates.append("discount_rate = ?"); params.append(discount_rate)
-            if payment_terms:
-                updates.append("payment_terms = ?"); params.append(payment_terms)
-            if not updates:
-                return "沒有指定要更新的欄位。"
-            repository.safe_update_entity_terms(
-                db, customer_id, business_unit, updates, params
-            )
-            detail = (
-                f"更新 {cust['name']} 在 {business_unit} 條件："
-                f"{', '.join(u.split(' = ')[0] for u in updates)}"
-            )
-            repository.insert_interaction_log(
-                db,
-                actor="system",
-                action="customer_terms_updated",
-                target_type="customer",
-                target_id=customer_id,
-                detail=detail,
-                business_unit=business_unit,
-            )
-            return f"已更新 {cust['name']} 在 {business_unit} 的條件"
+        # 原子 upsert：表有 UNIQUE(customer_id, business_unit)，
+        # 先 SELECT 再 INSERT/UPDATE 在併發下會撞唯一鍵 raise（整 tx rollback、違反「回 ERROR 不 raise」）。
+        # 改 INSERT ... ON CONFLICT DO UPDATE，並仍攔 IntegrityError 轉 ERROR 字串（雙保險）。
+        try:
+            repository.upsert_entity_terms(db, customer_id, business_unit, dr, pt)
+        except sqlite3.IntegrityError as e:
+            return f"ERROR: 無法設定事業體條件（{e}）"
 
-        dr = discount_rate if discount_rate >= 0 else 0
-        pt = payment_terms or "net30"
-        repository.insert_entity_terms(db, customer_id, business_unit, dr, pt)
+        action = "customer_terms_updated" if existing else "customer_terms_set"
         repository.insert_interaction_log(
             db,
             actor="system",
-            action="customer_terms_set",
+            action=action,
             target_type="customer",
             target_id=customer_id,
             detail=f"設定 {cust['name']} 在 {business_unit} 條件：折扣 {dr*100:.0f}%，付款 {pt}",
             business_unit=business_unit,
         )
-    return f"已設定 {cust['name']} 在 {business_unit} 的條件：折扣 {dr*100:.0f}%，付款 {pt}"
+    verb = "已更新" if existing else "已設定"
+    return f"{verb} {cust['name']} 在 {business_unit} 的條件：折扣 {dr*100:.0f}%，付款 {pt}"

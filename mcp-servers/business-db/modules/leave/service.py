@@ -12,6 +12,7 @@ HITL 簽核走 modules.approvals.service 的 gate_check / gate_consume / create_
 import json
 from datetime import datetime
 
+from shared.auth import _check_permission, writer_or_error
 from shared.db import _now, get_db, transaction
 from shared.utils import _build_guidance
 
@@ -301,6 +302,24 @@ def approve_leave(
         return "ERROR: decided_by 必填（誰核准）"
 
     with transaction(mode="immediate") as db:
+        # 核准請假＝簽核動作，須 manager 以上（#24 / #10 對齊）。非全權限層（floored 部門
+        # session）由系統取 line-channel verified user_id 驗權（agent 自填 decided_by 無效、
+        # 防基層員工冒名核准）；operator / 全權限層（老闆可信 session）放行。
+        from shared.floor_policy import is_full_access
+        if not is_full_access():
+            perm_err = _check_permission(db, "", "manager")
+            if perm_err:
+                return (
+                    f"ERROR: 無權核准請假 #{leave_request_id}"
+                    f"（{perm_err.removeprefix('ERROR: ')}）。核准需 manager 以上、"
+                    "且須由本人 LINE 操作。"
+                )
+        # actor fail-closed（#10 對齊）：floored session 取 line-channel verified 員工名、
+        # 忽略 agent 自填 decided_by；查無 verified LINE 脈絡 → 拒寫。可信名才寫 DB / audit。
+        decided_by, err = writer_or_error(db, decided_by)
+        if err:
+            return err
+
         leave_req = repository.get_leave_request(db, leave_request_id)
         if not leave_req:
             return f"ERROR: 找不到請假申請 #{leave_request_id}"
@@ -308,6 +327,18 @@ def approve_leave(
             return (
                 f"ERROR: 請假申請 #{leave_request_id} 狀態是 {leave_req['status']!r}、"
                 "無法核准（必須是 pending）"
+            )
+        if not approved_id:
+            return (
+                f"ERROR: 核准請假 #{leave_request_id} 必須提供 approved_id"
+                "（已核准的 approval id、供 gate 比對 resume_params）"
+            )
+        # approval 1:1 綁定（codex MED）：approved_id 必須等於這筆 leave_request 建立時綁定的
+        # approval_id；否則另造一張內容相同的 approved approval 即可消費同一筆請假、破壞稽核關聯。
+        if leave_req["approval_id"] != approved_id:
+            return (
+                f"ERROR: approved_id #{approved_id} 跟請假申請 #{leave_request_id} "
+                f"綁定的 approval_id #{leave_req['approval_id']} 不符、拒絕核准"
             )
 
         gate = approvals_service.gate_check(
@@ -401,6 +432,20 @@ def reject_leave(
         return "ERROR: decided_by 必填"
 
     with transaction(mode="immediate") as db:
+        # 駁回請假＝簽核動作，比照 approve_leave 須 manager 以上 + actor fail-closed。
+        from shared.floor_policy import is_full_access
+        if not is_full_access():
+            perm_err = _check_permission(db, "", "manager")
+            if perm_err:
+                return (
+                    f"ERROR: 無權駁回請假 #{leave_request_id}"
+                    f"（{perm_err.removeprefix('ERROR: ')}）。駁回需 manager 以上、"
+                    "且須由本人 LINE 操作。"
+                )
+        decided_by, err = writer_or_error(db, decided_by)
+        if err:
+            return err
+
         leave_req = repository.get_leave_request(db, leave_request_id)
         if not leave_req:
             return f"ERROR: 找不到請假申請 #{leave_request_id}"
@@ -468,6 +513,13 @@ def cancel_leave(leave_request_id: int, reason: str, actor: str) -> str:
         return "ERROR: actor 必填（誰取消）"
 
     with transaction(mode="immediate") as db:
+        # actor fail-closed（#10 對齊）：floored session 取 line-channel verified 員工名、
+        # 忽略 agent 自填 actor；查無 verified LINE 脈絡 → 拒寫。取消不強制 manager（員工可
+        # 自行取消自己的請假）、但寫進 DB / audit 的必須是可信名。
+        actor, err = writer_or_error(db, actor)
+        if err:
+            return err
+
         leave_req = repository.get_leave_request(db, leave_request_id)
         if not leave_req:
             return f"ERROR: 找不到請假申請 #{leave_request_id}"
@@ -476,6 +528,30 @@ def cancel_leave(leave_request_id: int, reason: str, actor: str) -> str:
                 f"ERROR: 請假申請 #{leave_request_id} 狀態是 {leave_req['status']!r}、"
                 "無法取消（必須是 pending 或 approved）"
             )
+
+        # 殭屍審核作廢（codex MED）：取消 pending 請假時，其關聯 approval 可能仍 waiting
+        # （未 resolve）或 approved-but-unconsumed（已 resolve 但還沒 approve_leave）。若不
+        # 處理，會留下可被 resolve_approval / approve_leave 消費的孤兒審核。同 tx 把未消費的
+        # 關聯 approval 標成 expired（resolve 需 waiting、gate_consume 需 approved+未消費、
+        # 兩者皆擋下），並留 audit。approved 狀態的請假其 approval 已 consumed、不在此列。
+        zombie_msg = ""
+        if leave_req["status"] == "pending" and leave_req["approval_id"]:
+            approval = approvals_repo.get(db, leave_req["approval_id"])
+            if approval and approval["status"] in ("waiting", "approved") \
+                    and approval["consumed_at"] is None:
+                approvals_repo.mark_expired(db, leave_req["approval_id"])
+                repository.insert_interaction_log(
+                    db,
+                    actor=actor,
+                    action="leave_approval_voided",
+                    target_id=leave_request_id,
+                    detail=(
+                        f"取消請假 #{leave_request_id} 連帶作廢關聯審核 "
+                        f"#{leave_req['approval_id']}（原狀態 {approval['status']}）"
+                    ),
+                    business_unit=_employee_business_unit(db, leave_req["employee_id"]),
+                )
+                zombie_msg = f"（關聯審核 #{leave_req['approval_id']} 已作廢）"
 
         restore_msg = ""
         if leave_req["status"] == "approved":
@@ -523,7 +599,7 @@ def cancel_leave(leave_request_id: int, reason: str, actor: str) -> str:
         result_msg = (
             f"請假申請 #{leave_request_id} 已取消（{actor}）"
             f"\n{emp_label} {leave_req['type_name']} "
-            f"{leave_req['days']:g} 天 {restore_msg}"
+            f"{leave_req['days']:g} 天 {restore_msg}{zombie_msg}"
             + (f"\n取消原因：{reason}" if reason else "")
         )
 

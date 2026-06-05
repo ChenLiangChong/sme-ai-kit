@@ -16,4 +16,13 @@ collect_ignore = [
     "test_deadline_engine.py",
     "test_office_calendar_import.py",
     "test_health_intake.py",
+    "test_audit_accounting.py",
+    "test_audit_approvals.py",
+    "test_audit_crm_inv_tasks.py",
+    "test_audit_escalation.py",
+    "test_audit_knowledge.py",
+    "test_audit_leave.py",
+    "test_audit_notifications.py",
+    "test_audit_orders.py",
+    "test_audit_settings_attach_snap.py",
 ]

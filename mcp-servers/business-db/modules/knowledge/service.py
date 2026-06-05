@@ -11,7 +11,7 @@ import sqlite3
 from collections import OrderedDict, defaultdict
 from datetime import datetime, timedelta
 
-from shared.auth import _check_permission
+from shared.auth import _check_permission, _resolve_actor_label, writer_or_error
 from shared.business_units import _validate_business_unit
 from shared.db import _now, get_db, transaction
 from shared.utils import _like_param
@@ -45,12 +45,19 @@ def store_fact(
         return "ERROR: explicit 規則必須附上 source_quote（老闆的原話），不可省略"
 
     with transaction() as db:
+        # actor fail-closed（反捏造核心、#10）：在任何 business_rules 寫入「之前」解析可信寫入者。
+        # floored session 取 line-channel verified 員工名（忽略 agent 自填的 set_by）、operator 用傳入值；
+        # floored 但查無 verified LINE 脈絡 → 擋下。防員工偽造 set_by='老闆' + 假引言寫成「老闆指示」。
+        actor, err = writer_or_error(db, set_by)
+        if err:
+            return err
+
         like = _like_param(title)
         if business_unit:
             conflicts = db.execute(
                 "SELECT id, title, content FROM business_rules "
                 "WHERE category = ? AND superseded_by IS NULL "
-                "AND (business_unit = ? OR business_unit IS NULL) "
+                "AND (business_unit = ? OR business_unit IS NULL OR business_unit = '') "
                 "AND (title LIKE ? OR content LIKE ?)",
                 (category, business_unit, like, like),
             ).fetchall()
@@ -78,7 +85,7 @@ def store_fact(
             "(category, title, content, source_type, source_quote, set_by, business_unit, confidential) "
             "VALUES (?,?,?,?,?,?,?,?)",
             (category, title, content, source_type, source_quote.strip() or None,
-             set_by.strip() or None, business_unit or None, 1 if confidential else 0),
+             actor or None, business_unit or None, 1 if confidential else 0),
         )
         rule_id = cursor.lastrowid
 
@@ -86,7 +93,7 @@ def store_fact(
             "INSERT INTO interaction_log "
             "(actor, action, target_type, target_id, detail, business_unit) "
             "VALUES (?,?,?,?,?,?)",
-            (set_by or "system", "rule_created", "rule", rule_id,
+            (actor or "system", "rule_created", "rule", rule_id,
              f"[{category}] {title}", business_unit or None),
         )
 
@@ -122,7 +129,7 @@ def store_fact(
                     "INSERT INTO rule_relations "
                     "(rule_id_a, rule_id_b, relation_type, created_by) "
                     "VALUES (?,?,?,?)",
-                    (a, b, "related", set_by or "system"),
+                    (a, b, "related", actor or "system"),
                 )
                 linked.append(f"#{rid} {exists['title']}")
             except sqlite3.IntegrityError:
@@ -154,7 +161,7 @@ def query_knowledge(question: str, category: str, business_unit: str) -> str:
         if category and business_unit:
             bu_filter = (
                 "WHERE category = ? AND superseded_by IS NULL "
-                "AND (business_unit = ? OR business_unit IS NULL) "
+                "AND (business_unit = ? OR business_unit IS NULL OR business_unit = '') "
                 "AND (title LIKE ? OR content LIKE ?)"
             )
             params = [category, business_unit, like, like]
@@ -167,7 +174,7 @@ def query_knowledge(question: str, category: str, business_unit: str) -> str:
         elif business_unit:
             bu_filter = (
                 "WHERE superseded_by IS NULL "
-                "AND (business_unit = ? OR business_unit IS NULL) "
+                "AND (business_unit = ? OR business_unit IS NULL OR business_unit = '') "
                 "AND (title LIKE ? OR content LIKE ?)"
             )
             params = [business_unit, like, like]
@@ -245,44 +252,48 @@ def query_knowledge(question: str, category: str, business_unit: str) -> str:
                     results.append("\n## 相關規則（交叉引用）")
                     results.extend(items)
 
-        tasks = db.execute(
-            "SELECT id, title, description, assignee, status, due_date FROM tasks "
-            "WHERE title LIKE ? OR description LIKE ? LIMIT 5",
-            (like, like),
-        ).fetchall()
-        if tasks:
-            results.append("\n## 相關任務")
-            for t in tasks:
-                status_icon = {
-                    "pending": "[待處理]", "in_progress": "[進行中]",
-                    "done": "[已完成]", "cancelled": "[已取消]",
-                }.get(t["status"], "")
-                results.append(
-                    f"- {status_icon} [#{t['id']}] {t['title']} → {t['assignee'] or '未指派'}"
-                )
+        # 跨域營運資料（任務／客戶／庫存）這三段無 server-side BU 過濾（codex HIGH）：
+        # 非全權限層用知識工具就能撈到跨 BU 營運資料 = 越權。fail-safe 早退、只回知識規則段。
+        # （列級 BU 過濾 #11 尚未落地、在那之前一律 drop、不靠 caller 自帶 BU。）
+        if fa:
+            tasks = db.execute(
+                "SELECT id, title, description, assignee, status, due_date FROM tasks "
+                "WHERE title LIKE ? OR description LIKE ? LIMIT 5",
+                (like, like),
+            ).fetchall()
+            if tasks:
+                results.append("\n## 相關任務")
+                for t in tasks:
+                    status_icon = {
+                        "pending": "[待處理]", "in_progress": "[進行中]",
+                        "done": "[已完成]", "cancelled": "[已取消]",
+                    }.get(t["status"], "")
+                    results.append(
+                        f"- {status_icon} [#{t['id']}] {t['title']} → {t['assignee'] or '未指派'}"
+                    )
 
-        customers = db.execute(
-            "SELECT id, name, phone, tags, notes FROM customers "
-            "WHERE name LIKE ? OR notes LIKE ? OR tags LIKE ? LIMIT 5",
-            (like, like, like),
-        ).fetchall()
-        if customers:
-            results.append("\n## 相關客戶")
-            for c in customers:
-                results.append(f"- **{c['name']}** {c['phone'] or ''} {c['tags'] or ''}")
+            customers = db.execute(
+                "SELECT id, name, phone, tags, notes FROM customers "
+                "WHERE name LIKE ? OR notes LIKE ? OR tags LIKE ? LIMIT 5",
+                (like, like, like),
+            ).fetchall()
+            if customers:
+                results.append("\n## 相關客戶")
+                for c in customers:
+                    results.append(f"- **{c['name']}** {c['phone'] or ''} {c['tags'] or ''}")
 
-        inventory = db.execute(
-            "SELECT id, sku, name, current_stock, min_stock, unit FROM inventory "
-            "WHERE name LIKE ? OR sku LIKE ? OR category LIKE ? LIMIT 5",
-            (like, like, like),
-        ).fetchall()
-        if inventory:
-            results.append("\n## 相關庫存")
-            for i in inventory:
-                alert = " 注意：低於安全庫存" if i["current_stock"] <= i["min_stock"] else ""
-                results.append(
-                    f"- [{i['sku']}] {i['name']}: {i['current_stock']}{i['unit']}{alert}"
-                )
+            inventory = db.execute(
+                "SELECT id, sku, name, current_stock, min_stock, unit FROM inventory "
+                "WHERE name LIKE ? OR sku LIKE ? OR category LIKE ? LIMIT 5",
+                (like, like, like),
+            ).fetchall()
+            if inventory:
+                results.append("\n## 相關庫存")
+                for i in inventory:
+                    alert = " 注意：低於安全庫存" if i["current_stock"] <= i["min_stock"] else ""
+                    results.append(
+                        f"- [{i['sku']}] {i['name']}: {i['current_stock']}{i['unit']}{alert}"
+                    )
 
         if not results:
             return f"找不到與「{question}」相關的資料。"
@@ -310,12 +321,15 @@ def update_rule(
             return f"ERROR: 找不到有效規則 #{rule_id}（可能已被取代或不存在）"
 
         # Transactional flip：避免 idx_rules_unique_active 衝突
+        # 帶入 old["confidential"]（codex HIGH）：不帶會吃 migration 006 預設 0、
+        # 把原本機密規則降級成公開可查、連全權限層也誤洩。
         cursor = db.execute(
             "INSERT INTO business_rules "
-            "(category, title, content, source_type, source_quote, set_by, business_unit, superseded_by) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "(category, title, content, source_type, source_quote, set_by, business_unit, confidential, superseded_by) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             (old["category"], old["title"], new_content, old["source_type"],
-             old["source_quote"], old["set_by"], old["business_unit"], rule_id),
+             old["source_quote"], old["set_by"], old["business_unit"],
+             old["confidential"], rule_id),
         )
         new_id = cursor.lastrowid
         db.execute(
@@ -326,11 +340,14 @@ def update_rule(
             "UPDATE business_rules SET superseded_by = NULL WHERE id = ?", (new_id,)
         )
 
+        # 具名 actor（codex MED、#10）：已過 admin gate、audit 不再記 'system'，
+        # 用 _resolve_actor_label 寫 verified 操作者名（floored 取 verified 員工名、operator 用傳入值）。
+        audit_actor = _resolve_actor_label(db, actor_user_id)
         db.execute(
             "INSERT INTO interaction_log "
             "(actor, action, target_type, target_id, detail, business_unit) "
             "VALUES (?,?,?,?,?,?)",
-            ("system", "rule_updated", "rule", new_id,
+            (audit_actor, "rule_updated", "rule", new_id,
              f"取代 #{rule_id}，原因：{reason}", old["business_unit"]),
         )
 
@@ -1138,12 +1155,18 @@ def log_decision(
     linked = []
 
     with transaction() as db:
+        # actor fail-closed（反捏造核心、#10）：在任何 business_rules 寫入「之前」解析可信寫入者。
+        # 防員工偽造 set_by='老闆' + 假引言寫成正式決策。
+        actor, err = writer_or_error(db, set_by)
+        if err:
+            return err
+
         cur = db.execute(
             "INSERT INTO business_rules "
             "(category, title, content, source_type, source_quote, set_by, business_unit, confidential) "
             "VALUES ('decision_record', ?, ?, ?, ?, ?, ?, ?)",
             (title, reason, src_type, sq or None,
-             set_by or "system", business_unit or None, 1 if confidential else 0),
+             actor or "system", business_unit or None, 1 if confidential else 0),
         )
         new_id = cur.lastrowid
 
@@ -1176,7 +1199,7 @@ def log_decision(
                     "INSERT INTO rule_relations "
                     "(rule_id_a, rule_id_b, relation_type, created_by) "
                     "VALUES (?,?,?,?)",
-                    (a, b, "related", set_by or "system"),
+                    (a, b, "related", actor or "system"),
                 )
                 linked.append(f"#{rid} {exists['title']}")
             except sqlite3.IntegrityError:
@@ -1186,7 +1209,7 @@ def log_decision(
             "INSERT INTO interaction_log "
             "(actor, action, target_type, target_id, detail, business_unit) "
             "VALUES (?,?,?,?,?,?)",
-            (set_by or "system", "decision_logged", "rule", new_id, title,
+            (actor or "system", "decision_logged", "rule", new_id, title,
              business_unit or None),
         )
 

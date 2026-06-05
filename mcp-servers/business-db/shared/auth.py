@@ -14,27 +14,30 @@ _PERM_LEVEL = {"basic": 0, "manager": 1, "admin": 2}
 def _read_active_request(floor: str = ""):
     """讀 line-channel 每則驗簽後寫的 active-request（可信操作者來源）。
 
-    per-floor（決策 #164）：line-channel 依 target_floor 寫 active-request-<floor>.json，本 session 只讀
-    自己這層的，避免多層同時在線跨層覆蓋誤歸因。先試 per-floor 檔、fallback 舊全域檔（部署順序無關）。
-    此檔在 ~/.claude/channels/line 下、被 LINE-runtime 的 sandbox denyRead，agent 的 bash 碰不到、
-    也無 Write 權限 → 無法偽造；只有非 sandbox 的 MCP 進程讀得到。超過 10 分鐘視為過期（防 crash 殘留誤歸因）。
+    per-floor（決策 #164）：line-channel 依 target_floor 寫 active-request-<floor>.json，本 session **只讀
+    自己這層的**。此檔在 ~/.claude/channels/line 下、被 LINE-runtime 的 sandbox denyRead，agent 的 bash
+    碰不到、也無 Write 權限 → 無法偽造；只有非 sandbox 的 MCP 進程讀得到。
+
+    fail-closed 硬化（codex 全專案審 E-HIGH）：
+    - **floored session 不讀舊全域 active-request.json**——別層/舊請求殘留的全域檔會讓本層誤信他人 verified
+      user_id（無法回 __unverified__）。只信本層 per-floor 檔。
+    - `written_ms` **缺失即視為過期**（不再「有才檢查」）——少了寫入時戳就無法證明新鮮、寧可拒。
+    - 逾 10 分鐘過期（防 crash 殘留誤歸因）。
     """
     base = os.environ.get("LINE_STATE_DIR") or os.path.expanduser("~/.claude/channels/line")
-    candidates = []
     if floor:
-        candidates.append(os.path.join(base, f"active-request-{floor}.json"))
-    candidates.append(os.path.join(base, "active-request.json"))  # 舊全域、過渡相容
-    for path in candidates:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            continue
-        written_ms = data.get("written_ms", 0)
-        if written_ms and (time.time() * 1000 - written_ms) > 600_000:
-            continue
-        return data
-    return None
+        path = os.path.join(base, f"active-request-{floor}.json")  # 只信本層、無全域 fallback
+    else:
+        path = os.path.join(base, "active-request.json")  # 無 floor（過渡/測試）才讀全域
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    written_ms = data.get("written_ms", 0)
+    if not written_ms or (time.time() * 1000 - written_ms) > 600_000:
+        return None  # 缺時戳 or 逾 10 分鐘 → fail-closed 視為無效脈絡
+    return data
 
 
 def _resolve_trusted_actor(actor_user_id: str) -> str:
@@ -111,3 +114,18 @@ def _resolve_actor_label(db, actor_user_id: str) -> str:
         (resolved,),
     ).fetchone()
     return emp["name"] if emp else resolved
+
+
+def writer_or_error(db, actor_in):
+    """解析寫入者標籤並 fail-closed（共用版、對齊 #10；codex 全專案審 Group A）。
+
+    floored session 取 line-channel verified 員工名（忽略 agent 自填）、operator（無 SME_FLOOR）用傳入值；
+    floored 但查無 verified LINE 脈絡 → _resolve_actor_label 回 '__unverified__' → 拒絕寫入。
+    回 (actor_label, None) 表通過；回 (None, "ERROR: …") 表擋下。
+    **必須在任何 repository 寫入「之前」呼叫**——transaction() 對 return 字串仍會 commit、寫入後才擋擋不住。
+    """
+    a = _resolve_actor_label(db, actor_in)
+    if a == "__unverified__":
+        return None, ("ERROR: 無法驗證操作者身份（floored session 查無 verified LINE 脈絡）、"
+                      "為防偽造拒絕寫入；請從綁定的 LINE 帳號操作。")
+    return a, None

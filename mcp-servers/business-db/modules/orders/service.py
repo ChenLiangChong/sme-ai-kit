@@ -13,7 +13,7 @@ Codex P2.10 給的 5 條 checklist 全部落實：
 import json
 from datetime import datetime, timedelta
 
-from shared.auth import _check_permission
+from shared.auth import _check_permission, _resolve_actor_label, writer_or_error
 from shared.business_units import _get_approval_threshold, _validate_business_unit
 from shared.db import _now, get_db, transaction
 from shared.escalation import enqueue_escalation
@@ -59,14 +59,21 @@ def create_order(
     # 輸家不會白做 insert 再 rollback（codex LOW A 修法）。
     tx_mode = "immediate" if approved_id else "deferred"
     with transaction(mode=tx_mode) as db:
+        # actor fail-closed（codex 全專案審 MED）：floored session 不信任 caller 自填 created_by，
+        # 一律取 line-channel verified 員工名；floored 查無 verified 脈絡 → 擋下寫入。
+        # 解析後用 actor 寫 approval requester / interaction_log.actor，防偽造。
+        actor, actor_err = writer_or_error(db, created_by)
+        if actor_err:
+            return actor_err
+
         customer = repository.get_customer_for_order(db, customer_id)
         if not customer:
             return f"ERROR: 找不到客戶 #{customer_id}"
 
-        try:
-            items = json.loads(items_json) if isinstance(items_json, str) else items_json
-        except json.JSONDecodeError:
-            return "ERROR: items_json 格式錯誤，需要 JSON 陣列"
+        items_err = _validate_items_structure(items_json)
+        if items_err:
+            return items_err
+        items = json.loads(items_json) if isinstance(items_json, str) else items_json
 
         raw_total = sum(item.get("qty", 0) * item.get("price", 0) for item in items)
         terms_info = _get_customer_terms(db, customer_id, business_unit)
@@ -94,6 +101,8 @@ def create_order(
             # detail 的 resume_params 鍵需涵蓋上方 gate verify_fields（customer_id/items_json/
             # business_unit）→ 核准後依鎖定參數 create_order(approved_id=…) consume 必過。
             discount_note = f"（已含折扣 {discount*100:.0f}%）" if discount > 0 else ""
+            # actor fail-closed：requester 用 trusted actor label；actor_user_id 傳原始 caller 值
+            # 供 approval_pending 上報在 enqueue 當下蓋章來源（floored→re-resolve、operator→用傳入）。
             approval_id = approvals_service.create_in_tx(
                 db,
                 type_="purchase",
@@ -103,9 +112,10 @@ def create_order(
                     items_json=items_json,
                     notes=notes,
                     business_unit=business_unit,
-                    created_by=created_by,
+                    created_by=actor,
                 ),
-                requester=created_by or "system",
+                requester=actor,
+                actor_user_id=created_by,
                 business_unit=business_unit,
                 escalate=True,
             )
@@ -125,7 +135,7 @@ def create_order(
             items_json=json.dumps(items, ensure_ascii=False),
             business_unit=business_unit or None,
             notes=notes or None,
-            created_by=created_by or None,
+            created_by=actor or None,
             payment_terms=terms_info["payment_terms"],
             discount_applied=discount,
         )
@@ -153,7 +163,7 @@ def create_order(
 
         repository.insert_interaction_log(
             db,
-            actor=created_by or "system",
+            actor=actor or "system",
             action="order_created",
             target_type="order",
             target_id=order_id,
@@ -181,6 +191,37 @@ def create_order(
         reservation_notes=reservation_notes,
         bu_warn=bu_warn,
     )
+
+
+def _validate_items_structure(items_json) -> str | None:
+    """驗證 create_order 的 items_json 是 list[dict] 且 qty/price 為合法數值（codex 全專案審 LOW）。
+
+    原本只攔 JSONDecodeError，`{}`、`[1]`、`{"qty":"2"}` 會在後續 sum / .get 連鎖 raise（非
+    business ERROR）。這裡把結構/型別錯誤一律攔成 ERROR 中文字串、絕不 raise。
+    通過則回 None，由 caller 自行 json.loads（此處不回傳 parsed 值、維持原流程最小變動）。
+    """
+    try:
+        items = json.loads(items_json) if isinstance(items_json, str) else items_json
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return "ERROR: items_json 格式錯誤，需要 JSON 陣列"
+    if not isinstance(items, list):
+        return "ERROR: items_json 必須是 JSON 陣列（list），格式：[{\"sku\":...,\"qty\":...,\"price\":...}]"
+    if not items:
+        return "ERROR: items_json 不可為空，至少需要一項品項"
+    for idx, item in enumerate(items):
+        pos = idx + 1
+        if not isinstance(item, dict):
+            return f"ERROR: 第 {pos} 項品項格式錯誤，必須是物件（object）"
+        qty = item.get("qty", 0)
+        price = item.get("price", 0)
+        # bool 是 int subclass、明確擋避免 True 被當 1 通過
+        if isinstance(qty, bool) or not isinstance(qty, (int, float)):
+            return f"ERROR: 第 {pos} 項品項 qty={qty!r} 無效，必須是數字"
+        if isinstance(price, bool) or not isinstance(price, (int, float)):
+            return f"ERROR: 第 {pos} 項品項 price={price!r} 無效，必須是數字"
+        if qty < 0 or price < 0:
+            return f"ERROR: 第 {pos} 項品項 qty/price 不可為負數"
+    return None
 
 
 def _order_resume_detail(
@@ -599,21 +640,29 @@ def fulfill_order(order_id: int, partial_items_json: str) -> str:
         now = _now()
         repository.update_status(db, order_id, "shipped", now)
 
+        # codex 全專案審 HIGH：無論部分或完整出貨都把已出量寫回 items 的 shipped_qty。
+        # 完整出貨後 shipped_qty == qty → 後續再呼叫 fulfill_order 走 followup 分支時，
+        # _handle_followup_partial 算出剩餘量 0 → 回「已全部出貨完畢」、_validate_partial_ship_items
+        # 也擋下「已全數出貨完畢、無剩餘可補」，杜絕重複扣庫存 + 重複建應收。
+        all_items = _parse_items_json(order["items"])
+        shipped_skus = {si.get("sku"): si.get("qty", 0) for si in ship_items}
+        for ai in all_items:
+            sku = ai.get("sku", "")
+            if sku in shipped_skus:
+                ai["shipped_qty"] = ai.get("shipped_qty", 0) + shipped_skus[sku]
         if is_partial:
-            all_items = _parse_items_json(order["items"])
-            shipped_skus = {si.get("sku"): si.get("qty", 0) for si in ship_items}
-            for ai in all_items:
-                sku = ai.get("sku", "")
-                if sku in shipped_skus:
-                    ai["shipped_qty"] = ai.get("shipped_qty", 0) + shipped_skus[sku]
             note_label = "[補出貨]" if is_followup else "[部分出貨] 僅出貨合格品項"
-            repository.update_items_with_note(
-                db, order_id, json.dumps(all_items, ensure_ascii=False), note_label
-            )
+        else:
+            note_label = "[已全部出貨]"
+        repository.update_items_with_note(
+            db, order_id, json.dumps(all_items, ensure_ascii=False), note_label
+        )
 
         # 建立應收帳款（根據付款條件設 due_date）
         due_date = _calc_due_date(terms, order)
-        receivable = _calc_receivable(db, order_id, terms, ship_total)
+        receivable = _calc_receivable(
+            db, order_id, terms, ship_total, order["total_amount"]
+        )
         if receivable > 0:
             desc_suffix = "（部分出貨）" if is_partial else ""
             repository.insert_receivable(
@@ -832,11 +881,27 @@ def _calc_due_date(terms: str, order) -> str | None:
     return None  # prepaid / deposit
 
 
-def _calc_receivable(db, order_id: int, terms: str, ship_total: float) -> float:
-    """prepaid/deposit 已收全額/部分，應收 = 剩餘金額；其他 = ship_total。"""
+def _calc_receivable(
+    db, order_id: int, terms: str, ship_total: float, order_total: float
+) -> float:
+    """應收 = 本次出貨金額 - 本次該攤到的已收預付/訂金；其他付款條件 = 全額 ship_total。
+
+    codex 全專案審 MED：原本直接 ship_total - already_paid，多次部分出貨會把同一筆
+    預付/訂金重複抵掉（30% 訂金分兩次各 50% 出貨，總應收只建 400 而非 700）。
+    改成把已收款按「本次出貨佔整張訂單金額的比例」分攤抵扣，確保多次部分出貨的應收
+    加總 = 整張金額 - 已收款（單次抵一次、不重複）。
+
+    分攤式對完整單次出貨退化成原行為：ship_total == order_total → credit == already_paid。
+    """
     if terms == "prepaid" or terms.startswith("deposit_"):
         already_paid = repository.sum_paid_income_for_order(db, order_id)
-        return ship_total - already_paid
+        # 按本次出貨佔整張訂單的比例分攤已收款；order_total<=0 時不分攤（防除零）
+        if order_total and order_total > 0:
+            credit = already_paid * (ship_total / order_total)
+        else:
+            credit = already_paid
+        receivable = ship_total - credit
+        return receivable if receivable > 0 else 0.0
     return ship_total
 
 
@@ -902,6 +967,10 @@ def cancel_order(
         perm_err = _check_permission(db, actor_user_id, "manager")
         if perm_err:
             return perm_err
+        # codex 全專案審 MED：兩筆不可逆 audit（作廢應收、取消/退貨）原本硬寫 actor='system'、
+        # 事後無法追溯。用 _resolve_actor_label 取可信操作者名（floored 取 verified 員工名、
+        # operator 用傳入值、查無回原值、完全無值才 'system'）。權限關卡已過、此處只為留名。
+        audit_actor = _resolve_actor_label(db, actor_user_id)
         order = repository.get_order(db, order_id)
         if not order:
             return f"ERROR: 找不到訂單 #{order_id}"
@@ -951,7 +1020,7 @@ def cancel_order(
             repository.delete_transaction(db, txn["id"])
             repository.insert_interaction_log(
                 db,
-                actor="system",
+                actor=audit_actor,
                 action="transaction_voided",
                 target_type="transaction",
                 target_id=txn["id"],
@@ -977,7 +1046,7 @@ def cancel_order(
         )
         repository.insert_interaction_log(
             db,
-            actor="system",
+            actor=audit_actor,
             action=f"order_{cancel_type}",
             target_type="order",
             target_id=order_id,
@@ -1025,17 +1094,15 @@ def cancel_order(
 def _calc_fulfilled_total(order) -> float:
     """算 order 已 fulfilled 的 effective total（用於 cancel 反扣 customer.total_fulfilled）。
 
-    - 完整出貨（items 內無 shipped_qty 欄位）→ 整張 total_amount
-    - 部分出貨（fulfill 寫了 shipped_qty 進 items）→ 按比例分攤 total_amount
+    fulfill_order 現在無論部分或完整出貨都會把已出量寫進 items 的 shipped_qty
+    （codex 全專案審 HIGH 修正後）：
+    - 完整出貨 → shipped_qty == qty、ratio = 1.0 → 整張 total_amount
+    - 部分出貨 → 按已出量比例分攤 total_amount
+    - 舊資料無 shipped_qty 欄位（修正前完整出貨）→ fallback 整張 total_amount
 
-    codex P2.11 找到 first bug：原本 cancel 用 total_amount 反扣 fulfilled，但
-    fulfill 部分出貨用的是 ship_total（按比例），部分出貨後取消會 over-reverse。
-
-    codex P2 終審找到 second bug：fulfill_order 完整出貨時不會把 shipped_qty 寫回
-    items（is_partial 才寫），原本判斷式 `shipped_qty < qty` 對完整出貨會 True、
-    錯誤走 partial 分支、shipped_raw_total = 0 → 反扣金額變 0、完全沒反扣到。
-    改用「items 內是否有 shipped_qty 欄位」當判斷 — 沒欄位 = 完整出貨；
-    有欄位 = 部分出貨（fulfill 走 is_partial 路徑時才寫）。
+    codex P2.11 first bug：原本 cancel 用 total_amount 反扣 fulfilled，但 fulfill 部分
+    出貨用的是 ship_total（按比例），部分出貨後取消會 over-reverse。沿用「有 shipped_qty
+    欄位才按比例、否則整張」的判斷向後相容舊資料。
     """
     all_items = _parse_items_json(order["items"])
     has_partial_marker = any("shipped_qty" in i for i in all_items)

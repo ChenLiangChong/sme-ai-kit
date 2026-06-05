@@ -10,6 +10,15 @@
 import sqlite3
 
 
+def target_exists(db: sqlite3.Connection, table: str, target_id: int) -> bool:
+    """檢查 target_id 在 table 是否存在。table 由 service 的白名單映射來（非使用者輸入）、
+    可安全拼進 SQL；target_id parameterized。"""
+    row = db.execute(
+        f"SELECT 1 FROM {table} WHERE id = ? LIMIT 1", (target_id,)
+    ).fetchone()
+    return row is not None
+
+
 def insert(
     db: sqlite3.Connection,
     target_type: str,

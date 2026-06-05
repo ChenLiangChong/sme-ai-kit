@@ -100,6 +100,7 @@ def init_db():
         # legacy_alter_table=ON 關閉 SQLite 3.25+ 的 FK 自動改寫（避免改到其他表的 FK 後 DROP 造成 stale reference）
         db.execute("PRAGMA legacy_alter_table=ON")
         db.execute("PRAGMA foreign_keys=OFF")
+        db.execute("SAVEPOINT rebuild_orders")
         db.execute("ALTER TABLE orders RENAME TO _orders_migrate")
         db.execute("""CREATE TABLE orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,6 +137,7 @@ def init_db():
         db.execute("DROP TABLE _orders_migrate")
         db.execute("CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)")
+        db.execute("RELEASE rebuild_orders")
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("PRAGMA legacy_alter_table=OFF")
 
@@ -146,6 +148,7 @@ def init_db():
     if needs_snap_rebuild:
         db.execute("PRAGMA legacy_alter_table=ON")
         db.execute("PRAGMA foreign_keys=OFF")
+        db.execute("SAVEPOINT rebuild_snapshots")
         db.execute("ALTER TABLE daily_snapshots RENAME TO _snapshots_migrate")
         db.execute("""CREATE TABLE daily_snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,6 +178,7 @@ def init_db():
         db.execute("DROP TABLE _snapshots_migrate")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshots_date_bu ON daily_snapshots(snapshot_date, COALESCE(business_unit, ''))")
         db.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_date ON daily_snapshots(snapshot_date)")
+        db.execute("RELEASE rebuild_snapshots")
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("PRAGMA legacy_alter_table=OFF")
 
@@ -185,6 +189,7 @@ def init_db():
     if lg_schema and lg_schema["sql"] and "UNIQUE(channel_id,group_id)" not in lg_schema["sql"].replace(" ", ""):
         db.execute("PRAGMA legacy_alter_table=ON")
         db.execute("PRAGMA foreign_keys=OFF")
+        db.execute("SAVEPOINT rebuild_line_groups")
         db.execute("ALTER TABLE line_groups RENAME TO _line_groups_migrate")
         db.execute("""CREATE TABLE line_groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -210,6 +215,7 @@ def init_db():
         db.execute("DROP TABLE _line_groups_migrate")
         db.execute("CREATE INDEX IF NOT EXISTS idx_line_groups_type ON line_groups(group_type)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_line_groups_channel ON line_groups(channel_id)")
+        db.execute("RELEASE rebuild_line_groups")
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("PRAGMA legacy_alter_table=OFF")
 
@@ -218,6 +224,7 @@ def init_db():
     if inv_schema and inv_schema["sql"] and "UNIQUE" in inv_schema["sql"]:
         db.execute("PRAGMA legacy_alter_table=ON")
         db.execute("PRAGMA foreign_keys=OFF")
+        db.execute("SAVEPOINT rebuild_inventory")
         db.execute("ALTER TABLE inventory RENAME TO _inventory_migrate")
         # rebuild 必須包含 schema.sql 內定義的所有欄位（含 v4 reserved）— 否則之後 create_order 等查 reserved 會炸
         db.execute("""CREATE TABLE inventory (
@@ -249,6 +256,7 @@ def init_db():
         db.execute("DROP TABLE _inventory_migrate")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_sku_bu ON inventory(sku, COALESCE(business_unit, ''))")
         db.execute("CREATE INDEX IF NOT EXISTS idx_inventory_alert ON inventory(id) WHERE current_stock <= min_stock")
+        db.execute("RELEASE rebuild_inventory")
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("PRAGMA legacy_alter_table=OFF")
 
@@ -257,6 +265,7 @@ def init_db():
     if cust_schema and cust_schema["sql"] and "CHECK" not in cust_schema["sql"]:
         db.execute("PRAGMA legacy_alter_table=ON")
         db.execute("PRAGMA foreign_keys=OFF")
+        db.execute("SAVEPOINT rebuild_customers")
         db.execute("ALTER TABLE customers RENAME TO _customers_migrate")
         # rebuild 必須包含 schema.sql 內定義的所有欄位（含 v4 sales aggregate split）— 否則之後 fulfill_order/record_payment 等更新會炸
         db.execute("""CREATE TABLE customers (
@@ -301,6 +310,7 @@ def init_db():
             FROM _customers_migrate""")
         db.execute("DROP TABLE _customers_migrate")
         db.execute("CREATE INDEX IF NOT EXISTS idx_customers_type ON customers(type)")
+        db.execute("RELEASE rebuild_customers")
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("PRAGMA legacy_alter_table=OFF")
 

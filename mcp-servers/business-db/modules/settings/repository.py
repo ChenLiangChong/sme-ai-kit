@@ -10,6 +10,24 @@ import sqlite3
 from shared.utils import _safe_update
 
 
+# ---- audit ----
+
+def insert_interaction_log(
+    db: sqlite3.Connection,
+    actor: str,
+    action: str,
+    target_type: str,
+    target_id: int,
+    detail: str,
+    business_unit: str | None = None,
+) -> None:
+    db.execute(
+        "INSERT INTO interaction_log (actor, action, target_type, target_id, detail, business_unit) "
+        "VALUES (?,?,?,?,?,?)",
+        (actor, action, target_type, target_id, detail, business_unit),
+    )
+
+
 # ---- system_settings ----
 
 def get_setting_content(db: sqlite3.Connection, key: str) -> str | None:

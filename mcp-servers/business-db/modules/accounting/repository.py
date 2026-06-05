@@ -207,6 +207,21 @@ def update_customer_payment_totals(
     )
 
 
+def adjust_customer_total_paid(
+    db: sqlite3.Connection, customer_id: int, delta: float
+) -> None:
+    """只調整 total_paid（不動 last_payment_date）。
+
+    codex 稽核：刪帳回沖 / 改付款狀態或客戶掛載重算時用。delta 可為負（回沖）。
+    last_payment_date 刻意不動——回沖/重算無法可靠推回前一次付款日，亂寫會誤導 CRM；
+    保留現值較安全（最後付款日只在 record_payment / record_transaction 正向進帳時前進）。
+    """
+    db.execute(
+        "UPDATE customers SET total_paid = COALESCE(total_paid, 0) + ? WHERE id = ?",
+        (delta, customer_id),
+    )
+
+
 def get_order_status_total(
     db: sqlite3.Connection, order_id: int
 ) -> sqlite3.Row | None:

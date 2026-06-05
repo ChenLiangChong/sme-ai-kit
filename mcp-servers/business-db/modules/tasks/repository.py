@@ -62,6 +62,11 @@ def list_tasks(
     parent_task_id: int = 0,
     limit: int = 20,
 ) -> list[sqlite3.Row]:
+    """parent_task_id sentinel：
+    - 0   = 只列頂層任務（parent_task_id IS NULL）← 對外預設語義
+    - -1  = 不過濾（列出所有任務含子任務）
+    - >0  = 列出該父任務的子任務
+    """
     query = (
         "SELECT id, title, assignee, status, priority, category, business_unit, "
         "due_date, parent_task_id, created_at FROM tasks WHERE 1=1"
@@ -79,9 +84,12 @@ def list_tasks(
     if business_unit:
         query += " AND business_unit = ?"
         params.append(business_unit)
-    if parent_task_id:
+    if parent_task_id == 0:
+        query += " AND parent_task_id IS NULL"
+    elif parent_task_id > 0:
         query += " AND parent_task_id = ?"
         params.append(parent_task_id)
+    # parent_task_id < 0（sentinel -1）= 不過濾、不加條件
     query += (
         " ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'normal' THEN 1 "
         "ELSE 2 END, due_date LIMIT ?"

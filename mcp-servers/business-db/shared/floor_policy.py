@@ -46,6 +46,18 @@ ESCALATION_ADMIN_TOOLS = {
     "list_pending_escalations", "mark_escalation_sent",
 }
 
+# 全域控制 / 公司核心設定工具（codex 全專案審 B-HIGH）—— 非全權限層一律移除：
+# 部門層不該改公司主設定、boss_line_id、審核門檻、事業體 / OA→BU 映射（越權改設定）。
+GLOBAL_CONTROL_TOOLS = {
+    "update_company", "register_business_entity", "list_business_entities",
+}
+
+# 跨 OA LINE 資料工具（codex 全專案審 B-HIGH / E-HIGH）—— 非全權限層一律移除：
+# 這些工具無列級 channel/BU 縮限，受限層可橫向讀全公司 LINE 訊息 / 群組、或竄改群組登錄。
+LINE_DATA_TOOLS = {
+    "search_line_messages", "list_line_groups", "register_line_group",
+}
+
 # legal-admin（律所）案件/時限工具 —— 含當事人名 / calc_trace / 機密案件。
 # SPEC §54：小所「預設不分層、全所共用一個視圖」→ MVP 不把整支工具從受限層移除
 # （移除整支會連非機密案件都看不到、過度收斂）。機密性走「機密軸」列級過濾：
@@ -104,7 +116,9 @@ def apply_floor_policy(mcp) -> list[str]:
     from shared.floor_map import get_floor_config
     cfg = get_floor_config(floor)
 
-    to_remove: set[str] = set(HR_TOOLS) | set(ESCALATION_ADMIN_TOOLS)  # 非全權限層：不碰 HR/員工 PII/請假 + 上報管理工具
+    # 非全權限層：不碰 HR/員工 PII/請假 + 上報管理 + 全域控制設定 + 跨 OA LINE 資料
+    to_remove: set[str] = (set(HR_TOOLS) | set(ESCALATION_ADMIN_TOOLS)
+                           | set(GLOBAL_CONTROL_TOOLS) | set(LINE_DATA_TOOLS))
     fv = (cfg.financial_visibility or "none").strip()
     if fv == "all":
         pass  # 會計層：保留全部財務工具（HR 仍移除）

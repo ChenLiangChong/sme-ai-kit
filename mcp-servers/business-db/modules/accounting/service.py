@@ -13,7 +13,7 @@ Codex P2 spot-check 三個警告全部落實：
 import json
 from datetime import datetime
 
-from shared.auth import _check_permission, _resolve_actor_label
+from shared.auth import _check_permission, _resolve_actor_label, writer_or_error
 from shared.business_units import _get_approval_threshold, _validate_business_unit
 from shared.db import _now, get_db, transaction
 from shared.escalation import enqueue_escalation
@@ -66,6 +66,13 @@ def record_transaction(
     # 輸家不會白做 insert 再 rollback。
     tx_mode = "immediate" if approved_id else "deferred"
     with transaction(mode=tx_mode) as db:
+        # actor fail-closed（codex MED）：floored session 取 line-channel verified 員工名、
+        # 忽略 agent 自填的 recorded_by；floored 但查無 verified 脈絡 → 拒絕寫入。寫入前先解析、
+        # 後續 requester / recorded_by / audit 一律用 trusted_actor（不再直接寫 agent 傳入值）。
+        trusted_actor, actor_err = writer_or_error(db, recorded_by)
+        if actor_err:
+            return actor_err
+
         threshold = _get_approval_threshold(db, business_unit)
         gate = approvals_service.gate_check(
             db,
@@ -112,7 +119,11 @@ def record_transaction(
                     business_unit=business_unit,
                     payment_status=payment_status, due_date=due_date,
                 ),
-                requester=recorded_by or "system",
+                # actor fail-closed：requester 用 trusted_actor（floored=verified 員工名）、
+                # 不再用 agent 自填 recorded_by。actor_user_id 傳原始 caller 值供 approval_pending
+                # 上報在 enqueue 當下蓋章來源（floored→re-resolve active-request、operator→用傳入）。
+                requester=trusted_actor,
+                actor_user_id=recorded_by,
                 business_unit=business_unit,
                 escalate=True,
             )
@@ -139,11 +150,19 @@ def record_transaction(
             payment_status=payment_status,
             due_date=due_date or None,
             paid_amount=paid,
-            recorded_by=recorded_by or None,
+            recorded_by=trusted_actor,
         )
+
+        # 客戶累計同步（codex HIGH）：income + 已收（paid > 0）+ 有掛客戶 → 同 tx 累加
+        # customers.total_paid / last_payment_date，比照 record_payment。否則客戶實收永久偏低。
+        if type_ == "income" and paid > 0 and related_customer_id:
+            repository.update_customer_payment_totals(
+                db, related_customer_id, paid, transaction_date
+            )
+
         repository.insert_interaction_log(
             db,
-            actor=recorded_by or "system",
+            actor=trusted_actor,
             action="transaction_recorded",
             target_id=txn_id,
             detail=(
@@ -172,7 +191,7 @@ def record_transaction(
                 detail={
                     "txn_id": txn_id, "type": type_, "amount": amount,
                     "category": category, "business_unit": business_unit or None,
-                    "approval_id": gate.approval_id, "recorded_by": recorded_by or None,
+                    "approval_id": gate.approval_id, "recorded_by": trusted_actor,
                 },
                 actor_user_id=recorded_by or "",
                 business_unit=business_unit,
@@ -453,6 +472,14 @@ def delete_transaction(transaction_id: int, reason: str, actor_user_id: str) -> 
         if not txn:
             return f"ERROR: 找不到帳目 #{transaction_id}"
 
+        # 客戶累計回沖（codex MED）：刪除「已收（paid_amount>0）的 income + 掛客戶」帳目時，
+        # 該筆已計入 customers.total_paid 的金額要回沖（加負值），否則 CRM 應收越刪越髒。
+        # last_payment_date 不回推（無法確知前一次付款日；保留現值、不誤標）。
+        if txn["type"] == "income" and txn["related_customer_id"] and (txn["paid_amount"] or 0) > 0:
+            repository.adjust_customer_total_paid(
+                db, txn["related_customer_id"], -txn["paid_amount"]
+            )
+
         repository.delete_transaction(db, transaction_id)
         repository.insert_interaction_log(
             db,
@@ -493,11 +520,28 @@ def update_transaction(
     due_date: str,
     related_order_id: int,
     related_customer_id: int,
+    actor_user_id: str = "",
 ) -> str:
     with transaction() as db:
+        # 權限關卡（codex HIGH）：update_transaction 可改 payment_status / related_customer_id /
+        # business_unit 等財務關鍵欄位＝實質改帳，必須與 delete_transaction 同級 manager 把關。
+        # 先 _check_permission（floored 取 verified user_id、agent 自填無效）fail-closed。
+        perm_err = _check_permission(db, actor_user_id, "manager")
+        if perm_err:
+            return perm_err
         txn = repository.get_transaction(db, transaction_id)
         if not txn:
             return f"ERROR: 找不到帳目 #{transaction_id}"
+
+        # 客戶累計重算（codex MED）：先記錄「改動前」對客戶 total_paid 的貢獻
+        # （income 才計、貢獻=paid_amount、掛在 old_customer）。改動後再算新貢獻、套差額。
+        is_income = txn["type"] == "income"
+        old_customer = txn["related_customer_id"]
+        old_contrib = (txn["paid_amount"] or 0) if is_income else 0.0
+
+        # 改動後的 paid_amount / 客戶（預設＝沿用原值；對應欄位有改才覆寫）
+        new_paid = txn["paid_amount"] or 0
+        new_customer = old_customer
 
         updates: list[str] = []
         params: list = []
@@ -518,6 +562,7 @@ def update_transaction(
             updates.append("payment_status = ?"); params.append(payment_status)
             if payment_status == "paid":
                 updates.append("paid_amount = amount")
+                new_paid = txn["amount"]  # paid → paid_amount 補滿，比照 SQL
             detail_parts.append(f"狀態→{payment_status}")
         if due_date:
             updates.append("due_date = ?"); params.append(due_date)
@@ -530,6 +575,7 @@ def update_transaction(
         if related_customer_id != -1:
             updates.append("related_customer_id = ?")
             params.append(related_customer_id or None)
+            new_customer = related_customer_id or None
             detail_parts.append(
                 f"客戶→#{related_customer_id}" if related_customer_id else "客戶→(清除)"
             )
@@ -538,9 +584,25 @@ def update_transaction(
             return "沒有要更新的欄位。"
 
         repository.safe_update_transaction(db, transaction_id, updates, params)
+
+        # 客戶累計重算（codex MED）：改動後新貢獻 = 新 paid_amount（income 才計、掛新客戶）。
+        # 從 old_customer 扣 old_contrib、加到 new_customer 的 new_contrib（同客戶時自然合併為差額）。
+        # 只有 income 帳會影響 customers.total_paid；expense 不動客戶累計。
+        if is_income:
+            new_contrib = new_paid if new_customer else 0.0
+            if old_customer and old_customer == new_customer:
+                delta = new_contrib - old_contrib
+                if delta:
+                    repository.adjust_customer_total_paid(db, old_customer, delta)
+            else:
+                if old_customer and old_contrib:
+                    repository.adjust_customer_total_paid(db, old_customer, -old_contrib)
+                if new_customer and new_contrib:
+                    repository.adjust_customer_total_paid(db, new_customer, new_contrib)
+
         repository.insert_interaction_log(
             db,
-            actor="system",
+            actor=_resolve_actor_label(db, actor_user_id),
             action="transaction_updated",
             target_id=transaction_id,
             detail=" | ".join(detail_parts),

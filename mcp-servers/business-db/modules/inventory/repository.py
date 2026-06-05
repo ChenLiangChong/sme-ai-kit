@@ -24,6 +24,24 @@ def find_by_sku(
     return _find_inventory(db, sku, business_unit)
 
 
+def find_by_sku_exact(
+    db: sqlite3.Connection, sku: str, business_unit: str
+) -> sqlite3.Row | None:
+    """嚴格按 SKU + BU 精確匹配，找不到「不」fallback 到全域（避免 BU 打錯誤改共用庫存）。"""
+    return db.execute(
+        "SELECT * FROM inventory WHERE sku = ? AND business_unit = ?",
+        (sku, business_unit),
+    ).fetchone()
+
+
+def find_global_by_sku(db: sqlite3.Connection, sku: str) -> sqlite3.Row | None:
+    """只查無歸屬（共用）庫存的同 SKU，用於 BU 不符時的明確提示。"""
+    return db.execute(
+        "SELECT * FROM inventory WHERE sku = ? AND (business_unit IS NULL OR business_unit = '')",
+        (sku,),
+    ).fetchone()
+
+
 def search_by_keyword(
     db: sqlite3.Connection, query: str, business_unit: str
 ) -> list[sqlite3.Row]:

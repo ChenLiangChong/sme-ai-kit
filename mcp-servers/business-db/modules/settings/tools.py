@@ -25,8 +25,12 @@ def update_company(
     boss_title: str = "",
     boss_line_id: str = "__SKIP__",
     approval_threshold: float = -1,
+    actor_user_id: str = "",
 ) -> str:
     """更新公司基本資訊（company 表 id=1）。首次呼叫會自動建立。
+
+    需 admin 權限（改通知路由 boss_line_id / 審核門檻 = 高權動作）。floored session 由系統取
+    verified user_id 驗權、agent 自填的 actor_user_id 無效；operator（無 SME_FLOOR）才採傳入值。
 
     Args:
         name: 公司名稱
@@ -35,6 +39,7 @@ def update_company(
         boss_title: 老闆稱謂（如「總經理」「老闆」「執行長」）
         boss_line_id: 老闆的 LINE User ID（用於 LINE 通知路由，傳空字串清除）
         approval_threshold: 審核門檻金額（-1=不更新）
+        actor_user_id: 操作者 LINE user_id（floored 由系統覆寫；operator 可省略）
     """
     return service.upsert_company(
         name=name,
@@ -43,6 +48,7 @@ def update_company(
         boss_title=boss_title,
         boss_line_id=boss_line_id,
         approval_threshold=approval_threshold,
+        actor_user_id=actor_user_id,
     )
 
 
@@ -53,8 +59,12 @@ def register_business_entity(
     channel_id: str = "",
     approval_threshold: float = -1,
     notes: str = "",
+    actor_user_id: str = "",
 ) -> str:
     """登錄或更新事業體。用於多事業體/多品牌場景。
+
+    需 admin 權限（設定 OA→BU 映射 / 該事業體審核門檻 = 高權動作）。floored session 由系統取
+    verified user_id 驗權、agent 自填無效；operator（無 SME_FLOOR）才採傳入值。
 
     Args:
         entity_id: 事業體 ID（如 brand_c, brand_d），也作為 business_unit 值
@@ -62,6 +72,7 @@ def register_business_entity(
         channel_id: 對應的 LINE OA channel_id
         approval_threshold: 該事業體的審核門檻（-1=沿用公司預設）
         notes: 備註
+        actor_user_id: 操作者 LINE user_id（floored 由系統覆寫；operator 可省略）
     """
     return service.upsert_entity(
         entity_id=entity_id,
@@ -69,6 +80,7 @@ def register_business_entity(
         channel_id=channel_id,
         approval_threshold=approval_threshold,
         notes=notes,
+        actor_user_id=actor_user_id,
     )
 
 

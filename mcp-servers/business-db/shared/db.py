@@ -14,6 +14,13 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
+
+class _Connection(sqlite3.Connection):
+    """sqlite3.Connection 子類：原生 Connection 不支援屬性 / weakref，子類可以。
+    用來把「本 tx 的 escalation flush / in-session 注入 pending」綁在 connection 物件上
+    （per-tx 隔離、不再用 module-global、避免重疊 tx 跨污染；codex 全專案審 E-MED）。"""
+    pass
+
 # mcp-servers/business-db/shared/db.py → parent×3 = mcp-servers/business-db/.. = repo
 _DEFAULT_DB_PATH = str(Path(__file__).parent.parent.parent.parent / "data" / "business.db")
 
@@ -28,7 +35,7 @@ DB_PATH = get_db_path()
 
 
 def get_db() -> sqlite3.Connection:
-    db = sqlite3.connect(get_db_path())
+    db = sqlite3.connect(get_db_path(), factory=_Connection)
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA foreign_keys=ON")
     db.execute("PRAGMA busy_timeout=5000")
@@ -40,28 +47,25 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-# ── escalation 投遞觸發（#9g）：enqueue_escalation 寫入上報後設旗標，transaction() commit
-#    成功後 fire-and-forget 起 claude -p 通報投遞器（直接觸發、非 cron 輪詢）。module-global
-#    安全：MCP stdio 單請求序列、無並發 transaction()。rollback 會清旗標（上報沒 commit 不投遞）。──
-_escalation_flush_pending = False
-
-# B in-session push（#25）：enqueue_escalation 排一筆 channel notification payload，
-# 業務 transaction commit 成功後經 line-channel owner IPC socket 注入正在跑的全權限層 session
-# （即時推進 boss session）。rollback 會 clear（沒 commit → 不注入）。全 best-effort、
-# 注入失敗（沒 owner / 沒 confidential session 連著）不影響業務寫入；LINE claude -p + cron 仍是送達保證。
-_pending_injections = []
+# ── escalation 投遞觸發（#9g）+ B in-session push（#25）：enqueue_escalation 寫入上報後，
+#    在「該筆 tx 的 connection」上記 pending；transaction() commit 成功後 fire-and-forget 起
+#    claude -p 通報投遞器 + 經 IPC 注入全權限 session。
+#    綁 connection（codex 全專案審 E-MED）：原本 module-global，重疊 tx 下 A 的 pending 會被 B 的
+#    rollback 清掉、或被別人的 commit 誤送。改把 pending 存成 connection 物件屬性（每個 transaction()
+#    各自 get_db() 開獨立 _Connection）→ 嚴格 per-tx 隔離；rollback 只影響自己這筆連線。──
 
 
-def request_escalation_flush() -> None:
-    """enqueue_escalation 寫入上報後呼叫；下一個 commit 成功的 transaction() 觸發投遞。"""
-    global _escalation_flush_pending
-    _escalation_flush_pending = True
+def request_escalation_flush(db) -> None:
+    """enqueue_escalation 寫入上報後呼叫（傳本 tx 的 db）；該 connection commit 成功後觸發投遞。"""
+    db._sme_flush_pending = True
 
 
-def queue_session_injection(payload: dict) -> None:
-    """enqueue_escalation 呼叫：排一筆 in-session 注入 payload（notification dict）。
-    與 _escalation_flush_pending 同模式——下一個 commit 成功的 transaction() drain 並注入。"""
-    _pending_injections.append(payload)
+def queue_session_injection(db, payload: dict) -> None:
+    """enqueue_escalation 呼叫（傳本 tx 的 db）：排一筆 in-session 注入 payload（notification dict）。
+    該 connection commit 成功後 transaction() drain 並注入。"""
+    if getattr(db, "_sme_injections", None) is None:
+        db._sme_injections = []
+    db._sme_injections.append(payload)
 
 
 @contextmanager
@@ -93,7 +97,6 @@ def transaction(mode: str = "deferred"):
       （MCP server 場景罕見到、不額外處理）
     - 若 rollback 或 close 自己拋例外，可能遮蓋原始例外（罕見、SQLite 一般不會）
     """
-    global _escalation_flush_pending
     if mode not in ("deferred", "immediate"):
         raise ValueError(f"transaction mode 必須是 'deferred' 或 'immediate'，got {mode!r}")
     db = get_db()
@@ -113,8 +116,8 @@ def transaction(mode: str = "deferred"):
             db.commit()
         committed = True
     except Exception:
-        _escalation_flush_pending = False  # rollback → 上報沒 commit、不投遞
-        _pending_injections.clear()        # rollback → 業務沒 commit、不注入 session
+        db._sme_flush_pending = False  # rollback → 本 connection：上報沒 commit、不投遞
+        db._sme_injections = None      # rollback → 本 connection：業務沒 commit、不注入
         if mode == "immediate":
             try:
                 db.execute("ROLLBACK")
@@ -124,11 +127,13 @@ def transaction(mode: str = "deferred"):
             db.rollback()
         raise
     finally:
+        # 取出本 connection 的 pending；只動本 connection（per-tx 隔離）
+        _do_flush = committed and getattr(db, "_sme_flush_pending", False)
+        _drained = getattr(db, "_sme_injections", None) if committed else None
         db.close()
     # commit 成功且本 tx 寫過 escalation（連線已關、不持鎖）→ fire-and-forget 起 claude -p 通報投遞器。
     # 直接觸發（#9g）；best-effort——失敗不影響業務（上報已在佇列、cron flush_escalations.py 兜底）。
-    if committed and _escalation_flush_pending:
-        _escalation_flush_pending = False
+    if _do_flush:
         try:
             from shared.escalation import spawn_notifier
             spawn_notifier()
@@ -136,12 +141,10 @@ def transaction(mode: str = "deferred"):
             pass
     # B in-session push（#25）：commit 成功且本 tx 排了注入 → drain 並經 IPC socket 注入正在跑的
     # 全權限層 session。late import 避免 cycle（與 spawn_notifier 同理）；全 best-effort、吞例外。
-    if committed and _pending_injections:
-        drained = list(_pending_injections)
-        _pending_injections.clear()
+    if _drained:
         try:
             from shared.escalation import inject_to_sessions
-            for _p in drained:
+            for _p in _drained:
                 inject_to_sessions(_p)
         except Exception:
             pass

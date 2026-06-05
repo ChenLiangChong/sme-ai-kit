@@ -48,6 +48,7 @@ def register_line_group(
     channel_id: str = "",
     purpose: str = "",
     notes: str = "",
+    actor: str = "",
 ) -> str:
     """註冊 LINE 群組。當 bot 加入新群組或老闆告知群組用途時呼叫。
 
@@ -58,6 +59,7 @@ def register_line_group(
         channel_id: 來自哪個 LINE OA（多品牌模式），留空=default
         purpose: 一句話描述群組功能（例：品牌 X 內勤訂單協調、ERP 系統供應商交期追蹤）
         notes: 備註（成員、特殊 SOP、限制等自由文字）
+        actor: 操作者（operator/setup 用；floored session 由系統取 verified user_id、忽略此值）
     """
     return service.register_line_group(
         group_id=group_id,
@@ -66,6 +68,7 @@ def register_line_group(
         channel_id=channel_id,
         purpose=purpose,
         notes=notes,
+        actor=actor,
     )
 
 

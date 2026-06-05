@@ -272,7 +272,7 @@ def enqueue_escalation(
     # 直接觸發（#9g）：標記本 tx 寫了上報；commit 成功後 transaction() 會 fire-and-forget
     # 起 claude -p 通報投遞器（即時、非 cron 輪詢）。
     from shared.db import request_escalation_flush
-    request_escalation_flush()
+    request_escalation_flush(db)
 
     # B in-session push（#25）：排一筆 channel notification，commit 成功後經 line-channel owner
     # IPC socket 注入正在跑的全權限層 session（即時推進 boss session、與 claude -p / cron 並行、
@@ -322,7 +322,7 @@ def enqueue_escalation(
         "params": {"content": content, "meta": meta},
     }
     from shared.db import queue_session_injection
-    queue_session_injection(payload)
+    queue_session_injection(db, payload)
 
     return esc_id
 
@@ -601,16 +601,37 @@ def list_pending_for_notifier(limit: int = 50) -> str:
     return json.dumps({"pending": items, "count": len(items)}, ensure_ascii=False)
 
 
+# 標記送達時的「持有有效租約」條件（codex E-HIGH / E-MED）：mark_sent 不可只憑 id+pending 就標 sent，
+# 否則品質層 LLM 誤呼叫 / 亂呼叫會把「從未經 list_pending_for_notifier 取得租約、根本沒推出去」的高風險
+# 上報永久清成 sent、cron 不再補送（資料牆破口）。要求：該 row 目前由「某個 caller」持有未逾期租約
+# （claimed_at IS NOT NULL 且仍在 _CLAIM_TTL_MIN 內）才允許標 sent。
+#   - 裸 pending（claimed_at IS NULL、未經任何 claim）→ rowcount=0 → 拒絕（不可直接標 sent）。
+#   - 租約逾 TTL（claimed_at <= now-TTL，已被 cron / 另一支 notifier 視為可 reclaim）→ rowcount=0 → 拒絕；
+#     舊 notifier 卡超 TTL 被 reclaim 後仍想標 sent / 雙投 → 在此擋下（codex E-MED：送出/標記皆綁 lease）。
+# 與 _CLAIMABLE_WHERE 的 TTL 子句同義反向：可投遞＝claimed_at 為空或已逾期；可標 sent＝claimed_at 在 TTL 內。
+# 參數順序固定 (id, claim_ttl_min)。
+_MARK_SENT_WHERE = (
+    "id=? AND status='pending' AND claimed_at IS NOT NULL "
+    "AND claimed_at > datetime('now','localtime','-'||?||' minutes')"
+)
+
+
 def mark_sent_tool(escalation_id: int, sent_text: str = "") -> str:
-    """標記上報已送達（pending→sent、rowcount guard 防重複）+ 落 notifier 實際送出內容供稽核（#27）。
+    """標記上報已送達（pending→sent）+ 落 notifier 實際送出內容供稽核（#27）。
 
     sent_text = claude -p notifier 回報它真正推給主管的文字（品質層自報、與 cron 確定性 log 互補）；
-    投遞器推送成功後呼叫。rowcount guard 內才落 log → 不會對非 pending 的 row 留假紀錄。"""
+    投遞器推送成功後呼叫。
+
+    租約 guard（codex E-HIGH / E-MED）：只有「目前持有未逾 _CLAIM_TTL_MIN 租約」的 row 可標 sent
+    （見 _MARK_SENT_WHERE）。caller 必須先經 list_pending_escalations(=list_pending_for_notifier)
+    claim 到這筆才推、推完才標——裸 pending（沒 claim）/ 租約已逾期被 reclaim 都 rowcount=0、拒絕標記，
+    避免未送出的高風險上報被誤清成 sent、保住 cron 補送。rowcount guard 內才落 log → 不會對未持租約的
+    row 留假紀錄。"""
     from shared.db import _now, transaction
     with transaction() as db:
         rc = db.execute(
             "UPDATE pending_escalations SET status='sent', sent_at=? "
-            "WHERE id=? AND status='pending'", (_now(), escalation_id),
+            "WHERE " + _MARK_SENT_WHERE, (_now(), escalation_id, _CLAIM_TTL_MIN),
         ).rowcount
         if rc == 1:
             r = db.execute(
@@ -627,7 +648,8 @@ def mark_sent_tool(escalation_id: int, sent_text: str = "") -> str:
                  f"[notifier→{to}] {sent_text or '（notifier 未回報送出內容）'}", bu),
             )
     return (f"上報 #{escalation_id} 已標記 sent" if rc == 1
-            else f"上報 #{escalation_id} 無法標記（已送/不存在/非 pending）")
+            else f"上報 #{escalation_id} 未持有有效租約、不可標記送達"
+                 f"（已送/不存在/未經 claim/租約逾期被 reclaim）")
 
 
 # ── claude -p single-shot 通報投遞器（#9g、老闆「直接觸發、聰明通報」）──

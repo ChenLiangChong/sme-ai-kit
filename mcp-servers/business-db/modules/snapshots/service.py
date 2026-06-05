@@ -2,6 +2,8 @@
 
 層次邊界：transaction ownership 在這層，repository 不 commit。
 """
+import sqlite3
+
 from shared.db import _now, transaction
 
 from . import repository
@@ -14,12 +16,16 @@ def save_daily() -> str:
 
     with transaction() as db:
         def _save(bu_key: str, label: str) -> None:
-            if repository.snapshot_exists(db, today, bu_key):
-                skipped.append(label)
-                return
+            # 原子 upsert：唯一鍵 (snapshot_date, COALESCE(business_unit,'')) 上用 INSERT OR IGNORE，
+            # rowcount 判斷實際有沒有寫進。原「先 snapshot_exists 再 insert」的 check-then-insert 在
+            # 併發下會撞唯一鍵 raise IntegrityError、整批同 tx 回滾全部快照。INSERT OR IGNORE 讓單筆
+            # 衝突只 no-op 該筆、不影響其他 BU 的快照；再攔 IntegrityError 轉 skip 做雙保險。
             metrics = repository.compute_metrics(db, today, bu_key)
-            repository.insert_snapshot(db, today, bu_key, metrics)
-            saved.append(label)
+            try:
+                inserted = repository.insert_snapshot_if_absent(db, today, bu_key, metrics)
+            except sqlite3.IntegrityError:
+                inserted = False
+            (saved if inserted else skipped).append(label)
 
         _save("", "全域")
         for entity_id in repository.list_entity_ids(db):

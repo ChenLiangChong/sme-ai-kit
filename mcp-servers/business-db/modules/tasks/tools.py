@@ -90,7 +90,7 @@ def list_tasks(
         assignee: 篩選指派對象
         category: 篩選分類
         business_unit: 篩選事業體（留空=全部）
-        parent_task_id: 列出指定父任務的子任務（0=列出頂層任務）
+        parent_task_id: 0=只列頂層任務（無父任務者）；>0=列出該父任務的子任務；-1=不過濾（列出所有任務含子任務）
         limit: 最多顯示幾筆
     """
     return service.list_tasks(

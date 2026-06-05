@@ -56,7 +56,11 @@ def get_approved_unused(
     db: sqlite3.Connection, approval_id: int
 ) -> sqlite3.Row | None:
     """取已核准、尚未消耗的 approval。供 record_transaction / create_order 等
-    需要 HITL 通過的 caller 使用，並在使用後呼叫 mark_consumed 綁定到建立的 record。"""
+    需要 HITL 通過的 caller 使用，並在使用後呼叫 mark_consumed 綁定到建立的 record。
+
+    NOTE：此 getter **不**過濾 expires_at——過期判定（含「已過期 vs 不存在」的
+    區分回報）由 service.gate_check 負責，這裡只回「status=approved 且未消耗」的 row。
+    """
     return db.execute(
         "SELECT * FROM approvals "
         "WHERE id = ? AND status = 'approved' AND consumed_at IS NULL",
@@ -94,11 +98,18 @@ def mark_decided(
     decision: str,
     decided_by: str,
     decided_at: str,
-) -> None:
-    db.execute(
-        "UPDATE approvals SET status = ?, approver = ?, decided_at = ? WHERE id = ?",
+) -> int:
+    """以 CAS 方式落定審核結果，回傳實際 UPDATE 行數。
+
+    WHERE 加 `status='waiting' AND decided_at IS NULL` 防雙簽 race：兩個簽核人
+    各自讀到 waiting 後，只有先 commit 的那筆 UPDATE 命中（rowcount=1），後者
+    rowcount=0、由 service fail-closed 擋下，不會覆寫前者的決定 / 稽核。"""
+    cursor = db.execute(
+        "UPDATE approvals SET status = ?, approver = ?, decided_at = ? "
+        "WHERE id = ? AND status = 'waiting' AND decided_at IS NULL",
         (decision, decided_by, decided_at, approval_id),
     )
+    return cursor.rowcount
 
 
 def insert_interaction_log(

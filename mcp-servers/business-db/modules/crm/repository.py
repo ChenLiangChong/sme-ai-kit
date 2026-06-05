@@ -127,6 +127,24 @@ def insert_entity_terms(
     )
 
 
+def upsert_entity_terms(
+    db: sqlite3.Connection,
+    customer_id: int,
+    business_unit: str,
+    discount_rate: float,
+    payment_terms: str,
+) -> None:
+    """原子 upsert：依 UNIQUE(customer_id, business_unit) 衝突時改 UPDATE，
+    避免「先 SELECT 再 INSERT」在併發下撞唯一鍵 raise。"""
+    db.execute(
+        "INSERT INTO customer_entity_terms "
+        "(customer_id, business_unit, discount_rate, payment_terms) VALUES (?,?,?,?) "
+        "ON CONFLICT(customer_id, business_unit) DO UPDATE SET "
+        "discount_rate = excluded.discount_rate, payment_terms = excluded.payment_terms",
+        (customer_id, business_unit, discount_rate, payment_terms),
+    )
+
+
 def safe_update_entity_terms(
     db: sqlite3.Connection,
     customer_id: int,

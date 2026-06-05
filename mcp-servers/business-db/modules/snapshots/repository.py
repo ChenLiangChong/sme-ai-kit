@@ -102,11 +102,14 @@ def snapshot_exists(
     return row is not None
 
 
-def insert_snapshot(
+def insert_snapshot_if_absent(
     db: sqlite3.Connection, today: str, business_unit_key: str, metrics: dict
-) -> int:
+) -> bool:
+    """原子寫入：INSERT OR IGNORE 對唯一鍵 (snapshot_date, COALESCE(business_unit,'')) 衝突時 no-op。
+    回傳 True=本次真有插入、False=已存在被略過（用 rowcount 判斷）。避免 check-then-insert 在併發下
+    撞鍵 raise、整批 tx 回滾。"""
     cursor = db.execute(
-        "INSERT INTO daily_snapshots "
+        "INSERT OR IGNORE INTO daily_snapshots "
         "(snapshot_date, business_unit, pending_tasks, completed_tasks_today, overdue_tasks, "
         "total_income, total_expense, pending_receivables, low_stock_count, total_customers, "
         "line_messages_today, active_orders) "
@@ -126,7 +129,7 @@ def insert_snapshot(
             metrics["active_orders"],
         ),
     )
-    return cursor.lastrowid
+    return cursor.rowcount > 0
 
 
 def list_entity_ids(db: sqlite3.Connection) -> list[str]:

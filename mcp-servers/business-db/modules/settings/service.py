@@ -2,6 +2,7 @@
 
 層次邊界：transaction ownership 在這層，repository 不 commit。
 """
+from shared.auth import _check_permission, _resolve_actor_label
 from shared.db import _now, get_db, transaction
 
 from . import repository
@@ -27,9 +28,20 @@ def upsert_company(
     boss_title: str,
     boss_line_id: str,
     approval_threshold: float,
+    actor_user_id: str = "",
 ) -> str:
-    """name/industry/... 留空（或 boss_line_id='__SKIP__'）= 不更新；首次呼叫自動建立。"""
+    """name/industry/... 留空（或 boss_line_id='__SKIP__'）= 不更新；首次呼叫自動建立。
+
+    改公司主設定（boss_line_id 通知路由、審核門檻）= 高權動作，需 admin（defense-in-depth；
+    受限層的工具移除另由 floor_policy 處理、此處為 service 層第二道權限關卡）。floored session
+    取 line-channel verified user_id 驗權、agent 自填無效；operator（無 SME_FLOOR、空 actor）放行。
+    """
     with transaction() as db:
+        # fail-closed 必須在任何寫入「之前」：transaction() 對 return 字串仍會 commit。
+        perm_err = _check_permission(db, actor_user_id, "admin")
+        if perm_err:
+            return perm_err
+        actor_label = _resolve_actor_label(db, actor_user_id)
         existing = repository.get_company(db)
         if not existing:
             repository.insert_company(
@@ -40,6 +52,11 @@ def upsert_company(
                 boss_title=boss_title or "老闆",
                 boss_line_id=boss_line_id if boss_line_id != "__SKIP__" else None,
                 approval_threshold=approval_threshold if approval_threshold >= 0 else 5000,
+            )
+            repository.insert_interaction_log(
+                db, actor=actor_label, action="company_created",
+                target_type="company", target_id=1,
+                detail=f"建立公司主設定：{name or '未設定'}",
             )
             return f"公司資訊已建立：{name or '未設定'}"
 
@@ -63,6 +80,11 @@ def upsert_company(
 
         repository.safe_update_company(db, updates, params)
         changed = ", ".join(u.split(" = ")[0] for u in updates)
+        repository.insert_interaction_log(
+            db, actor=actor_label, action="company_updated",
+            target_type="company", target_id=1,
+            detail=f"更新公司主設定欄位：{changed}",
+        )
         return f"公司資訊已更新（{changed}）"
 
 
@@ -74,8 +96,16 @@ def upsert_entity(
     channel_id: str,
     approval_threshold: float,
     notes: str,
+    actor_user_id: str = "",
 ) -> str:
+    """登錄 / 更新事業體（含審核門檻、OA→BU 映射）= 高權動作，需 admin（defense-in-depth、
+    同 upsert_company）。floored 取 verified user_id、operator 空 actor 放行。"""
     with transaction() as db:
+        # fail-closed 在任何寫入之前。
+        perm_err = _check_permission(db, actor_user_id, "admin")
+        if perm_err:
+            return perm_err
+        actor_label = _resolve_actor_label(db, actor_user_id)
         existing = repository.get_entity(db, entity_id)
         if existing:
             updates: list[str] = []
@@ -91,6 +121,12 @@ def upsert_entity(
             if not updates:
                 return "沒有指定要更新的欄位。"
             repository.safe_update_entity(db, entity_id, updates, params)
+            changed = ", ".join(u.split(" = ")[0] for u in updates)
+            repository.insert_interaction_log(
+                db, actor=actor_label, action="business_entity_updated",
+                target_type="business_entity", target_id=0,
+                detail=f"更新事業體 {entity_id} 欄位：{changed}", business_unit=entity_id,
+            )
             return f"事業體 {entity_id} ({name}) 已更新"
 
         repository.insert_entity(
@@ -100,6 +136,11 @@ def upsert_entity(
             channel_id=channel_id or None,
             approval_threshold=approval_threshold if approval_threshold >= 0 else None,
             notes=notes or None,
+        )
+        repository.insert_interaction_log(
+            db, actor=actor_label, action="business_entity_created",
+            target_type="business_entity", target_id=0,
+            detail=f"登錄事業體 {entity_id} ({name})", business_unit=entity_id,
         )
         return f"事業體 {entity_id} ({name}) 已登錄"
 

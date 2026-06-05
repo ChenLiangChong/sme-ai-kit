@@ -79,12 +79,31 @@ def update_stock(
     business_unit: str,
 ) -> str:
     with transaction() as db:
-        item = repository.find_by_sku(db, sku, business_unit)
-        if not item:
-            return _create_new_item(
-                db, sku, quantity_change, reason, name, sell_price,
-                unit_cost, min_stock, unit, category, business_unit,
-            )
+        if business_unit:
+            # BU 有指定 → 嚴格按該 BU 找。找不到時「不」靜默 fallback 到全域共用庫存
+            # （find_by_sku 會 fallback、BU 打錯會誤扣別的庫存列）→ 只在該 BU 內判斷。
+            item = repository.find_by_sku_exact(db, sku, business_unit)
+            if not item:
+                # 該 BU 無此 SKU：若全域（無歸屬）有同 SKU，明確報「BU 不符」而非誤改全域；
+                # 否則視為該 BU 新品項。
+                global_item = repository.find_global_by_sku(db, sku)
+                if global_item:
+                    return (
+                        f"ERROR: 事業體 {business_unit} 無 SKU={sku}（但有一筆無歸屬的同 SKU 庫存）。"
+                        f"請確認事業體是否正確；若要動到無歸屬庫存請不要帶 business_unit，"
+                        f"若要為此事業體新建請改用全新 SKU。"
+                    )
+                return _create_new_item(
+                    db, sku, quantity_change, reason, name, sell_price,
+                    unit_cost, min_stock, unit, category, business_unit,
+                )
+        else:
+            item = repository.find_by_sku(db, sku, business_unit)
+            if not item:
+                return _create_new_item(
+                    db, sku, quantity_change, reason, name, sell_price,
+                    unit_cost, min_stock, unit, category, business_unit,
+                )
 
         new_stock = item["current_stock"] + quantity_change
         if new_stock < 0:

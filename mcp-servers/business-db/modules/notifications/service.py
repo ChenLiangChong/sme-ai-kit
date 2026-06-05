@@ -1,7 +1,14 @@
 """Notifications service — LINE 訊息查詢 + 群組管理業務邏輯（格式化 + flow）。
 
 層次邊界：transaction ownership 在這層，repository 不 commit。
+
+安全（codex 全專案審）：受限層的工具移除（search_line_messages / list_line_groups /
+register_line_group）由 shared.floor_policy.LINE_DATA_TOOLS 在 MCP 註冊後物理移除負責。
+本層另加 defense-in-depth：萬一工具未被移除（floor-map 設定錯 / 全權限誤呼），register_line_group
+這個寫入仍走 writer_or_error 做 actor fail-closed + audit 具名。**列級 channel/BU 縮限尚未實作**——
+search / list 不在碼或回傳宣稱「部門層只看自己 channel」，可見度收斂只靠 floor 工具移除這一道。
 """
+from shared.auth import writer_or_error
 from shared.db import get_db, transaction
 
 from . import repository
@@ -66,9 +73,19 @@ def register_line_group(
     channel_id: str,
     purpose: str,
     notes: str,
+    actor: str = "",
 ) -> str:
     ch = channel_id or "default"
     with transaction() as db:
+        # actor fail-closed（defense-in-depth、對齊 #10）：在任何 line_groups 寫入「之前」解析可信寫入者。
+        # floored session 取 line-channel verified 員工名（忽略 agent 自填的 actor）、operator 用傳入值；
+        # floored 但查無 verified LINE 脈絡 → __unverified__ → 擋下。防受限層只憑 group_id/channel_id
+        # 覆寫任意群組的 group_type/purpose/notes 造成跨部門資料汙染。transaction() 對 return 字串仍會
+        # commit、故必須在寫入前擋（writer_or_error 的契約）。
+        audit_actor, err = writer_or_error(db, actor)
+        if err:
+            return err
+
         existing = repository.get_line_group(db, group_id, ch)
         if existing:
             repository.update_line_group(
@@ -92,6 +109,12 @@ def register_line_group(
                 notes=notes or None,
             )
             verb = "已註冊"
+        db.execute(
+            "INSERT INTO interaction_log (actor, action, target_type, target_id, detail) "
+            "VALUES (?,?,?,?,?)",
+            (audit_actor, f"line_group_{verb}", "line_group", 0,
+             f"group_id={group_id} channel={ch} type={group_type}"),
+        )
     purpose_label = f" — {purpose}" if purpose else ""
     return f"群組{verb}：{group_name or group_id}（{group_type}）{purpose_label}"
 

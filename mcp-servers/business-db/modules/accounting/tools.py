@@ -134,8 +134,9 @@ def update_transaction(
     due_date: str = "",
     related_order_id: int = -1,
     related_customer_id: int = -1,
+    actor_user_id: str = "",
 ) -> str:
-    """修正帳目欄位（不含金額，金額修正請刪除重建）。
+    """修正帳目欄位（不含金額，金額修正請刪除重建）。需 manager 以上權限（會改付款狀態/客戶掛載等財務欄位）。
 
     Args:
         transaction_id: 帳目 ID
@@ -146,6 +147,7 @@ def update_transaction(
         due_date: 新到期日 YYYY-MM-DD（留空=不改）
         related_order_id: 關聯訂單 ID（-1=不改，0=清除）
         related_customer_id: 關聯客戶 ID（-1=不改，0=清除）
+        actor_user_id: 操作者 LINE user_id（權限驗證，留空=系統呼叫/operator，不驗證）
     """
     return service.update_transaction(
         transaction_id=transaction_id,
@@ -156,6 +158,7 @@ def update_transaction(
         due_date=due_date,
         related_order_id=related_order_id,
         related_customer_id=related_customer_id,
+        actor_user_id=actor_user_id,
     )
 
 
