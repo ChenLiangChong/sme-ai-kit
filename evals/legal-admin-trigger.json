@@ -1,0 +1,14 @@
+{"queries": [
+  {"id": "review", "query": "這筆上訴時限的計算我看過了，送達日和天數都對，幫我標記已複核", "should_trigger": true, "notes": "mark_deadline_reviewed 覆核留痕", "tags": ["new"]},
+  {"id": "amend", "query": "剛才那筆時限的送達日我填錯了，應該是6月10號不是6月1號，幫我改", "should_trigger": true, "notes": "amend_deadline 異動重算", "tags": ["new"]},
+  {"id": "provisional", "query": "法院寄來假扣押的命起訴裁定，要算債權人起訴的期限", "should_trigger": true, "notes": "provisional_litigation 保全命起訴", "tags": ["new"]},
+  {"id": "admin", "query": "訴願決定書收到了，要算提起行政訴訟撤銷訴訟的起訴期間", "should_trigger": true, "notes": "admin_revocation 行訴§106", "tags": ["new"]},
+  {"id": "limitation", "query": "這個借款債權的請求權消滅時效還剩多久？幫我建一個時效提醒", "should_trigger": true, "notes": "消滅時效 statute_*", "tags": ["new"]},
+  {"id": "audit", "query": "這筆時限被改過幾次？誰改的、改了什麼", "should_trigger": true, "notes": "get_deadline_audit", "tags": ["new"]},
+  {"id": "calendar_deid", "query": "把這筆上訴期限寫進事務所的 Google 行事曆", "should_trigger": true, "notes": "screen_calendar_text + 寫行事曆", "tags": ["existing"]},
+  {"id": "appeal_basic", "query": "傳一張一審民事判決照片，幫我算上訴期限", "should_trigger": true, "notes": "create_deadline 既有核心", "tags": ["existing"]},
+  {"id": "query_matter", "query": "林先生的那個案子是哪一件？有哪些時限快到", "should_trigger": true, "notes": "find_matter_by_party", "tags": ["existing"]},
+  {"id": "neg_marketing", "query": "幫我寫一篇 Instagram 貼文宣傳事務所", "should_trigger": false, "notes": "對外行銷 → social-media", "tags": ["neg"]},
+  {"id": "neg_design", "query": "幫我設計一張事務所的名片", "should_trigger": false, "notes": "視覺設計 → sme-design", "tags": ["neg"]},
+  {"id": "neg_weather", "query": "今天台北天氣怎麼樣？", "should_trigger": false, "notes": "完全無關", "tags": ["neg"]}
+]}
