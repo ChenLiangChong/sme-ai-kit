@@ -986,7 +986,7 @@ _assert("§121: 2026-06-15+5年→相當日前一日 2031-06-14",
 _lim125 = compute_deadline(
     period_type="statutory", statutory_days=0, statutory_basis="民法§125",
     service_type="normal", service_base_date="2010-01-01", has_local_agent=True,
-    period_unit="year", period_value=15, db=db)
+    period_unit="year", period_value=15, counting_regime="limitation", db=db)
 _assert("§125: 無 error", "error" not in _lim125, detail=str(_lim125.get("error")))
 _assert("§125: 起算2010-01-02(§120翌日)、末日2025-01-01(§121相當日前一日)",
         _lim125["start_date"] == "2010-01-02" and _lim125["statutory_deadline"] == "2025-01-01")
@@ -1005,7 +1005,7 @@ _assert("§125: calc_trace 含§121 + §122見解分歧 + §128法律判斷",
 _lim_wkend = compute_deadline(
     period_type="statutory", statutory_days=0, statutory_basis="民法§125",
     service_type="normal", service_base_date="2010-01-04", has_local_agent=True,
-    period_unit="year", period_value=15, db=db)
+    period_unit="year", period_value=15, counting_regime="limitation", db=db)
 _assert("§122不自動順延: 末日落週六2025-01-04 仍依曆、不順延至下週一",
         _lim_wkend["statutory_deadline"] == "2025-01-04", detail=_lim_wkend["statutory_deadline"])
 
@@ -1130,7 +1130,7 @@ _assert("修補HIGH2: statute_125 period_value 改 5 → ERROR", "ERROR" in _rTa
 _lim_svc = compute_deadline(
     period_type="statutory", statutory_days=0, statutory_basis="民法§125",
     service_type="public_domestic", service_base_date="2020-01-01", has_local_agent=True,
-    period_unit="year", period_value=15, db=db)
+    period_unit="year", period_value=15, counting_regime="limitation", db=db)
 _assert("修補HIGH3: 純函式 limitation 不吃 service_type 加算（public_domestic→末日仍2035-01-01）",
         _lim_svc["statutory_deadline"] == "2035-01-01", detail=_lim_svc["statutory_deadline"])
 _svcSN.create_deadline(
@@ -1171,7 +1171,7 @@ _assert("修補MED5: §197_2y 回覆提醒另一本10年時鐘（雙時鐘防漏
 _lim_month = compute_deadline(
     period_type="statutory", statutory_days=0, statutory_basis="自訂月期間",
     service_type="normal", service_base_date="2026-01-30", has_local_agent=True,
-    period_unit="month", period_value=1, db=db)
+    period_unit="month", period_value=1, counting_regime="limitation", db=db)
 _assert("修補MED6: month 路徑 2026-01-30→start01-31+1月→無相當日→月末2026-02-28（§121但書）",
         _lim_month["statutory_deadline"] == "2026-02-28", detail=_lim_month["statutory_deadline"])
 
@@ -1317,6 +1317,179 @@ finally:
         _osFC.environ.pop("LINE_STATE_DIR", None)
     else:
         _osFC.environ["LINE_STATE_DIR"] = _saved_lsd_fc
+
+
+# === 保全§529 命起訴期間（court_set seed）+ 行訴§106 程序月期間（counting_regime=procedural）===
+print("\n=== 保全§529 court_set + 行訴§106 程序月期間 ===")
+from shared.deadlines import (  # noqa: E402
+    PROCEDURAL_CALENDAR_PERIODS, procedural_calendar_type, court_set_type,
+)
+
+# --- 保全§529：登記於 COURT_SET_PERIODS、走 court_set 路徑（律師讀命起訴裁定填天數、強制複核）---
+_assert("§529: provisional_litigation 已登記於 COURT_SET_PERIODS",
+        "provisional_litigation" in _CSP and court_set_type("provisional_litigation") is not None)
+_assert("§529: 種子無 statutory_days 欄（反捏造：期間非法定固定值、律師讀裁定填）",
+        "statutory_days" not in _CSP["provisional_litigation"])
+_assert("§529: severity=red（逾期未起訴→保全被撤銷、失權）",
+        _CSP["provisional_litigation"]["severity"] == "red")
+_mid529 = db.execute(
+    "INSERT INTO matters (matter_no, title, status, has_local_agent, confidential) "
+    "VALUES ('2026-bn-001', '假扣押命起訴案', 'open', 1, 0)").lastrowid
+db.commit()
+# 缺天數 → ERROR + 提示讀裁定（court_set 反捏造：不臆測不預設）
+_r529NoDays = _svcSN.create_deadline(
+    matter_id=_mid529, type="provisional_litigation", description="", trigger_event="",
+    service_base_date="2026-06-01", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=-1, in_transit_days=0,
+    court_region="", party_region="", buffer_days=1, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="王律師")
+_assert("§529: 缺天數 → ERROR（讀裁定填、引擎不臆測）",
+        "ERROR" in _r529NoDays and "裁定" in _r529NoDays, detail=_r529NoDays[:90])
+# 完整建立：律師讀命起訴裁定填 30 日 + 裁定文號 → court_set 強制複核 + sibling note §529III
+_r529 = _svcSN.create_deadline(
+    matter_id=_mid529, type="provisional_litigation", description="", trigger_event="",
+    service_base_date="2026-06-01", service_type="normal", statutory_days=30,
+    statutory_basis="北院114全字第5號裁定 + 民訴§529", statutory_basis_version="", period_type="",
+    severity="", has_local_agent=-1, in_transit_days=0, court_region="", party_region="",
+    buffer_days=1, stated_period_days=0, document_date="", assignee="", assignee_line_user_id="",
+    escalation_lead_days="", created_by="王律師")
+_assert("§529: 完整建立成功 + 強制人工複核（court_set）+ §529Ⅲ夫妻剩餘財產提醒",
+        "已建立" in _r529 and "需人工複核" in _r529 and "§529Ⅲ" in _r529, detail=_r529[:140])
+_d529 = db.execute(
+    "SELECT period_type,period_unit,statutory_days,needs_manual_review,severity FROM deadlines "
+    "WHERE matter_id=? ORDER BY id DESC LIMIT 1", (_mid529,)).fetchone()
+_assert("§529: 落欄 period_type=court_set/period_unit=day/statutory_days=30/強制複核",
+        _d529 and _d529["period_type"] == "court_set" and _d529["period_unit"] == "day"
+        and _d529["statutory_days"] == 30 and _d529["needs_manual_review"] == 1,
+        detail=str(dict(_d529)) if _d529 else "None")
+
+# --- 行訴§106 純函式 golden：訴願決定書送達後2個月不變期間（送達+次日+§121+§122）---
+# 送達 2026-02-02(一)→effective 2/2→start 2/3→+2月§121相當日(4/3)前一日=4/2(週四上班日、不順延)
+_a106 = compute_deadline(
+    period_type="peremptory", statutory_days=0, statutory_basis="行政訴訟法§106Ⅰ",
+    service_type="normal", service_base_date="2026-02-02", has_local_agent=True,
+    period_unit="month", period_value=2, counting_regime="procedural", buffer_days=1, db=db)
+_assert("§106 golden: 送達2026-02-02→末日2026-04-02（§121相當日前一日、末日為上班日不順延）",
+        _a106["statutory_deadline"] == "2026-04-02", detail=_a106["statutory_deadline"])
+_assert("§106 golden: 起算=送達次日2026-02-03（民§120Ⅱ、行訴§88依民法）",
+        _a106["start_date"] == "2026-02-03", detail=_a106["start_date"])
+_assert("§106 golden: period_unit/value 回 month/2（反捏造：非日）",
+        _a106["period_unit"] == "month" and _a106["period_value"] == 2)
+_assert("§106 golden: 回復原狀=行政訴訟法§91（≠民訴§164；1個月、逾1年/逾3年不得）",
+        _a106["recovery_window"].get("basis") == "行政訴訟法§91"
+        and "1個月" in _a106["recovery_window"].get("condition", ""), detail=str(_a106["recovery_window"]))
+_assert("§106 golden: 有當地代理人→在途0、calc_trace 標行訴§89但書（非民訴§162）",
+        _a106["in_transit_days"] == 0 and any("行訴§89但書" in t for t in _a106["calc_trace"]),
+        detail=str([t for t in _a106["calc_trace"] if "在途" in t]))
+_assert("§106 golden: 起算用送達日(確定事實)→不因 regime 強制複核（calendar 已載入、normal 送達）",
+        _a106["needs_manual_review"] is False, detail=str(_a106["calc_trace"]))
+_assert("§106 golden: calc_trace 含民§121 + §123 依曆",
+        any("§121" in t for t in _a106["calc_trace"]) and any("§123" in t for t in _a106["calc_trace"]))
+
+# §121但書（月期間無相當日→該月末日）+ §122 順延：送達 2025-12-30→start 12/31→+2月→2/28(週六)→順延 3/2
+_a106b = compute_deadline(
+    period_type="peremptory", statutory_days=0, statutory_basis="行政訴訟法§106Ⅰ",
+    service_type="normal", service_base_date="2025-12-30", has_local_agent=True,
+    period_unit="month", period_value=2, counting_regime="procedural", buffer_days=0, db=db)
+_assert("§106 §121但書: 送達2025-12-30→起算12-31→+2月無相當日→月末2026-02-28(週六)→§122順延2026-03-02",
+        _a106b["statutory_deadline"] == "2026-03-02"
+        and any("§121但書" in t for t in _a106b["calc_trace"]), detail=_a106b["statutory_deadline"])
+
+# --- 行訴§106 service 端到端：admin_revocation 種子回填、不強制複核、提醒三例外 ---
+_assert("§106: admin_revocation 已登記 PROCEDURAL_CALENDAR_PERIODS",
+        "admin_revocation" in PROCEDURAL_CALENDAR_PERIODS
+        and procedural_calendar_type("admin_revocation") is not None)
+_mid106 = db.execute(
+    "INSERT INTO matters (matter_no, title, status, has_local_agent, confidential) "
+    "VALUES ('2026-adm-001', '撤銷訴訟案', 'open', 1, 0)").lastrowid
+db.commit()
+_r106 = _svcSN.create_deadline(
+    matter_id=_mid106, type="admin_revocation", description="", trigger_event="",
+    service_base_date="2026-02-02", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=-1, in_transit_days=0,
+    court_region="", party_region="", buffer_days=1, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="王律師")
+_assert("§106端到端: 建立成功 + 期間顯示「2 月」+ 逾3年/利害關係人/§106Ⅲ三例外提醒",
+        "已建立" in _r106 and "2 月" in _r106 and "逾3年" in _r106 and "利害關係人" in _r106,
+        detail=_r106[:160])
+_d106 = db.execute(
+    "SELECT period_type,period_unit,period_value,statutory_days,statutory_basis,"
+    "needs_manual_review,statutory_deadline,severity FROM deadlines "
+    "WHERE matter_id=? ORDER BY id DESC LIMIT 1", (_mid106,)).fetchone()
+_assert("§106端到端: 落欄 period_type=peremptory/unit=month/value=2/statutory_days=0/basis=行訴§106",
+        _d106 and _d106["period_type"] == "peremptory" and _d106["period_unit"] == "month"
+        and _d106["period_value"] == 2 and _d106["statutory_days"] == 0
+        and "§106" in _d106["statutory_basis"], detail=str(dict(_d106)) if _d106 else "None")
+_assert("§106端到端: 末日2026-04-02、不強制複核（送達日確定事實、calendar 已載入）",
+        _d106 and _d106["statutory_deadline"] == "2026-04-02" and _d106["needs_manual_review"] == 0,
+        detail=str(dict(_d106)) if _d106 else "None")
+_get106 = _svcSN.get_deadline(_d106 and db.execute(
+    "SELECT id FROM deadlines WHERE matter_id=? ORDER BY id DESC LIMIT 1", (_mid106,)).fetchone()["id"])
+_assert("§106端到端: get_deadline 顯示「法定期間：2 月」、不出現「2 日」（反捏造）",
+        "2 月" in _get106 and "法定期間：2 日" not in _get106,
+        detail=str([l for l in _get106.split(chr(10)) if "法定期間" in l]))
+
+# --- 行訴§106 種子鎖（反捏造）：改 period_type / period_value → ERROR ---
+_r106BadPt = _svcSN.create_deadline(
+    matter_id=_mid106, type="admin_revocation", description="", trigger_event="",
+    service_base_date="2026-02-02", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="statutory", severity="", has_local_agent=-1,
+    in_transit_days=0, court_region="", party_region="", buffer_days=1, stated_period_days=0,
+    document_date="", assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="王律師")
+_assert("§106鎖: admin_revocation 改標 statutory → ERROR（§106 是不變期間 peremptory）",
+        "ERROR" in _r106BadPt and "peremptory" in _r106BadPt, detail=_r106BadPt[:90])
+_r106BadVal = _svcSN.create_deadline(
+    matter_id=_mid106, type="admin_revocation", description="", trigger_event="",
+    service_base_date="2026-02-02", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=-1, in_transit_days=0,
+    court_region="", party_region="", buffer_days=1, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="王律師", period_value=3)
+_assert("§106鎖: admin_revocation period_value 改 3 → ERROR（法定2月固定）",
+        "ERROR" in _r106BadVal, detail=_r106BadVal[:90])
+
+# --- 行訴§106 教示比對 month-aware：stated=2→相符；stated=60(誤填日)→不符+複核 ---
+_a106match = compute_deadline(
+    period_type="peremptory", statutory_days=0, statutory_basis="行政訴訟法§106Ⅰ",
+    service_type="normal", service_base_date="2026-02-02", has_local_agent=True,
+    period_unit="month", period_value=2, counting_regime="procedural", stated_period_days=2, db=db)
+_assert("§106教示: 教示2(月)＝引擎2月→相符（match、單位 aware 不誤判）",
+        _a106match["period_match"] == "match"
+        and any("教示" in t and "個月" in t and "相符" in t for t in _a106match["calc_trace"]),
+        detail=str([t for t in _a106match["calc_trace"] if "教示" in t]))
+_a106mis = compute_deadline(
+    period_type="peremptory", statutory_days=0, statutory_basis="行政訴訟法§106Ⅰ",
+    service_type="normal", service_base_date="2026-02-02", has_local_agent=True,
+    period_unit="month", period_value=2, counting_regime="procedural", stated_period_days=60, db=db)
+_assert("§106教示: 教示60(誤當日)≠引擎2月→不符+強制複核（揪出單位/期間誤判）",
+        _a106mis["period_match"] == "mismatch" and _a106mis["needs_manual_review"] is True,
+        detail=_a106mis["period_match"])
+
+# --- 行訴§106 無當地代理人：行政在途依行訴§89Ⅱ司法院定之、引擎無表→人工複核（不臆測）---
+_a106na = compute_deadline(
+    period_type="peremptory", statutory_days=0, statutory_basis="行政訴訟法§106Ⅰ",
+    service_type="normal", service_base_date="2026-02-02", has_local_agent=False,
+    period_unit="month", period_value=2, counting_regime="procedural", db=db)
+_assert("§106在途: 行政無代理人→needs_review + trace 標行訴§89Ⅱ（不臆測在途）",
+        _a106na["needs_manual_review"] is True
+        and any("行訴§89Ⅱ" in t for t in _a106na["calc_trace"]),
+        detail=str([t for t in _a106na["calc_trace"] if "在途" in t]))
+
+# --- counting_regime 防呆 + 四表零重疊 ---
+_rRegBad = compute_deadline(
+    period_type="statutory", statutory_days=20, statutory_basis="民訴§440",
+    service_type="normal", service_base_date="2026-02-02", has_local_agent=True,
+    counting_regime="bogus", db=db)
+_assert("regime防呆: counting_regime 非法值 → error", "error" in _rRegBad, detail=str(_rRegBad.get("error")))
+_rRegLimDay = compute_deadline(
+    period_type="statutory", statutory_days=20, statutory_basis="民訴§440",
+    service_type="normal", service_base_date="2026-02-02", has_local_agent=True,
+    counting_regime="limitation", period_unit="day", db=db)
+_assert("regime防呆: limitation 搭 period_unit=day → error（消滅時效必年/月）",
+        "error" in _rRegLimDay, detail=str(_rRegLimDay.get("error")))
+_assert("四表零重疊: PROCEDURAL_CALENDAR_PERIODS 與 STATUTORY/COURT_SET/LIMITATION 皆不重疊",
+        not (set(PROCEDURAL_CALENDAR_PERIODS) & set(STATUTORY_PERIODS))
+        and not (set(PROCEDURAL_CALENDAR_PERIODS) & set(_CSP))
+        and not (set(PROCEDURAL_CALENDAR_PERIODS) & set(LIMITATION_PERIODS)))
 
 
 db.close()

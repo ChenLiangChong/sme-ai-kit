@@ -126,10 +126,18 @@ def create_deadline(
     statutory_days / statutory_basis / period_type / description（律師仍可覆寫）。
     type 不在種子表 → **必須**手動帶 statutory_days + statutory_basis + period_type，否則擋下。
 
-    裁定期間類（type='correction' 限期補正等）：自動帶 period_type=court_set / severity=orange / 描述 /
-    觸發語，但 statutory_days **絕不回填**——裁定期間是法院在裁定當下載明（「於本裁定送達後 ○ 日內補正」），
-    律師必須讀裁定填 ○ 日；statutory_basis 填補正裁定文號（非法條）。凡最終 period_type=court_set 一律
-    強制 needs_manual_review（天數純人讀、無固定法定種子可交叉驗證＝反捏造風險最高，須律師覆核）。
+    裁定期間類（type='correction' 限期補正 / 'provisional_litigation' 保全命起訴等）：自動帶
+    period_type=court_set / severity / 描述 / 觸發語，但 statutory_days **絕不回填**——裁定期間是法院在
+    裁定當下載明（限期補正「於本裁定送達後 ○ 日內補正」；保全命起訴民訴§529Ⅰ「命債權人於『一定期間』內
+    起訴」、期間由法院於命起訴裁定主文所定、坊間「30日」是慣例非法律值），律師必須讀那紙裁定填 ○ 日；
+    statutory_basis 填裁定文號（非法條）。凡最終 period_type=court_set 一律強制 needs_manual_review（天數
+    純人讀、無固定法定種子可交叉驗證＝反捏造風險最高，須律師覆核）。
+
+    程序月期間類（type='admin_revocation' 行政訴訟撤銷訴訟 行訴§106Ⅰ等）：與消滅時效都是「月」期間但本質
+    不同——走程序機制（送達+次日§120Ⅱ+在途行訴§89+依曆2個月§121/§123+末日順延§122），起算用「訴願決定書
+    送達日」這個確定事實（非法律判斷）→ **不**強制複核（這正是相對消滅時效可確定性自動算之處），但回覆會
+    提醒三例外須律師另判（逾3年長期失權、利害關係人知悉在後改起算、不經訴願§106Ⅲ）。回復原狀依行政訴訟法§91
+    （1個月，≠民訴§164 之10日）。自動回填 period_unit=month/period_value=2/period_type=peremptory/basis。
 
     消滅時效類（type='limitation' 或 statute_125/126/127/197_2y/197_10y、period_unit='year'/'month'）：
     與訴訟期間根本不同——期間是「年/月」（用 period_value 非 statutory_days）、依民§121 曆法（相當日

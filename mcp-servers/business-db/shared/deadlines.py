@@ -123,6 +123,18 @@ COURT_SET_PERIODS = {
         "default_trigger": "補正裁定送達",
         "basis_hint": "補正裁定文號（如「臺灣臺北地方法院 114 年度補字第 ○ 號裁定」）",
     },
+    "provisional_litigation": {  # 保全（假扣押/假處分）命起訴期間（民訴§529Ⅰ，假處分準用§533）
+        # 法條查證（taiwan-legal-db query_regulation 民訴§529/§533）：§529Ⅰ「命債權人於『一定期間』內
+        # 起訴」——期間是**法院於命起訴裁定主文當下所定**、非法定固定日數（坊間「30日」是慣例非法律值＝
+        # 捏造風險）。故歸 court_set：律師必讀那紙命起訴裁定填天數、引擎不臆測不預設。
+        # severity=red：逾期未起訴→債務人得聲請撤銷假扣押/假處分裁定（§529Ⅳ/§533準用）＝保全盡失、
+        # 無補正餘地，較限期補正(orange,可補)更失權，故 red。起算屬法律判斷(命起訴裁定送達)→court_set 強制複核。
+        "period_type": "court_set",
+        "severity": "red",
+        "label": "保全命起訴期間（假扣押/假處分·命起訴裁定所定）",
+        "default_trigger": "命起訴裁定送達",
+        "basis_hint": "命起訴裁定文號 + 民訴§529（假處分準用§533）；期間為法院於裁定主文所定『一定期間』、非法定固定日數，請讀裁定填",
+    },
 }
 
 
@@ -179,6 +191,37 @@ def limitation_type(type_code):
     """type 是否為已登記的消滅時效類（statute_125 等）。回 dict（含 period_unit/period_value/
     period_type/severity/statutory_basis/label/trigger_hint）或 None。"""
     return LIMITATION_PERIODS.get(type_code)
+
+
+# ── 程序「月/年期間」種子（counting_regime='procedural'、period_unit='month'/'year'）──
+# 與消滅時效（limitation）關鍵不同：消滅時效是「實體權利」期間（民§128 自請求權可行使時起算、無送達/
+# 在途/§122 順延、起算屬法律判斷強制複核）；本表是「程序期間」但以「月」定（非日），故仍要走程序機制：
+#   送達生效 → 民§120Ⅱ 次日起算 → 依曆 N 個月（民§121 相當日前一日/§121但書無相當日→月末·§123依曆）
+#   → 在途加計 → 民§122 末日順延。
+# 法條查證（taiwan-legal-db query_regulation 行訴§88/§89/§91/§106）：行訴§88「期間之計算依民法之規定」
+# ＝§120/§121/§122 全適用；§89 在途（但書同民訴§162但書概念）；§91 回復原狀「原因消滅後1個月內、逾1年
+# 或§106起訴逾3年不得聲請」（≠民訴§164 之10日，寫死10日＝捏造）。
+# 種子只登記 period_unit/period_value/period_type/severity/法條/label/觸發/註記；起算用送達日（確定事實、
+# 非法律判斷）→ 預設**不**強制複核（這正是相對消滅時效的可確定性自動算之處），但於 trace/sibling_note
+# 明示三個須律師另判的例外（逾3年長期失權、利害關係人知悉在後、不經訴願§106Ⅲ）。
+PROCEDURAL_CALENDAR_PERIODS = {
+    "admin_revocation": {  # 行政訴訟撤銷訴訟/課予義務訴訟 起訴期間（行訴§106Ⅰ）
+        "period_unit": "month", "period_value": 2, "period_type": "peremptory", "severity": "red",
+        "statutory_basis": "行政訴訟法§106Ⅰ",
+        "statutory_basis_version": "行政訴訟法§106 現行（訴願決定書送達後2個月不變期間）",
+        "label": "行政訴訟撤銷訴訟起訴（訴願決定書送達後2個月）",
+        "default_trigger": "訴願決定書送達",
+        "longstop_note": "例外須律師另判：①§106Ⅰ後段 自訴願決定書送達後逾3年不得提起（長期失權、另立時鐘）；"
+                         "②利害關係人知悉在後者自知悉時起算（起算改法律判斷）；③不經訴願者依§106Ⅲ自行政處分"
+                         "達到/公告後2個月（起算事件不同、請另建一筆並改 trigger）。",
+    },
+}
+
+
+def procedural_calendar_type(type_code):
+    """type 是否為已登記的程序月/年期間類（admin_revocation 等）。回 dict 或 None。
+    與 limitation_type 互斥：本類走程序機制（送達/在途/§122），消滅時效類不走。"""
+    return PROCEDURAL_CALENDAR_PERIODS.get(type_code)
 
 
 # ── 期間「日數」修法沿革（法版檢核：反捏造安全網）──
@@ -273,6 +316,25 @@ def _statute_period_end(start: date, unit: str, value: int):
     if anchor.day == start.day:
         return anchor - timedelta(days=1), False   # 相當日之前一日
     return anchor, True                              # 無相當日 → 該月末日（§121 但書）
+
+
+def _bump_past_holidays(nominal_due: date, db):
+    """民§122 末日順延：末日遇休息日→逐日推次一上班日。日數路徑與程序月期間路徑共用（避免 drift）。
+    回 (statutory_deadline, bumped, trace_line, needs_review)。防呆上限 60（office_calendar 異常時擋下複核）。"""
+    d = nominal_due
+    bumped = 0
+    while is_holiday(d, db=db) and bumped < 60:
+        d = d + timedelta(days=1)
+        bumped += 1
+    if bumped == 0:
+        return d, 0, f"末日順延：{_fmt(nominal_due)} 為上班日→不順延（民法§122）", False
+    if bumped >= 60:
+        return d, bumped, (
+            f"末日順延：自 {_fmt(nominal_due)} 連推 60 日仍為假日（辦公日曆異常）→ 需人工複核（民法§122）"
+        ), True
+    return d, bumped, (
+        f"末日順延：{_fmt(nominal_due)} 為假日→順延 {bumped} 日至 {_fmt(d)}（次一上班日，民法§122）"
+    ), False
 
 
 def is_holiday(d, db=None) -> bool:
@@ -399,6 +461,7 @@ def compute_deadline(
     document_date: str = "",
     period_unit: str = "day",
     period_value=None,
+    counting_regime: str = "procedural",
     db=None,
 ) -> dict:
     """純函式：依 §2 步驟 1~7 算出法定/內部雙日期 + calc_trace + 法條依據。
@@ -420,6 +483,11 @@ def compute_deadline(
             交叉比對，不符 → needs_manual_review + calc_trace 記不符（反捏造：引擎不靜默蓋過教示）
         document_date: 文書作成日（判決/裁定日 YYYY-MM-DD，法版檢核用）。法版適用版本依「文書作成日」
             而非送達日（舊判決可能修法後才送達）。未提供 → 以 service_base_date 近似、calc_trace 誠實標明
+        period_unit: day（日數路徑、讀 statutory_days）/ year / month（曆法路徑、讀 period_value、依民§121）
+        period_value: 年/月期間數（period_unit=year/month 時必 > 0）
+        counting_regime: 'procedural'（程序期間：送達+次日§120Ⅱ+在途+§122 末日順延；含日數路徑與行訴§106
+            等月期間）/ 'limitation'（消滅時效：無送達/在途/§122、§128 自請求權可行使時起算、強制複核）。
+            'limitation' 必搭 period_unit=year/month；year/month + 'procedural' = 程序月期間（行訴§106）
         db: 可選 read-only 連線（is_holiday / 在途查表共用）
 
     Returns: dict — 含 effective_date / start_date / in_transit_days / in_transit_source /
@@ -437,23 +505,46 @@ def compute_deadline(
         return {"error": f"service_type 必須是 {sorted(_VALID_SERVICE_TYPES)}，got {service_type!r}"}
     if period_unit not in ("day", "year", "month"):
         return {"error": f"period_unit 必須是 day/year/month，got {period_unit!r}"}
-    # 縱深防禦（codex+workflow）：年/月曆法分支＝消滅時效、period_type 必為 statutory。純函式層也擋
-    # 「year/month + 非 statutory」組合，使 cron / 直接呼叫純函式的路徑同樣不接受法律性質錯置的輸入。
-    if period_unit in ("year", "month") and period_type != "statutory":
-        return {"error": f"period_unit={period_unit}（消滅時效曆法）要求 period_type=statutory，got {period_type!r}"}
+    if counting_regime not in ("procedural", "limitation"):
+        return {"error": f"counting_regime 必須是 procedural/limitation，got {counting_regime!r}"}
+    # ── 兩條正交軸（codex+workflow 全面審：原把「年/月」直接當「消滅時效」是錯誤耦合）──
+    #   _is_calendar：期間以年/月定 → 用民§121 曆法 + period_value（vs 日數路徑用 statutory_days）。
+    #   _is_limitation：消滅時效 regime → 無送達/在途/§122、§128 起算、強制複核（與「年/月」獨立：
+    #     行訴§106 是「年/月 + 程序 regime」、即月期間但仍走送達/在途/§122）。
+    _is_calendar = period_unit in ("year", "month")
+    _is_limitation = counting_regime == "limitation"
+    # 消滅時效必為年/月期間（無「以日計的消滅時效」走本引擎）
+    if _is_limitation and not _is_calendar:
+        return {"error": "counting_regime='limitation'（消滅時效）必須 period_unit=year/month、不可走日數路徑"}
+    # 消滅時效法律性質固定為 statutory（非不變期間/訓示）。程序月期間（行訴§106）則可為 peremptory（不變期間）
+    # → 故此鎖只綁 limitation regime、不再對所有年/月強制 statutory（否則行訴§106 不變期間被錯標）。
+    if _is_limitation and period_type != "statutory":
+        return {"error": f"counting_regime=limitation（消滅時效）要求 period_type=statutory，got {period_type!r}"}
     if not statutory_basis or not str(statutory_basis).strip():
         return {"error": "statutory_basis 不可為空（反捏造：每個法定天數都要有法條依據）"}
-    # statutory_days 僅「日數路徑（period_unit='day'）」適用且必 > 0；年/月（消滅時效）路徑改用
-    # period_value（在步驟 3' 驗），statutory_days 此時為 0/未提供、不可被 day 路徑的 >0 規則誤擋。
-    _is_statute_period = period_unit in ("year", "month")
+    # 行政訴訟期間：在途依行訴§89、回復原狀依行訴§91（≠民訴§162/§164）——由 statutory_basis 偵測、
+    # 使在途但書與逾期救濟備援標對法條（反捏造：不可對行政案誤標民訴條文）。
+    # 採字串命中（與下方刑事 is_criminal 偵測『刑訴/刑事』同一既有手法）：所有行政種子（admin_revocation
+    # 基準『行訴§106』、appeal_admin『行政訴訟法§241』）皆含『行訴/行政訴訟』必命中；殘留風險僅限「自訂
+    # 行政時限卻把 statutory_basis 寫成不含此關鍵字」（屬使用者輸入錯誤、與刑事偵測同等限制，codex finding#1）。
+    _is_admin = ("行政訴訟" in statutory_basis) or ("行訴" in statutory_basis)
+    # statutory_days 僅「日數路徑（period_unit='day'）」適用且必 > 0；年/月路徑改用 period_value，
+    # statutory_days 此時為 0/未提供、不可被 day 路徑的 >0 規則誤擋。
     try:
         si = int(statutory_days) if statutory_days else 0
     except (TypeError, ValueError):
         return {"error": f"statutory_days 必須是整數，got {statutory_days!r}"}
-    if not _is_statute_period and si <= 0:
+    if not _is_calendar and si <= 0:
         return {"error": f"statutory_days 必須 > 0（期間日數，0 日期間無意義），got {si}"}
     if si < 0:
         return {"error": f"statutory_days 不可為負，got {si}"}
+    # period_value（年/月期間數）提前解析驗證：日數與曆法路徑、教示比對都會用到（消除分支內重複解析）。
+    try:
+        pv = int(period_value) if period_value else 0
+    except (TypeError, ValueError):
+        return {"error": f"period_value 必須是整數，got {period_value!r}"}
+    if _is_calendar and pv <= 0:
+        return {"error": f"period_value（{period_unit} 期間數）必須 > 0，got {period_value!r}"}
     try:
         base = _parse_date(service_base_date)
     except (ValueError, TypeError):
@@ -501,20 +592,24 @@ def compute_deadline(
     # 交叉比對：不符可能是法定期間判斷有誤、或屬特別期間 → needs_manual_review，引擎不靜默蓋過教示。
     period_match = "not_provided"
     spd = None
+    # 比對標的依期間單位：日數路徑比 statutory_days（日）、年/月路徑比 period_value（同單位）。
+    # 反捏造：消滅時效/月期間絕不拿「日」去比「月/年」（單位錯置會誤判相符/不符）。
+    _match_target = pv if _is_calendar else si
+    _unit_zh = "個月" if period_unit == "month" else ("年" if period_unit == "year" else "日")
     if stated_period_days is not None:
         try:
             spd = int(stated_period_days)
         except (TypeError, ValueError):
             spd = None
         if spd is not None:
-            if spd == si:
+            if spd == _match_target:
                 period_match = "match"
-                trace.append(f"教示比對：判決書教示 {spd} 日＝引擎採用 {si} 日（相符）")
+                trace.append(f"教示比對：判決書教示 {spd} {_unit_zh}＝引擎採用 {_match_target} {_unit_zh}（相符）")
             else:
                 period_match = "mismatch"
                 needs_manual_review = True
                 trace.append(
-                    f"教示比對：判決書教示 {spd} 日 ≠ 引擎採用 {si} 日（不符）"
+                    f"教示比對：判決書教示 {spd} {_unit_zh} ≠ 引擎採用 {_match_target} {_unit_zh}（不符）"
                     f"→ 須人工確認（可能法定期間判斷有誤、或屬特別期間）"
                 )
         else:
@@ -525,13 +620,14 @@ def compute_deadline(
             needs_manual_review = True
             trace.append(
                 f"教示比對：判決書教示天數原文『{stated_period_days}』無法解析為整數、無法與引擎採用 "
-                f"{si} 日交叉比對 → 須人工核對原文（反捏造：安全網不靜默旁路）"
+                f"{_match_target} {_unit_zh}交叉比對 → 須人工核對原文（反捏造：安全網不靜默旁路）"
             )
 
     # ── 步驟 1：送達生效日 ──
-    if _is_statute_period:
+    if _is_limitation:
         # 消滅時效：無送達生效加算（民§128 自請求權可行使時直接起算）→ effective=可行使日本身、
         # 完全不看 service_type（否則 public_domestic+20 等送達規則會錯套到時效，codex HIGH-3）。
+        # 注意：程序月期間（行訴§106，_is_calendar 但非 limitation）走 else、仍有送達生效（訴願決定書送達）。
         effective = base
         trace.append(f"請求權可行使日={_fmt(base)}（消滅時效自可行使時起算、無送達生效加算·民§128）")
     else:
@@ -558,15 +654,9 @@ def compute_deadline(
     trace.append(f"起算=生效翌日{_fmt(start)}（民法§120Ⅱ 始日不算入）")
     legal_basis.append("民法§120Ⅱ")
 
-    if _is_statute_period:
+    if _is_limitation:
         # ════ 消滅時效路徑（民§121 曆法、§128 起算點法律判斷）════
-        # 步驟 3'：無在途、無送達加算（§128 自請求權可行使時直接起算）
-        try:
-            pv = int(period_value) if period_value else 0
-        except (TypeError, ValueError):
-            return {"error": f"period_value 必須是整數，got {period_value!r}"}
-        if pv <= 0:
-            return {"error": f"period_value（{period_unit} 期間數）必須 > 0，got {period_value!r}"}
+        # 步驟 3'：無在途、無送達加算（§128 自請求權可行使時直接起算）。pv 已於入口統一解析驗證。
         in_transit = 0
         in_transit_source = "消滅時效不適用在途/送達加算（§128 自請求權可行使時起算）"
         trace.append(f"在途=0（{in_transit_source}）")
@@ -594,8 +684,11 @@ def compute_deadline(
         # statutory_days 欄「不重載」期間數：year/month 留 0（statutory_days 是「日數」語義，把 15 年
         # 塞成 15 會在顯示端變「15 日」＝反捏造，codex HIGH-4）。期間數一律由 period_value 表達。
     else:
-        # ════ 日數路徑（訴訟期間：上訴/抗告/補正…）：在途 + 天數加法 + §122 末日順延 ════
-        # ── 步驟 3：在途天數（民訴§162）──
+        # ════ 程序期間路徑（訴訟/行政訴訟期間：上訴/抗告/補正/行訴§106…）════
+        # 日數與月/年期間共用：送達生效(步驟1) + 次日(步驟2) + 在途 + 末日 + §122 順延。
+        # 末日算法依 period_unit 二分：日→天數加法；月/年→民§121 曆法（行訴§88 期間依民法計算）。
+        # ── 步驟 3：在途天數（民訴§162 / 行政訴訟§89；行政案標 §89、避免對行政案誤標民訴條文）──
+        _transit_law = "行訴§89" if _is_admin else "民訴§162"
         in_transit = 0
         in_transit_source = ""
         if period_type == "court_set":
@@ -611,9 +704,16 @@ def compute_deadline(
             trace.append(f"在途={in_transit}（{in_transit_source}）")
         elif has_local_agent:
             in_transit = 0
-            in_transit_source = "§162但書·律師住法院所在地→在途歸零"
+            in_transit_source = f"{_transit_law}但書·律師住法院所在地→在途歸零"
             trace.append(f"在途=0（{in_transit_source}）")
-            legal_basis.append("民訴§162但書")
+            legal_basis.append(f"{_transit_law}但書")
+        elif _is_admin:
+            # 行政訴訟在途期間（行訴§89Ⅱ「由司法院定之」）非民訴 transit_period 表口徑，引擎無該表
+            # → 不臆測、人工複核、在途暫 0（fail-toward）。律師依司法院定之在途期間表手動填 in_transit_days。
+            in_transit = 0
+            needs_manual_review = True
+            in_transit_source = "無當地代理人之行政訴訟在途（行訴§89Ⅱ 由司法院定之）→ 需人工複核並手動填在途日數"
+            trace.append(f"在途=0（暫）；{in_transit_source}")
         else:
             days, src = lookup_transit_days(court_region, party_region, db=db)
             if days is None:
@@ -631,34 +731,42 @@ def compute_deadline(
                 trace.append(f"在途={in_transit}（{in_transit_source}）")
                 legal_basis.append("民訴§162")
 
-        # ── 步驟 4：理論末日（中間假日全計入、不跳過）──
-        span = si + in_transit
-        nominal_due = start + timedelta(days=span - 1) if span > 0 else start
-        trace.append(
-            f"理論末日={_fmt(start)}+({si}{'+' + str(in_transit) if in_transit else ''}-1)"
-            f"={_fmt(nominal_due)}（中間週末/國定假日全計入、連續計算）"
-        )
-
-        # ── 步驟 5：末日順延（民法§122，只對末日；遇假日逐日推次一上班日）──
-        d = nominal_due
-        bumped = 0
-        # 防呆上限：避免 office_calendar 異常造成無限迴圈（連推 60 日仍假日＝資料錯、擋下人工複核）
-        while is_holiday(d, db=db) and bumped < 60:
-            d = d + timedelta(days=1)
-            bumped += 1
-        statutory_deadline = d
-        if bumped == 0:
-            trace.append(f"末日順延：{_fmt(nominal_due)} 為上班日→不順延（民法§122）")
-        elif bumped >= 60:
-            needs_manual_review = True
-            trace.append(
-                f"末日順延：自 {_fmt(nominal_due)} 連推 60 日仍為假日（辦公日曆異常）→ 需人工複核（民法§122）"
-            )
+        # ── 步驟 4：理論末日 ──
+        if _is_calendar:
+            # 月/年程序期間（如行訴§106 訴願決定書送達後2個月不變期間）：依民§121 曆法算末日，
+            # 再「加計在途日數」、最後§122 末日順延。行訴§88 明定期間之計算依民法（§120/§121/§122）。
+            period_end, _no_corr = _statute_period_end(start, period_unit, pv)
+            _uzh = "年" if period_unit == "year" else "月"
+            if _no_corr:
+                trace.append(
+                    f"末日（民§121但書）：起算日{_fmt(start)}+{pv}{_uzh}無相當日（月末）"
+                    f"→以該月末日{_fmt(period_end)}為期間末日（§123 依曆）"
+                )
+            else:
+                trace.append(
+                    f"末日（民§121）：起算日{_fmt(start)}+{pv}{_uzh}之相當日之前一日"
+                    f"={_fmt(period_end)}（§123 依曆計算）"
+                )
+            legal_basis.extend(["民法§121", "民法§123"])
+            if in_transit:
+                period_end = period_end + timedelta(days=in_transit)
+                trace.append(f"在途加計：依曆末日 +{in_transit} 日={_fmt(period_end)}（{_transit_law}在途加計）")
+            nominal_due = period_end
         else:
+            # 日數路徑（中間假日全計入、不跳過）
+            span = si + in_transit
+            nominal_due = start + timedelta(days=span - 1) if span > 0 else start
             trace.append(
-                f"末日順延：{_fmt(nominal_due)} 為假日→順延 {bumped} 日至 {_fmt(statutory_deadline)}"
-                f"（次一上班日，民法§122）"
+                f"理論末日={_fmt(start)}+({si}{'+' + str(in_transit) if in_transit else ''}-1)"
+                f"={_fmt(nominal_due)}（中間週末/國定假日全計入、連續計算）"
             )
+
+        # ── 步驟 5：末日順延（民法§122，只對末日；日數/月期間共用 _bump_past_holidays）──
+        statutory_deadline, bumped, _bump_trace, _bump_review = _bump_past_holidays(nominal_due, db)
+        trace.append(_bump_trace)
+        if _bump_review:
+            needs_manual_review = True
+        if 0 < bumped < 60:
             legal_basis.append("民法§122")
 
     # ── 步驟 5b：辦公日曆完整載入偵測（部署安全，BUG2 + codex r4/r5）──
@@ -667,9 +775,10 @@ def compute_deadline(
     # 檢查 start_date → statutory_deadline 區間涵蓋的每個年度是否「完整」載入（達 365/366）。
     # 反捏造：trace 據實標「未完整載入（current/expected）」、不謊稱「完全無紀錄」（半套也算未載入）。
     _missing_years = []  # (year, count, expected)
-    # 消滅時效（年/月）不順延、末日不靠日曆，且跨年區間長（如15年）→ 跳過整區間日曆檢查（免洗版；
-    # 已因起算點屬法律判斷強制複核）。internal 前移若落未載入年度退回週末規則、屬參考線可接受。
-    if not _is_statute_period:
+    # 消滅時效（limitation）不順延、末日不靠日曆，且跨年區間長（如15年）→ 跳過整區間日曆檢查（免洗版；
+    # 已因起算點屬法律判斷強制複核）。程序月期間（行訴§106）末日要§122順延、仍需日曆完整→照常檢查。
+    # internal 前移若落未載入年度退回週末規則、屬參考線可接受。
+    if not _is_limitation:
         for _y in range(start.year, statutory_deadline.year + 1):
             if not calendar_year_loaded(_y, db=db):
                 _missing_years.append(
@@ -723,16 +832,24 @@ def compute_deadline(
                 f"{_fmt(statutory_deadline)}、須人工複核（盯此；底線法定{_fmt(statutory_deadline)}）"
             )
 
-    # ── 步驟 7：逾期救濟備援（民訴§164 / 刑訴§67）──
-    if service_type == "registered_deposit" or "刑訴" in statutory_basis or "刑事" in statutory_basis:
-        is_criminal = "刑訴" in statutory_basis or "刑事" in statutory_basis
-    else:
-        is_criminal = False
+    # ── 步驟 7：逾期救濟備援（民訴§164 / 刑訴§67 / 行政訴訟§91）──
+    # 程序別不同、回復原狀法條與期間都不同（反捏造：行政案不可端出民訴§164 之10日）：
+    #   刑事 刑訴§67（10日）／民事 民訴§164（10日、逾1年不得）／行政 行訴§91（1個月、逾1年或§106起訴逾3年不得）。
+    is_criminal = "刑訴" in statutory_basis or "刑事" in statutory_basis
     if is_criminal:
         recovery_window = {
             "basis": "刑訴§67",
             "condition": "遲誤非因過失，於原因消滅後10日內聲請回復原狀，並同時補行期間內應為之訴訟行為",
             "deadline_after_cause_removed_days": 10,
+        }
+    elif _is_admin:
+        # 行政訴訟回復原狀（行訴§91，taiwan-legal-db 查證）：原因消滅後「1個月」內（不變期間少於1個月者於
+        # 相等日數內）；逾1年不得聲請，遲誤§106起訴期間逾3年亦不得。期間以「月」計、不寫死成日數（反捏造）。
+        recovery_window = {
+            "basis": "行政訴訟法§91",
+            "condition": "因不應歸責於己之事由遲誤不變期間，於原因消滅後1個月內（該不變期間少於1個月者於相等日數內）"
+                         "以書狀聲請回復原狀，並補行期間內應為之訴訟行為",
+            "absolute_limit": "遲誤不變期間逾1年不得聲請；遲誤§106起訴期間逾3年不得聲請",
         }
     else:
         recovery_window = {
@@ -742,8 +859,9 @@ def compute_deadline(
             "absolute_limit": "距遲誤期間末日逾1年不得聲請",
         }
 
-    # 消滅時效（年/月）不適用回復原狀（民訴§164/刑訴§67 是訴訟程序遲誤的救濟、非實體權利消滅）
-    if _is_statute_period:
+    # 消滅時效（limitation）不適用回復原狀（民訴§164/刑訴§67/行訴§91 是訴訟程序遲誤的救濟、非實體權利消滅）。
+    # 程序月期間（行訴§106、_is_calendar 但非 limitation）是不變期間、適用回復原狀（行訴§91）→ 不清空。
+    if _is_limitation:
         recovery_window = {}
 
     return {
@@ -763,7 +881,7 @@ def compute_deadline(
         "recovery_window": recovery_window,
         "legal_basis": legal_basis,
         "period_unit": period_unit,
-        "period_value": (pv if _is_statute_period else None),
+        "period_value": (pv if _is_calendar else None),
     }
 
 

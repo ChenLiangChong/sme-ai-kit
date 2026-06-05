@@ -17,6 +17,7 @@ from shared.deadlines import (
     default_lead_days,
     default_severity,
     limitation_type,
+    procedural_calendar_type,
 )
 
 from . import repository
@@ -386,6 +387,41 @@ def create_deadline(
         period_unit = lim_seed["period_unit"]      # 強制鎖死
         period_value = lim_seed["period_value"]    # 強制鎖死
 
+    # ── 程序月/年期間回填（procedural_calendar，如行訴§106）：與消滅時效都是「月/年」但 regime 不同 ──
+    # 走程序機制（送達/在途/§122 順延、起算用送達日這個確定事實）→ counting_regime='procedural'（見下）、
+    # 不強制人工複核（這正是相對消滅時效可確定性自動算之處）。period_type 多為 peremptory（不變期間）、
+    # 非 statutory——故與消滅時效鎖分流。seed 鎖死法律性質（period_type/unit/value）、caller 只能留空回填。
+    pc_seed = procedural_calendar_type(type)
+    if pc_seed:
+        if period_type and period_type != pc_seed["period_type"]:
+            return (
+                f"ERROR: {pc_seed['label']}的 period_type 必為 {pc_seed['period_type']}、"
+                f"不可指定為 '{period_type}'——法定期間性質固定，留空自動帶即可。"
+            )
+        if period_unit and period_unit != "day" and period_unit != pc_seed["period_unit"]:
+            return (
+                f"ERROR: {pc_seed['label']}的 period_unit 必為 {pc_seed['period_unit']}、"
+                f"不可指定為 '{period_unit}'——期間單位固定，留空自動帶即可。"
+            )
+        if period_value and int(period_value) != pc_seed["period_value"]:
+            return (
+                f"ERROR: {pc_seed['label']}的期間為 {pc_seed['period_value']} {pc_seed['period_unit']}、"
+                f"不可改為 {period_value}——法定期間固定（反捏造），留空自動帶即可。"
+            )
+        if not severity:
+            severity = pc_seed["severity"]
+        if not description:
+            description = pc_seed["label"]
+        if not statutory_basis:
+            statutory_basis = pc_seed["statutory_basis"]
+        if not statutory_basis_version:
+            statutory_basis_version = pc_seed["statutory_basis_version"]
+        if not trigger_event:
+            trigger_event = pc_seed["default_trigger"]
+        period_type = pc_seed["period_type"]       # 強制鎖死
+        period_unit = pc_seed["period_unit"]       # 強制鎖死
+        period_value = pc_seed["period_value"]     # 強制鎖死
+
     # generic type='limitation'：必須走年/月路徑、不可 day-bypass（否則消滅時效被當日數算成 N 日）
     if type == "limitation" and period_unit not in ("year", "month"):
         return (
@@ -396,25 +432,29 @@ def create_deadline(
     # 年/月曆法分支的法律性質鎖（綁 period_unit、非 type 字面——codex+workflow 同根因：原鎖只綁
     # type=='limitation'，任意 type 或 STATUTORY/COURT_SET 種子 + period_unit=year 可繞過 → 把 15 年
     # 時效標成 directory/grey 降級提醒、或把 appeal_civil 算成多年並令 calc_trace 謊稱§128）：
-    #   (a) 日數/裁定種子 type 不可指定年/月（其法律性質非消滅時效）；
-    #   (b) 凡走年/月分支、period_type 一律強制 statutory（caller 傳非 statutory → ERROR）。
+    #   (a) 日數/裁定種子 type 不可指定年/月（其法律性質非月/年期間）；
+    #   (b) 泛型年/月（無 pc_seed）＝消滅時效 → period_type 一律強制 statutory（caller 傳非 statutory → ERROR）；
+    #   (c) 程序月期間種子（pc_seed，如行訴§106）已各自鎖好 period_type（多為 peremptory 不變期間）、不在此覆寫。
     if period_unit in ("year", "month"):
         if seed:
             return (
                 f"ERROR: type='{type}' 是固定日數法定期間種子、不可指定 period_unit='{period_unit}'"
-                "（年/月曆法僅適用消滅時效 type=limitation / statute_*）。"
+                "（年/月曆法僅適用消滅時效 type=limitation / statute_*、或程序月期間種子如 admin_revocation）。"
             )
         if cs_seed:
             return (
                 f"ERROR: type='{type}' 是裁定期間種子、不可指定 period_unit='{period_unit}'"
-                "（年/月曆法僅適用消滅時效 type=limitation / statute_*）。"
+                "（年/月曆法僅適用消滅時效 type=limitation / statute_*、或程序月期間種子如 admin_revocation）。"
             )
-        if period_type and period_type != "statutory":
-            return (
-                f"ERROR: 年/月期間（period_unit='{period_unit}'）的 period_type 必為 statutory、"
-                f"不可指定為 '{period_type}'——消滅時效是法定期間（非不變期間/訓示）、法律性質固定。"
-            )
-        period_type = "statutory"
+        if not pc_seed:
+            # 無程序月期間種子＝視為消滅時效（保留既有行為）→ 強制 statutory
+            if period_type and period_type != "statutory":
+                return (
+                    f"ERROR: 年/月期間（period_unit='{period_unit}'）的 period_type 必為 statutory、"
+                    f"不可指定為 '{period_type}'——消滅時效是法定期間（非不變期間/訓示）、法律性質固定。"
+                    "（程序月期間如行訴§106 請用已登記的種子 type=admin_revocation）"
+                )
+            period_type = "statutory"
 
     # ── 必填驗證（反捏造：缺法條依據直接擋）──
     if not period_type:
@@ -426,12 +466,19 @@ def create_deadline(
             "ERROR: statutory_basis（法條依據）不可為空——反捏造鐵律，每個法定天數都要有依據。"
             f"未知 type='{type}' 請手動帶 statutory_days + statutory_basis"
         )
-    _is_statute_period = period_unit in ("year", "month")
-    if _is_statute_period:
+    # 兩條正交軸：_is_calendar（年/月、用 period_value）vs counting_regime（限定誰是消滅時效）。
+    # 消滅時效 = 年/月 且非程序月期間種子（pc_seed）；程序月期間（行訴§106）= 年/月 + procedural。
+    # 機制閉合性（codex 全面審 finding#2）：非 pc_seed 的年/月一律歸 limitation＝保留既有行為，「不會誤算」
+    # 因上方年/月鎖已對「無 pc_seed + period_type!=statutory（如想自建不變期間月期間）」直接 ERROR 擋下；
+    # 故未登記 seed 的『程序』月期間不可能靜默走進來——要新增此類期間必須先登 PROCEDURAL_CALENDAR_PERIODS 種子。
+    _is_calendar = period_unit in ("year", "month")
+    _is_limitation = _is_calendar and not pc_seed
+    counting_regime = "limitation" if _is_limitation else "procedural"
+    if _is_calendar:
         if not period_value or int(period_value) <= 0:
             return (
-                f"ERROR: 消滅時效期間數（period_value）必須 > 0"
-                f"（type='{type}'、period_unit='{period_unit}'；如 §125=15、§126=5、§127/§197=2）"
+                f"ERROR: 年/月期間數（period_value）必須 > 0"
+                f"（type='{type}'、period_unit='{period_unit}'；消滅時效§125=15/§126=5/§127·§197=2、行訴§106=2月）"
             )
     elif not statutory_days:
         return f"ERROR: statutory_days（法定日數）不可為 0/空（type='{type}' 不在種子表、請手動帶）"
@@ -442,14 +489,17 @@ def create_deadline(
     if not description:
         return "ERROR: description（時限描述）不可為空"
     svc = service_type or "normal"
-    if _is_statute_period:
+    if _is_limitation:
         svc = "normal"  # 消滅時效無送達加算（民§128 直接起算）→ 強制 normal、避免 service_type 落欄誤導
+        # 注意：程序月期間（行訴§106）仍有送達（訴願決定書送達）→ 不強制 normal、保留 caller 的 service_type
     sev = severity or default_severity(period_type)
     # 裁定期間（court_set）天數純由律師讀裁定填、無固定法定種子可交叉驗證＝反捏造
     # 風險最高一類 → 強制人工複核（不論 type 是否登記在 COURT_SET_PERIODS、只看最終 period_type）。
     # 律師覆核後走 mark_deadline_reviewed（#6，未實作）清旗標；MVP 一律標、不給關閉選項。
-    # 消滅時效（period_unit=year/month）起算點是民§128「請求權可行使時」＝法律判斷 → 一律強制複核。
-    force_review = (period_type == "court_set") or _is_statute_period
+    # 消滅時效（limitation）起算點是民§128「請求權可行使時」＝法律判斷 → 一律強制複核。
+    # 程序月期間（行訴§106、_is_calendar 但非 limitation）起算用送達日這個確定事實 → 不在此強制複核
+    #（仍會因引擎內送達/在途/教示等不確定因素而個案標複核）。
+    force_review = (period_type == "court_set") or _is_limitation
 
     from shared.floor_policy import is_full_access
 
@@ -490,6 +540,7 @@ def create_deadline(
             document_date=document_date or "",
             period_unit=period_unit,
             period_value=period_value,
+            counting_regime=counting_regime,
             db=db,
         )
         if "error" in result:
@@ -604,6 +655,18 @@ def create_deadline(
         sibling_note = "\n（§197 雙時鐘：另一本「自侵權行為時起10年」statute_197_10y 若尚未建請補、起算日填行為日；兩者先到者時效完成）"
     elif type == "statute_197_10y":
         sibling_note = "\n（§197 雙時鐘：另一本「知有損害及賠償義務人時起2年」statute_197_2y 若尚未建請補、起算日填知悉日；兩者先到者時效完成）"
+    elif type == "admin_revocation":
+        sibling_note = (
+            "\n（行訴§106 提醒：①另注意「自訴願決定書送達後逾3年不得提起」之長期失權（另立時鐘、本筆未建）；"
+            "②若為訴願人以外之利害關係人、起算改「自知悉時」＝法律判斷、請改填知悉日並人工複核；"
+            "③不經訴願程序者依§106Ⅲ「自行政處分達到/公告後2個月」、起算事件不同、請另建並改 trigger）"
+        )
+    elif type == "provisional_litigation":
+        sibling_note = (
+            "\n（保全命起訴：期間以命起訴裁定主文所定為準、已強制人工複核；逾期未起訴債務人得聲請撤銷保全裁定·"
+            "§529Ⅳ/§533。另注意特例§529Ⅲ：基於夫妻剩餘財產差額分配請求權之假扣押，應於宣告改用分別財產制"
+            "『裁定確定之日』起10日內起訴——起算點為『裁定確定』非送達、亦走本 court_set 路徑由律師讀裁定手填10日）"
+        )
     # 期間人話（反捏造：年/月不顯示成日）
     _ph = _period_phrase(period_unit, period_value, result["statutory_days"])
     return (
@@ -729,17 +792,22 @@ def get_deadline(deadline_id: int) -> str:
         sev = _SEVERITY_ZH.get(d["severity"], d["severity"] or "未分級")
         review = f"\n- [需人工複核]：含不確定因素（{_REVIEW_FACTORS}）、不可全自動倚賴" if d["needs_manual_review"] else ""
 
-        # 教示比對（安全網）：有抓判決書教示天數才顯示是否與引擎相符
+        # 教示比對（安全網）：有抓判決書教示天數才顯示是否與引擎相符。
+        # 單位 aware（反捏造）：年/月期間比 period_value（同單位）、日期間比 statutory_days。
         stated = d["stated_period_days"]
         if stated is None:
             stated_str = ""
-        elif stated == d["statutory_days"]:
-            stated_str = f"\n- 判決書教示：{stated} 日（與引擎採用 {d['statutory_days']} 日相符）"
         else:
-            stated_str = (
-                f"\n- 判決書教示：{stated} 日（與引擎採用 {d['statutory_days']} 日"
-                f"【不符，已標複核】）"
-            )
+            _pu = d["period_unit"] or "day"
+            _tgt = d["period_value"] if _pu in ("year", "month") else d["statutory_days"]
+            _u = "個月" if _pu == "month" else ("年" if _pu == "year" else "日")
+            if stated == _tgt:
+                stated_str = f"\n- 判決書教示：{stated} {_u}（與引擎採用 {_tgt} {_u}相符）"
+            else:
+                stated_str = (
+                    f"\n- 判決書教示：{stated} {_u}（與引擎採用 {_tgt} {_u}"
+                    f"【不符，已標複核】）"
+                )
         # 行事曆同步（SPEC「寫兩處」）
         if d["calendar_event_id"]:
             cal_str = (
