@@ -18,6 +18,7 @@ LINE 訊息含 `[圖片]` 路徑或 PDF → 用 Read 工具看內容。抽出這
    - 一審判決 → 上訴：民事 `appeal_civil` / 刑事 `appeal_criminal` / 行政 `appeal_admin` / 家事 `appeal_family`
    - 裁定 → 抗告：民事 `abjection_civil` / 刑事 `abjection_criminal`
    - 第三審上訴理由書補提 `appeal_reason`、訴願 `petition_appeal`、支付命令異議 `payment_order_objection`
+   - **限期補正裁定**（命補正當事人能力／法定代理／書狀程式／裁判費等）→ `type='correction'`（裁定期間、特殊處理見下方「限期補正」）
    - 開庭通知 → 不是「期間」是「期日」，建 `type='custom'` + `period_type='court_set'`、或直接寫行事曆庭期（見下方「開庭通知」）
 2. **送達日 / 基準日** → `service_base_date`（YYYY-MM-DD）：判決書/裁定上的「送達證書收受日」、或 LINE 訊息裡人講的收受日。
 3. **送達類型** → `service_type`：一般 `normal` / 寄存送達 `registered_deposit`（+10）/ 公示送達境內 `public_domestic`（+20）/ 外國 `public_foreign`（+60）/ 囑託 `commissioned`（需人工複核）。**看不出來就當 `normal` 並在確認步驟問人。**
@@ -95,10 +96,43 @@ create_deadline(
 - 要系統提醒就 `create_task`（title=庭期說明、due_date=開庭日、assignee=承辦律師）。
 - 每日彙整 cron 會讀「事務所慣用行事曆」當天/近期事件、自然涵蓋庭期（見 daily-digest）。
 
+## 限期補正（裁定命補正、`type='correction'`）
+
+法院裁定命「於本裁定送達後 ○ 日內補正」（補正當事人能力、法定代理權、書狀程式、繳裁判費等程式欠缺）。
+**漏補正＝駁回起訴／上訴**，小所最高頻時限之一，但與上訴/抗告有一個關鍵差異要特別小心：
+
+- **天數不是法定固定值、是法院在這紙裁定當下訂的**——多少天只有讀那份裁定才知道。引擎沒有、也不會替
+  `correction` 預設天數（反捏造鐵律：上訴 20 日寫死在法律可回填，補正期間寫死＝臆測）。你**必須讀裁定
+  主文抓出那個 ○ 日**填 `statutory_days`。
+- `statutory_basis` 填的不是法條、是**那紙裁定的文號**（如「臺灣臺北地方法院 114 年度補字第 ○ 號裁定」）。
+- `type='correction'` 會自動帶 `period_type='court_set'`（裁定期間、在途歸零·§162）、`severity=orange`、描述、觸發語。
+- **一律標 `[需人工複核]`**：裁定天數純人讀、沒有固定法定種子可交叉驗證，是反捏造風險最高的
+  一類——引擎強制複核，請律師確認天數無誤後再倚賴。這不是出錯、是保護。
+
+抽取（步驟1）→ 一鍵確認（步驟2，`doc_type='correction'`）→ 入庫：
+
+```
+create_deadline(
+  matter_id=<案件ID>,
+  type="correction",
+  trigger_event="補正裁定送達",                       # 留空會自動填
+  service_base_date="2026-06-15",                     # 補正裁定送達日
+  service_type="normal",
+  statutory_days=10,                                  # ← 必填！讀裁定主文「○ 日內補正」的 ○
+  statutory_basis="臺北地院114年度補字第123號裁定",     # ← 必填！裁定文號（非法條）
+  buffer_days=1,
+  created_by="<操作者>",
+  confirm_intake_id=<步驟2的 intake_id>,
+)
+```
+
+漏填 `statutory_days` 或 `statutory_basis` → 引擎給「請讀裁定」的針對性提示擋下，不會用 0 硬算（反捏造）。
+
 ## 失敗情境判讀（遇到這些不是系統壞、是引擎在保護你）
 
-- **回傳帶 `[需人工複核]`** → 引擎偵測到不確定因素（送達/在途/**法版/教示比對**之一）。看 `get_deadline` 的 `calc_trace` 知道是哪一項：
+- **回傳帶 `[需人工複核]`** → 引擎偵測到不確定因素（送達/在途/**法版/教示比對/裁定期間**之一）。看 `get_deadline` 的 `calc_trace` 知道是哪一項：
   - 「法版檢核：文書日期早於修法施行日…」→ 判決日早於該法條期間修法（如刑訴§349 2021-06-16、§406 2023-06-21）。**舊判決可能適用舊法天數**、引擎不臆測重算 → 請律師確認適用版本與確切施行日。
+  - 「裁定期間（court_set）：補正期間 X 日採律師讀裁定填寫…」→ 限期補正等裁定期間，天數是你從裁定讀進來的、引擎強制複核（無固定法定種子可交叉驗證）。**核對裁定主文天數無誤即可**，確認後當正常時限盯。這不是出錯、是反捏造保護。
   - 「教示比對：判決書教示 X 日 ≠ 引擎採用 Y 日」→ 可能法定期間判斷錯（type 選錯）或屬特別期間。**回去檢查 type 對不對**，真的是特別期間就手動帶正確 `statutory_days` + `statutory_basis`。
   - 「辦公日曆未載入：所需年度…」→ 該年度國定假日沒匯入、末日順延算不準。請維護者匯入該年度 `office_calendar`（見 privacy-deploy 部署）。
   - 「囑託送達 / 無當地代理人查無在途」→ 回證日/在途天數要人工認定，律師確認後手動帶 `in_transit_days` 或 `service_base_date`（回證日）。

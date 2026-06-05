@@ -100,6 +100,32 @@ STATUTORY_PERIODS = {
     },
 }
 
+# ── 裁定期間類種子（court_set）：與 STATUTORY_PERIODS「本質不同」、故獨立一張表 ──
+# STATUTORY_PERIODS 是「固定法定天數」（上訴 20 / 抗告 10…），天數寫死在法律、可交叉驗證。
+# 裁定期間（限期補正等）的天數是**法院在裁定當下載明**的（「於本裁定送達後 X 日內補正」），
+# 不是法定固定值——X 是多少只有讀那份裁定才知道。故本表：
+#   1. **絕不含 statutory_days**（律師必須讀裁定填，引擎不回填、不預設＝反捏造鐵律：漏補正→駁回起訴）
+#   2. statutory_basis 不是法條而是「裁定文號」（basis_hint 提示律師填哪份裁定）
+#   3. 命中本表（或任何 period_type=='court_set'）→ create_deadline 強制 needs_manual_review：
+#      天數純人輸入、無固定法定種子可交叉驗證，是反捏造風險最高的一類，必須律師覆核。
+# 只登記 period_type / severity / label / 觸發語 / 依據提示，不碰天數。修法不影響本表（天數本就非法定）。
+COURT_SET_PERIODS = {
+    "correction": {  # 限期補正（裁定命補正當事人能力/法定代理/書狀程式/繳費等程式欠缺）
+        "period_type": "court_set",
+        "severity": "orange",
+        "label": "限期補正（裁定所定期間）",
+        "default_trigger": "補正裁定送達",
+        "basis_hint": "補正裁定文號（如「臺灣臺北地方法院 114 年度補字第 ○ 號裁定」）",
+    },
+}
+
+
+def court_set_type(type_code):
+    """type 是否為已登記的裁定期間類（如 correction）。回 dict（含 period_type/severity/label/
+    default_trigger/basis_hint）或 None。create_deadline 用來回填非天數欄 + 觸發強制人工複核。"""
+    return COURT_SET_PERIODS.get(type_code)
+
+
 # ── 期間「日數」修法沿革（法版檢核：反捏造安全網）──
 # STATUTORY_PERIODS 編的是「現行法」日數。若**文書作成日**（判決/裁定日，非送達日）早於某法條
 # 「期間日數修正施行日」，舊文書可能適用修正前日數（如刑訴§349 上訴 2021-06-16 前 10 日、後 20 日）。
@@ -321,8 +347,8 @@ def compute_deadline(
         si = int(statutory_days)
     except (TypeError, ValueError):
         return {"error": f"statutory_days 必須是整數，got {statutory_days!r}"}
-    if si < 0:
-        return {"error": f"statutory_days 不可為負，got {si}"}
+    if si <= 0:
+        return {"error": f"statutory_days 必須 > 0（期間日數，0 日期間無意義），got {si}"}
     try:
         base = _parse_date(service_base_date)
     except (ValueError, TypeError):

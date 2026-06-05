@@ -124,6 +124,11 @@ def create_deadline(
     statutory_days / statutory_basis / period_type / description（律師仍可覆寫）。
     type 不在種子表 → **必須**手動帶 statutory_days + statutory_basis + period_type，否則擋下。
 
+    裁定期間類（type='correction' 限期補正等）：自動帶 period_type=court_set / severity=orange / 描述 /
+    觸發語，但 statutory_days **絕不回填**——裁定期間是法院在裁定當下載明（「於本裁定送達後 ○ 日內補正」），
+    律師必須讀裁定填 ○ 日；statutory_basis 填補正裁定文號（非法條）。凡最終 period_type=court_set 一律
+    強制 needs_manual_review（天數純人讀、無固定法定種子可交叉驗證＝反捏造風險最高，須律師覆核）。
+
     Args:
         matter_id: 所屬案件 ID（必填）
         type: 時限類型（種子 key 或 custom）

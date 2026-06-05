@@ -12,6 +12,7 @@ from shared.db import _now, get_db, transaction
 from shared.deadlines import (
     STATUTORY_PERIODS,
     compute_deadline,
+    court_set_type,
     default_lead_days,
     default_severity,
 )
@@ -47,6 +48,8 @@ _SERVICE_TYPE_ZH = {
     "commissioned": "囑託送達",
 }
 _SEVERITY_ZH = {"red": "紅（失權硬倒數）", "orange": "橙（可補正）", "grey": "灰（訓示提醒）"}
+# 需人工複核的不確定因素清單（create 回覆 + get_deadline 摘要共用一份、避免 drift，codex R2 LOW）
+_REVIEW_FACTORS = "送達/在途/法版/教示比對/裁定期間"
 
 
 # ───────────────────────── matters ─────────────────────────
@@ -238,6 +241,16 @@ def create_deadline(
     並連到本時限（關閉「待確認跟催」backlog、不再被 scan_unconfirmed_intake 催）。查無 / 非 awaiting
     不報錯（避免擋下正常入庫），但回覆會註記未對位、供操作者察覺。
     """
+    # statutory_days 正規化（反捏造第二道牆，codex R2 MED）：truthiness 檢查會被 "0"/"00" 等字串
+    # 繞過（非空字串 truthy）→ 後面 int() 變 0、純函式建出 0 日期間。先一律轉 int：空/壞/負 → 0
+    # （代表「未提供」、交由種子回填或必填驗證擋下），確保所有 `if not statutory_days` 判斷正確。
+    try:
+        statutory_days = int(str(statutory_days).strip()) if str(statutory_days).strip() else 0
+    except (TypeError, ValueError):
+        statutory_days = 0
+    if statutory_days < 0:
+        statutory_days = 0
+
     # ── 種子回填（未自帶時）──
     seed = STATUTORY_PERIODS.get(type)
     if seed:
@@ -251,6 +264,40 @@ def create_deadline(
             period_type = seed["period_type"]
         if not description:
             description = seed["label"]
+
+    # ── 裁定期間類回填（court_set，如限期補正）：與固定天數種子分開 ──
+    # 只回填「非天數」欄（period_type/severity/描述/觸發語）；天數絕不回填——裁定期間是法院當下
+    # 載明、律師必讀裁定填（反捏造：漏補正＝駁回起訴）。缺天數/依據時給「讀裁定」的具體指引，
+    # 而非泛化擋下（針對性 UX）。force_review 在 period_type 定案後另算（見下），不論是否登記本表。
+    cs_seed = court_set_type(type)
+    if cs_seed:
+        # 已知裁定期間類 type 的法律性質固定為 court_set，不容 caller 改標成別的 period_type
+        # （否則 correction 被標 peremptory/statutory → compute 不走 court_set 分支、錯加在途、
+        # 且 force_review 失效＝法律性質錯置 + 繞過強制複核，codex HIGH）。只補空不夠、要校驗一致。
+        if period_type and period_type != cs_seed["period_type"]:
+            return (
+                f"ERROR: {cs_seed['label']}的 period_type 必為 {cs_seed['period_type']}（裁定期間）、"
+                f"不可指定為 '{period_type}'——裁定期間的法律性質固定，留空自動帶即可。"
+            )
+        if not period_type:
+            period_type = cs_seed["period_type"]
+        if not severity:
+            severity = cs_seed["severity"]
+        if not description:
+            description = cs_seed["label"]
+        if not trigger_event:
+            trigger_event = cs_seed["default_trigger"]
+        if not statutory_days:
+            return (
+                f"ERROR: {cs_seed['label']}的補正期間日數（statutory_days）須讀裁定填寫"
+                "——裁定期間非法定固定值、引擎不臆測不預設（反捏造：漏補正＝駁回起訴）。"
+                "請看裁定主文「於本裁定送達後 ○ 日內補正」填入 ○ 日。"
+            )
+        if not statutory_basis or not statutory_basis.strip():
+            return (
+                f"ERROR: {cs_seed['label']}的 statutory_basis 請填{cs_seed['basis_hint']}"
+                "——裁定期間的依據是該紙裁定本身、非法條。"
+            )
 
     # ── 必填驗證（反捏造：缺法條依據直接擋）──
     if not period_type:
@@ -272,6 +319,10 @@ def create_deadline(
         return "ERROR: description（時限描述）不可為空"
     svc = service_type or "normal"
     sev = severity or default_severity(period_type)
+    # 裁定期間（court_set）天數純由律師讀裁定填、無固定法定種子可交叉驗證＝反捏造
+    # 風險最高一類 → 強制人工複核（不論 type 是否登記在 COURT_SET_PERIODS、只看最終 period_type）。
+    # 律師覆核後走 mark_deadline_reviewed（#6，未實作）清旗標；MVP 一律標、不給關閉選項。
+    force_review = (period_type == "court_set")
 
     from shared.floor_policy import is_full_access
 
@@ -315,6 +366,17 @@ def create_deadline(
         if "error" in result:
             return f"ERROR: 計算失敗 — {result['error']}"
 
+        # 裁定期間強制複核：calc_trace 留一筆「為何標複核」，供律師覆核卡（#6）/get_deadline 看到。
+        # 一律 append（與 compute 內因送達/法版/教示標的 review 是各自獨立的理由、可並存）。
+        if force_review:
+            # 中性措辭：force_review 涵蓋所有 court_set（不只 correction），故不寫死「補正期間」。
+            # 不宣稱「教示比對不適用」——純函式仍會對 stated_period_days 跑教示比對（codex MED：不實軌跡）。
+            result["calc_trace"].append(
+                f"裁定所定期間（court_set）：期間 {int(statutory_days)} 日由人工讀裁定/法院文書填寫、"
+                f"非法定固定值（依據 {statutory_basis}）→ 強制人工複核"
+                "（無固定法定種子可交叉驗證，反捏造）"
+            )
+
         # ── escalation_lead_days：未指定 → 依 severity 預設 ──
         if escalation_lead_days:
             try:
@@ -348,7 +410,7 @@ def create_deadline(
             "stated_period_days": result["stated_period_days"],
             "document_date": document_date or None,
             "calc_trace": json.dumps(result["calc_trace"], ensure_ascii=False),
-            "needs_manual_review": 1 if result["needs_manual_review"] else 0,
+            "needs_manual_review": 1 if (result["needs_manual_review"] or force_review) else 0,
             "status": "pending",
             "assignee": assignee or (matter["lead_attorney"] or None),
             "assignee_line_user_id": assignee_line_user_id or None,
@@ -401,7 +463,7 @@ def create_deadline(
                     if closed else _NOMATCH
                 )
 
-    review = "\n[需人工複核] 含不確定因素（送達/在途/法版/教示比對之一），請律師確認後再倚賴本期限。" if result["needs_manual_review"] else ""
+    review = f"\n[需人工複核] 含不確定因素（{_REVIEW_FACTORS}之一），請律師確認後再倚賴本期限。" if (result["needs_manual_review"] or force_review) else ""
     return (
         f"時限 #{deadline_id} 已建立：{description}\n"
         f"- 內部期限（盯這個）：{result['internal_deadline']}\n"
@@ -522,7 +584,7 @@ def get_deadline(deadline_id: int) -> str:
         pt = _PERIOD_TYPE_ZH.get(d["period_type"], d["period_type"])
         svc = _SERVICE_TYPE_ZH.get(d["service_type"], d["service_type"])
         sev = _SEVERITY_ZH.get(d["severity"], d["severity"] or "未分級")
-        review = "\n- [需人工複核]：含不確定因素（送達/在途/法版/教示比對）、不可全自動倚賴" if d["needs_manual_review"] else ""
+        review = f"\n- [需人工複核]：含不確定因素（{_REVIEW_FACTORS}）、不可全自動倚賴" if d["needs_manual_review"] else ""
 
         # 教示比對（安全網）：有抓判決書教示天數才顯示是否與引擎相符
         stated = d["stated_period_days"]

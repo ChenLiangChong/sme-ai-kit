@@ -12,7 +12,7 @@
 2. **法定末日（hard）與內部期限（working）分欄存放、永遠並陳**。盯的是 internal、底線是 statutory。
 3. **天數確定性計算 + calc_trace 可逐步覆核**（律師不能信黑箱），每筆強制附 `statutory_basis`（反捏造，比照知識庫 `source_quote`）。
 4. **時間驅動屬 system-layer**：cron 每日掃 → enqueue → 既有三層投遞。人沒開 Claude 也在倒數。
-5. **fail-toward-有人看**：在途罕見組合 / 囑託送達（依回證完成日、不確定）/ 緩衝期完全落在連假無上班日可前移 / 所需年度辦公日曆未載入 → `needs_manual_review`，不自動結案、推人複核（呼應 escalation「fail-toward-有人收」）。**公示送達境內+20 / 外國+60 為法定固定值、自動計算可辯護、不標複核**（`_SERVICE_NEEDS_REVIEW` 只含 commissioned）。
+5. **fail-toward-有人看**：在途罕見組合 / 囑託送達（依回證完成日、不確定）/ 緩衝期完全落在連假無上班日可前移 / 所需年度辦公日曆未載入 / 裁定期間（court_set，如限期補正）天數由律師讀裁定填、無固定種子可交叉驗證 → `needs_manual_review`，不自動結案、推人複核（呼應 escalation「fail-toward-有人收」）。**公示送達境內+20 / 外國+60 為法定固定值、自動計算可辯護、不標複核**（`_SERVICE_NEEDS_REVIEW` 只含 commissioned）。
 6. **法規版本鎖定**：刑訴上訴 10→20 日（2021）、刑訴抗告/回復原狀 5→10 日（2023）、寄存送達 +10 日（2021）——引舊資料即算錯。每筆種子標 `statutory_basis` + 版本。
 
 ---
@@ -123,6 +123,8 @@ CREATE INDEX IF NOT EXISTS idx_deadlines_matter ON deadlines(matter_id);
 | `calendar_synced_at TEXT` | 回填時間 |
 
 **法版檢核安全網**（純算、不落欄）：`compute_deadline` 內 `_PERIOD_AMENDMENTS`（regex 精準鎖法別+條號邊界、不裸子字串誤命中如 §349之1）記已查證的期間日數修法施行日（刑訴§349 2021-06-16 由 10→20、刑訴§406 2023-06-21 由 5→10）。**優先比對 `document_date`（文書作成日）**、未提供才以 `service_base_date` 近似並於 calc_trace 誠實標明；該日早於施行日 → `needs_manual_review` + calc_trace 說明，**不臆測重算舊法**（沿革表僅含已查證者、寧缺勿錯；非空 document_date 格式錯誤直接回 error、不靜默落髒資料）。`compute_deadline` 回傳加 `stated_period_days` / `period_match`（match/mismatch/not_provided）。
+
+**裁定期間強制複核安全網**（`COURT_SET_PERIODS`，與固定天數種子 `STATUTORY_PERIODS` 分開的獨立表）：限期補正（`type='correction'`）等裁定期間，天數由法院在裁定當下載明、**非法定固定值**——`COURT_SET_PERIODS` 只登記 `period_type='court_set'` / `severity` / 描述 / 觸發語 / 裁定文號提示，**絕不含 `statutory_days`**（律師必讀裁定填、引擎不回填不預設；上訴 20 日寫死在法律可回填，補正期間是法院個案訂的、回填＝臆測）。`create_deadline` 凡最終 `period_type='court_set'` 一律強制 `needs_manual_review`：裁定天數純人輸入、無固定法定種子可交叉驗證，是反捏造風險最高一類，calc_trace 留「裁定所定期間強制複核」理由。缺天數 / 裁定文號 → 給「讀裁定」針對性提示擋下、不以 0 硬算。漏補正＝駁回起訴，小所最高頻時限之一。
 
 ---
 
