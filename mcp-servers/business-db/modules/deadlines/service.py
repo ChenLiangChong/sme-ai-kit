@@ -1209,6 +1209,144 @@ def get_deadline_audit(deadline_id: int) -> str:
         db.close()
 
 
+# ───────────────────────── 去識別化自檢閘（信任/稽核 #6c）─────────────────────────
+
+def screen_calendar_text(matter_id: int, proposed_text: str, screened_by: str) -> str:
+    """寫外部行事曆「之前」的去識別化自檢：比對提議事件文字有無命中該案當事人名（advisory 擋 + 留底）。
+
+    誠實邊界（務必如實回報）：外部行事曆 MCP 的實際寫入在我方 sandbox 外、本檢查攔不到；只能
+    「比對已知當事人名 + 留稽核底」。**絕不可宣稱「保證不外流 / 不可能外流」**——若 agent 略過本檢查、
+    或當事人名以未涵蓋寫法出現，仍會外流。命中時請改用案件代號（matter_no）+ 期限類型 + 日期重寫。
+    留底只記命中「數量」、不把當事人名 / 提議全文寫進 interaction_log（否則自檢反而把 PII 漏進我方紀錄）。
+    """
+    from shared.floor_policy import is_full_access
+    from shared.privacy import extract_party_names, scan_text_for_names
+
+    if not proposed_text or not proposed_text.strip():
+        return "ERROR: proposed_text（提議寫進行事曆的事件文字）不可為空"
+
+    with transaction() as db:
+        m = repository.get_matter(db, matter_id)
+        if not m:
+            return f"ERROR: 找不到案件 #{matter_id}"
+        if m["confidential"] and not is_full_access():
+            return f"ERROR: 找不到案件 #{matter_id}"
+        _actor, _err = _writer_or_error(db, screened_by)  # 留底寫 interaction_log → actor fail-closed
+        if _err:
+            return _err
+        names = extract_party_names(m["client_name"])
+        # 無可比對 token（client_name 空 / 僅單字）→ **不可靜默通過**（codex#6c HIGH、fail-toward）：
+        # 此時根本沒比對任何名字、「通過」會被誤當檢查成功。明示「無法自檢、不可視為安全」。
+        _no_basis = not names
+        hits = scan_text_for_names(proposed_text, names)
+        # 留底：只記命中數量 + 案件，絕不寫當事人名 / 提議全文（避免自檢反而把 PII 漏進 log）
+        if _no_basis:
+            _outcome = "無可比對token(未能自檢)"
+        elif hits:
+            _outcome = "命中"
+        else:
+            _outcome = "通過"
+        repository.insert_interaction_log(
+            db,
+            actor=_actor or "system",
+            action="calendar_privacy_screen",
+            target_type="matter",
+            target_id=matter_id,
+            detail=f"行事曆去識別化自檢：{_outcome}（命中 {len(hits)} 個當事人名 token）",
+            business_unit=None,
+        )
+    _caveat = (
+        "（註：本檢查只比對已知當事人名並留底、屬 advisory；外部行事曆 server 端寫入攔不到，"
+        "不代表保證不外流——請務必親自確認事件文字已去識別化）"
+    )
+    if _no_basis:
+        return (
+            f"[去識別化無法自檢] 本案（{m['matter_no'] or '案件#' + str(matter_id)}）無可比對的當事人名 token"
+            "（client_name 空或僅單字）——本工具未能比對任何名字、**不可視為已去識別化/安全**。"
+            f"請人工確認事件文字不含當事人姓名後再寫入。\n{_caveat}"
+        )
+    if hits:
+        return (
+            f"[去識別化警告] 提議行事曆文字命中當事人名：{'、'.join(hits)}。\n"
+            f"請勿直接寫入外部行事曆——改用「案件代號（{m['matter_no'] or '案件#' + str(matter_id)}）"
+            f"+ 期限類型 + 日期」重寫、移除當事人姓名後再建 event。\n{_caveat}"
+        )
+    return (
+        f"[去識別化通過] 提議文字未命中本案已知當事人名（仍請人工確認去識別化後再寫入）。\n{_caveat}"
+    )
+
+
+def privacy_audit(within_days: int, limit: int) -> str:
+    """事後自檢：掃 interaction_log，找有無當事人名漏進我方紀錄（去識別化留底的另一半）。
+
+    讀 matters 的 client_name 建比對集，掃近 within_days 的 interaction_log detail 是否含當事人名。
+    誠實邊界：只掃我方 log、純字串比對；不證明「未外流到外部行事曆」（外部端攔不到）。
+    機密軸：非全權限層不把機密案件當事人名納入比對集（避免比對集本身洩漏機密當事人）。
+    """
+    from datetime import datetime, timedelta
+
+    from shared.floor_policy import is_full_access
+    from shared.privacy import extract_party_names, scan_text_for_names
+
+    fa = is_full_access()
+    db = get_db()
+    try:
+        # 比對集：各案 client_name → 當事人名 token（機密案件非全權限層略過）
+        mrows = db.execute(
+            "SELECT id, matter_no, client_name, confidential FROM matters"
+        ).fetchall()
+        # token → 對應案件清單（同名可能對應多案，codex#6c MED：不可只綁第一案致稽核歸因錯）
+        name_to_matter = {}
+        for m in mrows:
+            if m["confidential"] and not fa:
+                continue
+            mref = m["matter_no"] or f"#{m['id']}"
+            for tok in extract_party_names(m["client_name"]):
+                lst = name_to_matter.setdefault(tok, [])
+                if mref not in lst:
+                    lst.append(mref)
+        if not name_to_matter:
+            return "去識別化稽核：尚無可比對的當事人名（matters 無 client_name）。"
+
+        wd = within_days if within_days and within_days > 0 else 90
+        since = (datetime.now() - timedelta(days=wd)).strftime("%Y-%m-%d %H:%M:%S")
+        lim = limit if limit and limit > 0 else 200
+        logs = db.execute(
+            "SELECT id, action, detail, created_at FROM interaction_log "
+            "WHERE created_at >= ? AND detail IS NOT NULL "
+            "ORDER BY id DESC LIMIT ?",
+            (since, lim),
+        ).fetchall()
+        names = list(name_to_matter.keys())
+        flagged = []
+        for lg in logs:
+            # 自檢留底本身只記數量、不含名字（action='calendar_privacy_screen'）→ 跳過、不誤報
+            if lg["action"] == "calendar_privacy_screen":
+                continue
+            hit = scan_text_for_names(lg["detail"], names)
+            if hit:
+                flagged.append((lg["id"], lg["action"], hit, lg["created_at"]))
+    finally:
+        db.close()
+
+    header = (
+        f"## 去識別化稽核（近 {within_days if within_days and within_days > 0 else 90} 天 interaction_log、"
+        f"比對 {len(name_to_matter)} 個當事人名 token）"
+    )
+    caveat = (
+        "\n註：只掃我方 interaction_log、純字串比對；**不證明未外流到外部行事曆**"
+        "（外部 MCP server 端寫入攔不到、不可宣稱不可能外流）。"
+    )
+    if not flagged:
+        return f"{header}\n未發現我方紀錄含當事人名（在比對範圍內）。{caveat}"
+    lines = [header, f"發現 {len(flagged)} 筆紀錄疑似含當事人名（請人工確認是否應改代號）："]
+    for lid, action, hit, ts in flagged:
+        # 同名可能對應多案 → 列出全部、不武斷指單一案（誠實歸因）
+        _refs = "；".join(f"{n}→案{('/'.join(name_to_matter.get(n, ['?'])))}" for n in hit)
+        lines.append(f"- [log#{lid}] {action} @ {ts}：命中 {_refs}")
+    return "\n".join(lines) + caveat
+
+
 def mark_deadline_calendared(
     deadline_id: int, calendar_event_id: str, calendar_provider: str, marked_by: str
 ) -> str:

@@ -235,6 +235,18 @@ CREATE INDEX IF NOT EXISTS idx_deadlines_matter ON deadlines(matter_id);
 
 ---
 
+## 3.5 信任 / 稽核（覆核留痕 / 異動稽核 / 去識別化自檢）
+
+時限的價值是「人能信任這個倒數」。三件互補的信任機制（均 actor fail-closed + 機密軸 gate）：
+
+- **律師覆核留痕（`mark_deadline_reviewed`，migration 016 加 `reviewed_by`/`reviewed_at`）**：引擎對不確定因素標 `needs_manual_review=1`（scan/顯示「未複核·非權威·勿逕依此倒數」）。律師用 `get_deadline` 看 `calc_trace` 確認無誤後**逐筆具名**覆核 → 寫 `reviewed_by`/`reviewed_at` + 解除 `needs_manual_review`（轉權威倒數、警語消失）+ `interaction_log` 留痕。逐筆/具名/留時間戳＝「不可一鍵過」；覆核（確認計算）≠ 遞交（`mark_deadline_filed`，書狀送出）兩事件分明。
+
+- **時限異動稽核（`amend_deadline` + `get_deadline_audit`，migration 017 `deadline_audit` 表 + migration 018 計算輸入蓋章）**：律師發現送達日填錯 / 裁定天數讀錯 → `amend_deadline` 一律走 `compute_deadline` 確定性重算（不心算），落 `deadline_audit`（before/after 快照 + `changed_fields` + `amended_by` + `reason`）+ 同 tx `enqueue` `deadline_amended` 上報主持律師（鏡像 `transaction_deleted`）。**重算同時清 `reviewed_by`/`reviewed_at`**（舊覆核不可套新計算）。只對 `status='pending'`。為忠實重算、避免 provenance drift（把查表得出的在途謊報成「手動指定」），migration 018 把建立當下的計算輸入（`compute_has_local_agent`/`court_region`/`party_region`/`in_transit_override`）蓋章存欄，amend 從蓋章值重建（在途 override 與 create 同語義鎖：僅 >0 算人工指定）。
+
+- **去識別化自檢閘（`screen_calendar_text` 事前 / `privacy_audit` 事後，純函式 `shared/privacy.py`、無新表）**：時限寫進外部行事曆（Google Calendar 等）時事件文字應去識別化（案件代號 + 期限類型 + 日期、不放當事人姓名）。`screen_calendar_text` 在建 event「之前」比對提議文字有無含本案當事人名（命中→警告改用代號重寫；無可比對 token→明示「無法自檢·不可視為安全」、**不靜默通過**），**留底只記命中數量、不把姓名/全文寫進 log**（自檢不可反而漏 PII）。`privacy_audit` 事後掃 `interaction_log` 有無當事人名漏進我方紀錄（同名列全部對應案）。**誠實邊界（鐵律）：外部行事曆 MCP 寫入在我方 sandbox 外、攔不到——只能「比對已知當事人名 + 留底」、屬 advisory，回覆一律附「不代表保證不外流」，絕不可宣稱「不可能外流」。**
+
+---
+
 ## 4. 提醒節奏（T-N 升級式）+ 接既有 escalation/LINE
 
 ### 4.1 建議天數（依 severity 分流）

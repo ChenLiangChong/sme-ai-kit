@@ -1696,6 +1696,83 @@ finally:
         _osFC.environ["LINE_STATE_DIR"] = _saved_ls_am
 
 
+# === 去識別化自檢閘 screen_calendar_text + privacy_audit（信任/稽核 #6c）===
+print("\n=== 去識別化自檢閘 ===")
+from shared.privacy import extract_party_names, scan_text_for_names  # noqa: E402
+# 純函式：client_name 多名分隔 + 子字串命中
+_assert("privacy 純函式: extract_party_names 分隔多名、濾掉長度<2",
+        extract_party_names("王大明、李小華 / 甲") == ["王大明", "李小華"],
+        detail=str(extract_party_names("王大明、李小華 / 甲")))
+_assert("privacy 純函式: scan_text_for_names 子字串命中（保序去重）",
+        scan_text_for_names("通知王大明開庭、王大明簽收", ["王大明", "李小華"]) == ["王大明"])
+_assert("privacy 純函式: 空 text/names → 空", scan_text_for_names("", ["王"]) == [] and scan_text_for_names("x", []) == [])
+_midPr = db.execute(
+    "INSERT INTO matters (matter_no, title, client_name, status, has_local_agent, confidential) "
+    "VALUES ('2026-pr-001', '請求給付貨款', '王大明、李小華', 'open', 1, 0)").lastrowid
+db.commit()
+# 命中 → 警告 + 列名 + 不宣稱不可能外流
+_rHit = _svcSN.screen_calendar_text(_midPr, "王大明案 上訴期限 2026-06-22", "王律師")
+_assert("screen: 命中當事人名→警告 + 列名 + 改代號建議 + 不宣稱保證不外流",
+        "去識別化警告" in _rHit and "王大明" in _rHit and "2026-pr-001" in _rHit
+        and "不代表保證不外流" in _rHit, detail=_rHit[:120])
+# 通過（只用案件代號）
+_rPass = _svcSN.screen_calendar_text(_midPr, "2026-pr-001 上訴期限 2026-06-22", "王律師")
+_assert("screen: 只用案件代號→通過", "去識別化通過" in _rPass, detail=_rPass[:80])
+# 留底只記數量、不把當事人名寫進 log（自檢不可反而漏 PII）
+_scLog = db.execute(
+    "SELECT detail FROM interaction_log WHERE action='calendar_privacy_screen' AND target_id=? "
+    "ORDER BY id DESC LIMIT 1", (_midPr,)).fetchone()
+_assert("screen 留底: log 只記命中數量、不含當事人名（自檢不漏 PII）",
+        _scLog and "王大明" not in _scLog["detail"] and "命中" in _scLog["detail"],
+        detail=str(dict(_scLog)) if _scLog else "None")
+# 空文字防呆
+_assert("screen 防呆: 空提議文字 → ERROR", "ERROR" in _svcSN.screen_calendar_text(_midPr, "", "王律師"))
+# 無可比對 token（client_name 空）→ 不可靜默通過（codex#6c HIGH）：明示「無法自檢、不可視為安全」
+_midNoName = db.execute(
+    "INSERT INTO matters (matter_no, title, client_name, status, has_local_agent, confidential) "
+    "VALUES ('2026-pr-002', '某案', '', 'open', 1, 0)").lastrowid
+db.commit()
+_rNoBasis = _svcSN.screen_calendar_text(_midNoName, "某案 上訴期限 2026-06-22", "王律師")
+_assert("screen: client_name 空→無可比對 token→『無法自檢·不可視為安全』、不靜默通過",
+        "無法自檢" in _rNoBasis and "不可視為" in _rNoBasis and "去識別化通過" not in _rNoBasis,
+        detail=_rNoBasis[:120])
+# privacy_audit：植入一筆含當事人名的 log → 掃得到、且跳過 calendar_privacy_screen 自檢列
+db.execute("INSERT INTO interaction_log (actor,action,target_type,target_id,detail) "
+           "VALUES ('系統','note','matter',?,?)", (_midPr, "提醒王大明的開庭日"))
+db.commit()
+_rAudit = _svcSN.privacy_audit(90, 200)
+_assert("privacy_audit: 掃到漏進 log 的當事人名（命中王大明 + 對應案號）",
+        "王大明" in _rAudit and "2026-pr-001" in _rAudit and "不證明未外流" in _rAudit,
+        detail=_rAudit[:200])
+_assert("privacy_audit: 不誤報自檢留底列（calendar_privacy_screen 只記數量、不算洩漏）",
+        "calendar_privacy_screen" not in _rAudit)
+# 同名多案歸因（codex#6c MED regression）：另建一案 client_name 也含「王大明」→ audit 命中時列出兩案
+db.execute("INSERT INTO matters (matter_no, title, client_name, status, has_local_agent, confidential) "
+           "VALUES ('2026-pr-003', '另案', '王大明', 'open', 1, 0)")
+db.commit()
+_rAudit2 = _svcSN.privacy_audit(90, 200)
+_assert("privacy_audit: 同名對應多案→列出全部（2026-pr-001 與 2026-pr-003 皆現、不武斷指單案）",
+        "2026-pr-001" in _rAudit2 and "2026-pr-003" in _rAudit2, detail=_rAudit2[:200])
+# screen fail-closed：floored 無 verified → 拒（會寫 log → actor gate）
+_saved_fl_pr = _osFC.environ.get("SME_FLOOR")
+_saved_ls_pr = _osFC.environ.get("LINE_STATE_DIR")
+_osFC.environ["SME_FLOOR"] = "general"
+_osFC.environ["LINE_STATE_DIR"] = "/tmp/_no_ar_priv_xyz"
+try:
+    _rScFC = _svcSN.screen_calendar_text(_midPr, "2026-pr-001 期限", "agent自填")
+    _assert("screen fail-closed: floored 無 verified → 拒（留底寫入需 verified）",
+            "ERROR" in _rScFC and "無法驗證" in _rScFC, detail=_rScFC[:90])
+finally:
+    if _saved_fl_pr is None:
+        _osFC.environ.pop("SME_FLOOR", None)
+    else:
+        _osFC.environ["SME_FLOOR"] = _saved_fl_pr
+    if _saved_ls_pr is None:
+        _osFC.environ.pop("LINE_STATE_DIR", None)
+    else:
+        _osFC.environ["LINE_STATE_DIR"] = _saved_ls_pr
+
+
 db.close()
 
 

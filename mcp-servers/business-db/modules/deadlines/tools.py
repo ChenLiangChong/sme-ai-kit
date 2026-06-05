@@ -352,6 +352,41 @@ def get_deadline_audit(deadline_id: int) -> str:
 
 
 @mcp.tool()
+def screen_calendar_text(matter_id: int, proposed_text: str, screened_by: str = "") -> str:
+    """寫外部行事曆「之前」的去識別化自檢：比對提議事件文字有無含本案當事人姓名（advisory + 留底）。
+
+    時限寫進外部行事曆（Google Calendar 等）時，事件文字應去識別化（只放「案件代號 + 期限類型 + 日期」、
+    不放當事人姓名 / 案由）。建 event 前先用本工具檢查提議文字——命中當事人名會警告請改寫。
+
+    誠實邊界（務必如實轉達、不可誇大）：外部行事曆 MCP 的實際寫入在我方 sandbox 外、本檢查攔不到；
+    只能「比對已知當事人名 + 留稽核底」，**不代表保證不外流**。若略過本檢查或當事人名以未涵蓋寫法出現，
+    仍會外流。留底只記命中數量、不把姓名 / 全文寫進 log（避免自檢反而把當事人名漏進我方紀錄）。
+
+    Args:
+        matter_id: 該時限所屬案件 ID（用其 client_name 當比對集）
+        proposed_text: 打算寫進行事曆 event 的文字（標題/內文）
+        screened_by: 操作者（floored session 由系統取 verified 員工名）
+    """
+    return service.screen_calendar_text(
+        matter_id=matter_id, proposed_text=proposed_text, screened_by=screened_by
+    )
+
+
+@mcp.tool()
+def privacy_audit(within_days: int = 90, limit: int = 200) -> str:
+    """事後去識別化稽核：掃近 N 天 interaction_log，找有無當事人姓名漏進我方紀錄。
+
+    去識別化留底的另一半（screen_calendar_text 是事前、本工具是事後）。誠實邊界：只掃我方 log、
+    純字串比對，**不證明未外流到外部行事曆**（外部 MCP server 端寫入攔不到）。
+
+    Args:
+        within_days: 掃描回溯天數（預設 90）
+        limit: 最多檢查幾筆 log（預設 200）
+    """
+    return service.privacy_audit(within_days=within_days, limit=limit)
+
+
+@mcp.tool()
 def mark_deadline_calendared(
     deadline_id: int,
     calendar_event_id: str,
