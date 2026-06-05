@@ -271,6 +271,25 @@ def mark_deadline_filed(deadline_id: int, filed_by: str = "") -> str:
 
 
 @mcp.tool()
+def mark_deadline_reviewed(deadline_id: int, reviewed_by: str = "", note: str = "") -> str:
+    """律師覆核時限計算軌跡（calc_trace）後留痕 → 寫 reviewed_by/reviewed_at + 解除需人工複核旗標。
+
+    用於引擎標「需人工複核」的時限（送達/在途/法版/教示/裁定期間/消滅時效起算等不確定因素）：
+    律師用 get_deadline 看計算軌跡、逐步確認無誤後，呼叫本工具具名覆核。該筆才從「未複核·非權威」
+    轉為可作權威倒數（scan/顯示的警語隨之消失）。逐筆、具名、留時間戳＝「不可一鍵過」。
+    覆核（確認計算正確）≠ 遞交（mark_deadline_filed，書狀已送出）：兩個獨立事件，覆核後仍要按時遞交。
+
+    Args:
+        deadline_id: 時限 ID
+        reviewed_by: 覆核律師（floored session 由系統取 verified 員工名、忽略此傳入值）
+        note: 覆核備註（落稽核 log，如「已核對送達回證、起算日無誤」）
+    """
+    return service.mark_deadline_reviewed(
+        deadline_id=deadline_id, reviewed_by=reviewed_by, note=note
+    )
+
+
+@mcp.tool()
 def mark_deadline_calendared(
     deadline_id: int,
     calendar_event_id: str,

@@ -439,6 +439,11 @@ check("legal(消滅時效): deadlines 有 period_unit + period_value 欄（migra
       "period_unit" in _dl_cols and "period_value" in _dl_cols,
       detail=str(sorted(_dl_cols)))
 
+# 律師覆核留痕（migration 016）：reviewed_by/reviewed_at 兩欄（ALTER ADD COLUMN、PRAGMA 驗）
+check("legal(覆核留痕): deadlines 有 reviewed_by + reviewed_at 欄（migration 016）",
+      "reviewed_by" in _dl_cols and "reviewed_at" in _dl_cols,
+      detail=str(sorted(_dl_cols)))
+
 # index 落地（含 partial WHERE status='pending'）
 lindexes = {r[0] for r in conn.execute(
     "SELECT name FROM sqlite_master WHERE type='index'"

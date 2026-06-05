@@ -1492,6 +1492,55 @@ _assert("四表零重疊: PROCEDURAL_CALENDAR_PERIODS 與 STATUTORY/COURT_SET/LI
         and not (set(PROCEDURAL_CALENDAR_PERIODS) & set(LIMITATION_PERIODS)))
 
 
+# === 律師覆核留痕 mark_deadline_reviewed（信任/稽核 #6a）===
+print("\n=== 律師覆核留痕 mark_deadline_reviewed ===")
+# 用 _mid529 那筆 court_set（needs_manual_review=1）來測覆核
+_rvId = db.execute(
+    "SELECT id FROM deadlines WHERE matter_id=? ORDER BY id DESC LIMIT 1", (_mid529,)).fetchone()["id"]
+_preRv = db.execute(
+    "SELECT needs_manual_review, reviewed_by, reviewed_at FROM deadlines WHERE id=?", (_rvId,)).fetchone()
+_assert("覆核前: needs_manual_review=1、reviewed_by/at 皆空",
+        _preRv["needs_manual_review"] == 1 and not _preRv["reviewed_by"] and not _preRv["reviewed_at"])
+_rRv = _svcSN.mark_deadline_reviewed(deadline_id=_rvId, reviewed_by="王律師", note="已核對命起訴裁定主文30日無誤")
+_assert("覆核: 成功 + 回覆含覆核人 + 解除需複核旗標",
+        "已由 王律師 覆核留痕" in _rRv and "解除" in _rRv, detail=_rRv[:120])
+_postRv = db.execute(
+    "SELECT needs_manual_review, reviewed_by, reviewed_at FROM deadlines WHERE id=?", (_rvId,)).fetchone()
+_assert("覆核後: needs_manual_review=0、reviewed_by/reviewed_at 落欄",
+        _postRv["needs_manual_review"] == 0 and _postRv["reviewed_by"] == "王律師"
+        and _postRv["reviewed_at"], detail=str(dict(_postRv)))
+_rvLog = db.execute(
+    "SELECT actor,action,detail FROM interaction_log WHERE action='deadline_reviewed' "
+    "AND target_id=? ORDER BY id DESC LIMIT 1", (_rvId,)).fetchone()
+_assert("覆核: interaction_log 留痕 deadline_reviewed（具名+備註）",
+        _rvLog and _rvLog["actor"] == "王律師" and "30日無誤" in _rvLog["detail"],
+        detail=str(dict(_rvLog)) if _rvLog else "None")
+_getRv = _svcSN.get_deadline(_rvId)
+_assert("覆核: get_deadline 顯示「已覆核：王律師」、且不再顯示「需人工複核」",
+        "已覆核：王律師" in _getRv and "[需人工複核]" not in _getRv,
+        detail=str([l for l in _getRv.split(chr(10)) if "覆核" in l]))
+# 找不到 / 已取消防呆
+_assert("覆核防呆: 找不到時限 → ERROR", "ERROR" in _svcSN.mark_deadline_reviewed(999999, "王律師", ""))
+# fail-closed：floored 無 verified 脈絡 → 拒覆核（不可盲信任意覆核人名）
+_saved_fl_rv = _osFC.environ.get("SME_FLOOR")
+_saved_ls_rv = _osFC.environ.get("LINE_STATE_DIR")
+_osFC.environ["SME_FLOOR"] = "general"
+_osFC.environ["LINE_STATE_DIR"] = "/tmp/_no_ar_review_xyz"
+try:
+    _rRvFC = _svcSN.mark_deadline_reviewed(deadline_id=_rvId, reviewed_by="agent自填", note="x")
+    _assert("覆核 fail-closed: floored 無 verified → 拒覆核（防偽造覆核人）",
+            "ERROR" in _rRvFC and "無法驗證" in _rRvFC, detail=_rRvFC[:90])
+finally:
+    if _saved_fl_rv is None:
+        _osFC.environ.pop("SME_FLOOR", None)
+    else:
+        _osFC.environ["SME_FLOOR"] = _saved_fl_rv
+    if _saved_ls_rv is None:
+        _osFC.environ.pop("LINE_STATE_DIR", None)
+    else:
+        _osFC.environ["LINE_STATE_DIR"] = _saved_ls_rv
+
+
 db.close()
 
 

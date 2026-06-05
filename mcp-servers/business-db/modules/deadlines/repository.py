@@ -186,6 +186,19 @@ def mark_filed(
     return cur.rowcount
 
 
+def mark_reviewed(
+    db: sqlite3.Connection, deadline_id: int, reviewed_by: str | None, reviewed_at: str
+) -> int:
+    """律師覆核留痕：寫 reviewed_by/reviewed_at 並解除 needs_manual_review（具名人已確認計算）。
+    只對未取消的時限生效（cancelled 不可再覆核）。回 rowcount。"""
+    cur = db.execute(
+        "UPDATE deadlines SET reviewed_by=?, reviewed_at=?, needs_manual_review=0 "
+        "WHERE id=? AND status != 'cancelled'",
+        (reviewed_by, reviewed_at, deadline_id),
+    )
+    return cur.rowcount
+
+
 def mark_calendared(
     db: sqlite3.Connection,
     deadline_id: int,

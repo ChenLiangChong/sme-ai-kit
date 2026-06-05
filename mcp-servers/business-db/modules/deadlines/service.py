@@ -791,6 +791,11 @@ def get_deadline(deadline_id: int) -> str:
         svc = _SERVICE_TYPE_ZH.get(d["service_type"], d["service_type"])
         sev = _SEVERITY_ZH.get(d["severity"], d["severity"] or "未分級")
         review = f"\n- [需人工複核]：含不確定因素（{_REVIEW_FACTORS}）、不可全自動倚賴" if d["needs_manual_review"] else ""
+        # 覆核留痕（信任/稽核）：具名律師覆核過 calc_trace 才顯示「誰、何時」確認（漏期=執業過失的留痕命脈）
+        if d["reviewed_by"] or d["reviewed_at"]:
+            reviewed_str = f"\n- 已覆核：{d['reviewed_by'] or '?'}（{d['reviewed_at'] or '?'}）確認計算無誤"
+        else:
+            reviewed_str = ""
 
         # 教示比對（安全網）：有抓判決書教示天數才顯示是否與引擎相符。
         # 單位 aware（反捏造）：年/月期間比 period_value（同單位）、日期間比 statutory_days。
@@ -841,6 +846,7 @@ def get_deadline(deadline_id: int) -> str:
             f"- 負責律師：{d['assignee'] or '未指派'}\n"
             f"- 提醒節點：{d['escalation_lead_days']}（已發：{d['reminders_sent']}）\n"
             f"- 遞交：{('已於 ' + d['filed_at'] + ' 由 ' + (d['filed_by'] or '?') + ' 遞交') if d['filed_at'] else '未遞交'}"
+            f"{reviewed_str}"
             f"{review}\n"
             f"\n### 計算軌跡（律師逐步覆核）\n{trace_str}"
             f"{recovery_str}"
@@ -885,6 +891,50 @@ def mark_deadline_filed(deadline_id: int, filed_by: str) -> str:
             business_unit=None,
         )
     return f"時限 #{deadline_id}（{d['description']}）已標記為已遞交，cron 不再提醒。"
+
+
+def mark_deadline_reviewed(deadline_id: int, reviewed_by: str, note: str) -> str:
+    """律師逐筆覆核 calc_trace 後留痕（信任/稽核）：寫 reviewed_by/reviewed_at + 解除 needs_manual_review。
+
+    用於引擎標 needs_manual_review（送達/在途/法版/教示/裁定期間/消滅時效起算等不確定因素）的時限：
+    律師看過計算軌跡、確認無誤後具名覆核，該筆才從「未複核·非權威」轉為可作為權威倒數。
+    「不可一鍵過」＝逐筆、具名、留時間戳（actor fail-closed：floored 取 verified 員工名、忽略 agent 自填）。
+    覆核（確認計算正確）≠ 遞交（mark_deadline_filed，書狀已送出）——兩個獨立生命週期事件。
+    """
+    from shared.floor_policy import is_full_access
+
+    with transaction() as db:
+        d = repository.get_deadline(db, deadline_id)
+        if not d:
+            return f"ERROR: 找不到時限 #{deadline_id}"
+        # 機密軸（寫入端 gate）：時限隨母案件機密性，機密案件之時限非全權限層不可覆核（同 mark_filed gate 風格）。
+        m = repository.get_matter(db, d["matter_id"])
+        if m and m["confidential"] and not is_full_access():
+            # 機密軸 + 存在性洩漏防護：受限層對機密時限回「與不存在相同」的泛化錯誤（消除 ID 探測 oracle）。
+            return f"ERROR: 找不到時限 #{deadline_id}"
+        if d["status"] == "cancelled":
+            return f"ERROR: 時限 #{deadline_id} 已取消，無法覆核"
+        # actor 具名 + 防偽造 fail-closed（對齊 #10）：覆核留痕的「誰」必須可信、不可盲信任意字串。
+        _actor, _err = _writer_or_error(db, reviewed_by)
+        if _err:
+            return _err
+        _was_review = bool(d["needs_manual_review"])
+        rows = repository.mark_reviewed(db, deadline_id, _actor or None, _now())
+        if rows == 0:
+            return f"ERROR: 時限 #{deadline_id} 覆核留痕失敗（狀態已變動）"
+        repository.insert_interaction_log(
+            db,
+            actor=_actor or "system",
+            action="deadline_reviewed",
+            target_type="deadline",
+            target_id=deadline_id,
+            detail=(note or f"{d['description']} 計算軌跡已覆核確認"),
+            business_unit=None,
+        )
+    _cleared = "、已解除『需人工複核』旗標（轉為權威倒數）" if _was_review else "（本筆原即無需複核旗標）"
+    return (
+        f"時限 #{deadline_id}（{d['description']}）已由 {_actor or '系統'} 覆核留痕{_cleared}。"
+    )
 
 
 def mark_deadline_calendared(
