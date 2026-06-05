@@ -955,6 +955,14 @@ _AMEND_SNAPSHOT_FIELDS = (
     "reviewed_by", "reviewed_at",
 )
 
+# create 當下蓋章的「計算輸入」欄（migration 018）。納入 amend 快照（codex R2 稽核#6b 複審 finding#1+#2）：
+# 異動若更正了 has_local_agent/court_region/party_region 或在途 override，audit 要能看到真正的
+# 計算前提變更（如「override 5→7」「local_agent 0→1」），不能只看到衍生結果 in_transit_days 變了。
+_AMEND_COMPUTE_FIELDS = (
+    "compute_has_local_agent", "compute_court_region",
+    "compute_party_region", "compute_in_transit_override",
+)
+
 
 def amend_deadline(
     deadline_id: int,
@@ -968,6 +976,10 @@ def amend_deadline(
     buffer_days: int = -1,
     document_date: str = "",
     stated_period_days: int = -1,
+    has_local_agent: int = -1,
+    court_region: str = "",
+    party_region: str = "",
+    clear_in_transit_override: bool = False,
 ) -> str:
     """異動既有時限的輸入（如送達日填錯、裁定天數讀錯）→ 確定性重算雙日期 + before/after 稽核 + 上報。
 
@@ -979,9 +991,19 @@ def amend_deadline(
 
     sentinel：字串參數 ''＝不改、整數參數 -1＝不改（0 為合法值故不能當 sentinel）。
     period_type / statutory_basis / type 不可由本工具改（法律性質固定；要改性質應重建時限）。
+
+    計算輸入更正（codex R2 稽核#6b 複審 finding#1/#3）：建立當下的在途查表維度填錯時，可直接更正
+    根本輸入、由引擎重新查表，不必用手動在途硬蓋：
+    - has_local_agent：-1=不改、0/1=顯式更正（有無在途代理人，影響是否加計在途）
+    - court_region / party_region：''=不改、非空=更正（在途天數查表維度）
+    - clear_in_transit_override：True=把先前誤設的手動在途 override 清成 NULL、改回自動來源（查表/§162但書）；
+      與 in_transit_days(>0) 互斥
     """
     if not reason or not reason.strip():
         return "ERROR: reason（異動原因）不可為空——時限異動須留痕（漏期=執業過失）"
+    if clear_in_transit_override and in_transit_days is not None and in_transit_days > 0:
+        return ("ERROR: clear_in_transit_override 與 in_transit_days(>0) 互斥"
+                "——清除在途 override 就不能同時指定手動在途天數")
 
     from shared.floor_policy import is_full_access
     from shared.escalation import enqueue_escalation
@@ -1020,18 +1042,28 @@ def amend_deadline(
         except Exception:
             _ck = []
         _has_compute_cols = "compute_has_local_agent" in _ck
-        if _has_compute_cols and d["compute_has_local_agent"] is not None:
+        # has_local_agent：-1=沿用蓋章值（蓋章為 NULL 的舊時限 fallback matter.has_local_agent）；0/1=顯式更正
+        if has_local_agent in (0, 1):
+            _hla = bool(has_local_agent)
+        elif _has_compute_cols and d["compute_has_local_agent"] is not None:
             _hla = bool(d["compute_has_local_agent"])
         else:
             _hla = bool(m["has_local_agent"]) if m else True
-        _court = (d["compute_court_region"] if _has_compute_cols else None) or ""
-        _party = (d["compute_party_region"] if _has_compute_cols else None) or ""
+        # court/party region：''=沿用蓋章值；非空=顯式更正（在途查表維度）
+        _court = court_region.strip() if (court_region and court_region.strip()) \
+            else ((d["compute_court_region"] if _has_compute_cols else None) or "")
+        _party = party_region.strip() if (party_region and party_region.strip()) \
+            else ((d["compute_party_region"] if _has_compute_cols else None) or "")
         _orig_override = d["compute_in_transit_override"] if _has_compute_cols else None
         # 在途 override：與 create 同語義鎖（codex R2 finding#1）——只有「>0」才算「人工指定在途」；
         # 0/-1 一律視為「不指定手動 override」、沿用 create 蓋章的 _orig_override（None→仍由
         # has_local_agent/查表決定）。避免 amend(...,in_transit_days=0) 把「不 override」漂成「手動指定 0 日」。
+        # clear_in_transit_override=True（codex R2 複審 finding#3）：把誤設的正數 override 清回 NULL、
+        # 改走自動來源——這是唯一能合法「撤銷」人工在途的路徑（0/-1 故意只代表「不動」）。
         _amend_transit = in_transit_days if (in_transit_days is not None and in_transit_days > 0) else None
-        if _amend_transit is not None:
+        if clear_in_transit_override:
+            new_transit_override = None
+        elif _amend_transit is not None:
             new_transit_override = _amend_transit
         else:
             new_transit_override = _orig_override
@@ -1071,6 +1103,9 @@ def amend_deadline(
 
         # ── before 快照（重算前現值）──
         before = {k: d[k] for k in _AMEND_SNAPSHOT_FIELDS}
+        if _has_compute_cols:
+            for _k in _AMEND_COMPUTE_FIELDS:
+                before[_k] = d[_k]
 
         # ── 落欄（重算衍生欄 + 清覆核 + 重設 needs_review）──
         upd = {
@@ -1095,8 +1130,12 @@ def amend_deadline(
             "reviewed_by": None,
             "reviewed_at": None,
         }
-        # 若本次顯式改在途 override（僅 >0 算人工指定），持久化新 override 值（供下次 amend 忠實重算、不 drift）
-        if _amend_transit is not None:
+        # 持久化「計算輸入」蓋章欄（codex R2 複審 finding#1）：每次 amend 都重新蓋章本次實際採用的
+        # has_local_agent/court/party/override，使下次 amend 仍能忠實重建、且 provenance 不 drift。
+        if _has_compute_cols:
+            upd["compute_has_local_agent"] = 1 if _hla else 0
+            upd["compute_court_region"] = _court or None
+            upd["compute_party_region"] = _party or None
             upd["compute_in_transit_override"] = new_transit_override
         rows = repository.update_deadline_fields(db, deadline_id, upd)
         if rows == 0:
@@ -1120,7 +1159,13 @@ def amend_deadline(
             "reviewed_by": None,
             "reviewed_at": None,
         }
-        changed = [k for k in _AMEND_SNAPSHOT_FIELDS if before.get(k) != after.get(k)]
+        if _has_compute_cols:
+            after["compute_has_local_agent"] = 1 if _hla else 0
+            after["compute_court_region"] = _court or None
+            after["compute_party_region"] = _party or None
+            after["compute_in_transit_override"] = new_transit_override
+        _snap_fields = _AMEND_SNAPSHOT_FIELDS + (_AMEND_COMPUTE_FIELDS if _has_compute_cols else ())
+        changed = [k for k in _snap_fields if before.get(k) != after.get(k)]
         _was_reviewed = bool(d["reviewed_by"] or d["reviewed_at"])
 
         repository.insert_deadline_audit(db, {

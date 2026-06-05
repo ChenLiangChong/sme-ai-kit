@@ -302,11 +302,15 @@ def amend_deadline(
     buffer_days: int = -1,
     document_date: str = "",
     stated_period_days: int = -1,
+    has_local_agent: int = -1,
+    court_region: str = "",
+    party_region: str = "",
+    clear_in_transit_override: bool = False,
 ) -> str:
     """異動既有時限的輸入（送達日填錯、裁定天數讀錯等）→ 確定性重算雙日期 + 留稽核 + 通報主持律師。
 
     反捏造：重算一律走引擎 compute_deadline（不心算）。本工具會：
-    - 寫 deadline_audit（before/after 快照 + 變動欄位 + 異動人 + 原因）。
+    - 寫 deadline_audit（before/after 快照 + 變動欄位 + 異動人 + 原因；含計算輸入 compute_* 蓋章欄）。
     - **清除原覆核（reviewed_by/reviewed_at）並重設需人工複核**——舊覆核不可套在新計算上，須重新覆核。
     - 同 tx 上報 deadline_amended 給主持律師（時限雙日期被改是高風險動作、不擋但通知）。
     只對 status='pending' 生效（已遞交/取消不可重算）。period_type/statutory_basis/type 不可由本工具改
@@ -325,6 +329,11 @@ def amend_deadline(
         buffer_days: 新內部緩衝天數（-1=不改）
         document_date: 新文書作成日 YYYY-MM-DD（''=不改）
         stated_period_days: 新判決書教示天數（-1=不改）
+        has_local_agent: 更正「有無在途代理人」（-1=不改、0/1=顯式更正）——建立當下查表維度填錯時用
+        court_region: 更正法院所在地（''=不改）——在途天數查表維度
+        party_region: 更正當事人所在地（''=不改）——在途天數查表維度
+        clear_in_transit_override: True=清除先前誤設的手動在途 override、改回自動來源（查表/§162但書）；
+            與 in_transit_days(>0) 互斥。這是唯一能合法撤銷人工在途的路徑（0/-1 只代表「不動」）。
     """
     return service.amend_deadline(
         deadline_id=deadline_id,
@@ -338,6 +347,10 @@ def amend_deadline(
         buffer_days=buffer_days,
         document_date=document_date,
         stated_period_days=stated_period_days,
+        has_local_agent=has_local_agent,
+        court_region=court_region,
+        party_region=party_region,
+        clear_in_transit_override=clear_in_transit_override,
     )
 
 

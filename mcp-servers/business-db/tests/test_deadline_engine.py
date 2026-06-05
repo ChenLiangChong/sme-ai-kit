@@ -1664,6 +1664,50 @@ _noAfter = db.execute("SELECT in_transit_days,in_transit_source,compute_in_trans
 _assert("provenance 連鎖: create 無 override → amend(0) 不平白生出手動 override（在途仍0、source 非手動指定）",
         _noAfter["in_transit_days"] == 0 and "手動指定" not in (_noAfter["in_transit_source"] or "")
         and _noAfter["compute_in_transit_override"] is None, detail=str(dict(_noAfter)))
+
+# === codex R2 稽核#6b 複審：amend 可更正計算根本輸入 + clear override + compute_* 納稽核 ===
+print("\n=== amend 計算輸入更正（R2 複審 finding#1/#2/#3）===")
+# finding#3：clear_in_transit_override 把誤設的正數 override(_pvId 現為7) 清回 NULL、改走自動來源
+_svcSN.amend_deadline(_pvId, "在途 override 設錯、清回自動", "王律師", clear_in_transit_override=True)
+_pvClr = db.execute("SELECT in_transit_days,in_transit_source,compute_in_transit_override "
+                    "FROM deadlines WHERE id=?", (_pvId,)).fetchone()
+_assert("R2#3: clear_in_transit_override 清掉誤設的人工在途(7→自動)、override 落 NULL、source 非手動",
+        _pvClr["compute_in_transit_override"] is None
+        and "手動指定" not in (_pvClr["in_transit_source"] or ""), detail=str(dict(_pvClr)))
+# finding#3 互斥防呆：clear + in_transit_days>0 → ERROR
+_assert("R2#3: clear_in_transit_override 與 in_transit_days(>0) 互斥 → ERROR",
+        "ERROR" in _svcSN.amend_deadline(_pvId, "x", "王律師",
+                                         clear_in_transit_override=True, in_transit_days=3))
+# finding#1：amend 更正 has_local_agent（0→1）→ 重新蓋章 compute_has_local_agent=1，由引擎重算在途
+_midHla = db.execute(
+    "INSERT INTO matters (matter_no, title, status, has_local_agent, confidential) "
+    "VALUES ('2026-hla-001', 'local_agent更正案', 'open', 0, 0)").lastrowid
+db.commit()
+_rHla = _svcSN.create_deadline(
+    matter_id=_midHla, type="appeal_civil", description="", trigger_event="判決送達",
+    service_base_date="2026-06-01", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=0, in_transit_days=0,
+    court_region="臺北", party_region="高雄", buffer_days=1, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="王律師")
+_hlaId = int(_reAm.search(r"#(\d+)", _rHla).group(1))
+_hlaB = db.execute("SELECT compute_has_local_agent FROM deadlines WHERE id=?", (_hlaId,)).fetchone()
+_svcSN.amend_deadline(_hlaId, "其實有委任在途代理人、更正", "王律師", has_local_agent=1)
+_hlaA = db.execute("SELECT compute_has_local_agent FROM deadlines WHERE id=?", (_hlaId,)).fetchone()
+_assert("R2#1: amend(has_local_agent=1) 更正並重新蓋章 compute_has_local_agent(0→1)",
+        _hlaB["compute_has_local_agent"] == 0 and _hlaA["compute_has_local_agent"] == 1,
+        detail=f"{dict(_hlaB)}→{dict(_hlaA)}")
+# finding#1：amend 更正 court_region/party_region → 重新蓋章
+_svcSN.amend_deadline(_hlaId, "法院所在地讀錯、更正", "王律師", court_region="臺中", party_region="臺南")
+_hlaR = db.execute("SELECT compute_court_region,compute_party_region FROM deadlines WHERE id=?", (_hlaId,)).fetchone()
+_assert("R2#1: amend(court/party_region) 更正並重新蓋章查表維度",
+        _hlaR["compute_court_region"] == "臺中" and _hlaR["compute_party_region"] == "臺南",
+        detail=str(dict(_hlaR)))
+# finding#2：compute_* 計算輸入變更要進 deadline_audit 的 changed_fields（不只看衍生 in_transit_days）
+_hlaAud = db.execute(
+    "SELECT changed_fields FROM deadline_audit WHERE deadline_id=? ORDER BY id DESC LIMIT 1",
+    (_hlaId,)).fetchone()
+_assert("R2#2: compute_court_region 計算輸入變更進 audit changed_fields（可重建異動前提）",
+        "compute_court_region" in (_hlaAud["changed_fields"] or ""), detail=str(dict(_hlaAud)))
 # 另建一筆 pending 供 fail-closed 用（_amId 待會會被標 filed）
 _rAm2 = _svcSN.create_deadline(
     matter_id=_midAm, type="appeal_civil", description="", trigger_event="判決送達",
