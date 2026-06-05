@@ -285,10 +285,22 @@ _assert("H2-T16: list 不含已 discarded 的（#%d）" % _iid14, f"#{_iid14}" n
 # codex r1 修補回歸（機密軸 + 資料完整性）
 # ============================================================
 
-def _with_floor(floor, fn):
-    """暫時設 SME_FLOOR 跑 fn、用後還原（模擬受限層）。"""
+_AR_DIR = tempfile.mkdtemp(prefix="legal_ar_")  # 隔離的 line-channel verified active-request 目錄
+
+
+def _with_floor(floor, fn, user_id="Uverified_legal_test"):
+    """暫時設 SME_FLOOR + 寫 line-channel verified active-request（模擬受限層的 verified 員工）、跑 fn、
+    用後還原。actor fail-closed 後 floored 寫入需 verified LINE 脈絡（真實由 line-channel 驗簽寫）；測試
+    補上、否則會被當 __unverified__ 擋下（撞到的是 actor gate 而非要測的機密 gate）。"""
+    import json as _j
+    import time as _t
     old = os.environ.get("SME_FLOOR")
+    old_lsd = os.environ.get("LINE_STATE_DIR")
     os.environ["SME_FLOOR"] = floor
+    os.environ["LINE_STATE_DIR"] = _AR_DIR
+    _arp = os.path.join(_AR_DIR, f"active-request-{floor}.json")
+    with open(_arp, "w", encoding="utf-8") as _f:
+        _j.dump({"user_id": user_id, "written_ms": _t.time() * 1000}, _f)
     try:
         return fn()
     finally:
@@ -296,6 +308,14 @@ def _with_floor(floor, fn):
             os.environ.pop("SME_FLOOR", None)
         else:
             os.environ["SME_FLOOR"] = old
+        if old_lsd is None:
+            os.environ.pop("LINE_STATE_DIR", None)
+        else:
+            os.environ["LINE_STATE_DIR"] = old_lsd
+        try:
+            os.remove(_arp)
+        except OSError:
+            pass
 
 
 # T17：confirm_intake_id anti-oracle —— 受限層不可藉公開案件 + 猜 id 關掉機密 intake、

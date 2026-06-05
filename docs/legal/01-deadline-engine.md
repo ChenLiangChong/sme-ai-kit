@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS matters (
 );
 ```
 
-### 1.2 `deadlines`（時限主檔，migration 012 — 本模組核心）
+### 1.2 `deadlines`（時限主檔，與 `matters` 同在 migration 011 — 本模組核心）
 
 ```sql
 CREATE TABLE IF NOT EXISTS deadlines (
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS deadlines (
     service_base_date TEXT NOT NULL,      -- 送達/寄存/黏貼/公告/最後登報基準日 YYYY-MM-DD
     statutory_days INTEGER NOT NULL,      -- 法定日數（民事上訴=20、抗告=10…；裁定期間=裁定所載）
     statutory_basis TEXT NOT NULL,        -- 法條依據（民訴§440）— 強制非空，反捏造
-    statutory_basis_version TEXT,         -- 法規版本日（如『刑訴§349 110.06.16修正版』）
+    statutory_basis_version TEXT,         -- 法規版本日（如『刑訴§349 109.01.15修正版』）
     -- === 在途期間（民訴§162）===
     in_transit_days INTEGER DEFAULT 0,    -- 查表得（無代理人除外時加算；裁定期間/有當地代理人→0）
     in_transit_source TEXT,               -- '查表 B0010020 v107.7.1：金門→台北地院 N 日' / '§162但書歸零'
@@ -122,7 +122,7 @@ CREATE INDEX IF NOT EXISTS idx_deadlines_matter ON deadlines(matter_id);
 | `calendar_provider TEXT` | 行事曆來源標記（'google'/'internal'/…） |
 | `calendar_synced_at TEXT` | 回填時間 |
 
-**法版檢核安全網**（純算、不落欄）：`compute_deadline` 內 `_PERIOD_AMENDMENTS`（regex 精準鎖法別+條號邊界、不裸子字串誤命中如 §349之1）記已查證的期間日數修法施行日（刑訴§349 2021-06-16 由 10→20、刑訴§406 2023-06-21 由 5→10）。**優先比對 `document_date`（文書作成日）**、未提供才以 `service_base_date` 近似並於 calc_trace 誠實標明；該日早於施行日 → `needs_manual_review` + calc_trace 說明，**不臆測重算舊法**（沿革表僅含已查證者、寧缺勿錯；非空 document_date 格式錯誤直接回 error、不靜默落髒資料）。`compute_deadline` 回傳加 `stated_period_days` / `period_match`（match/mismatch/not_provided）。
+**法版檢核安全網**（純算、不落欄）：`compute_deadline` 內 `_PERIOD_AMENDMENTS`（regex 精準鎖法別+條號邊界、不裸子字串誤命中如 §349之1）記已查證的期間日數修法施行日（刑訴§349 2020-01-15〔109.01.15 自公布日施行〕由 10→20、刑訴§406 2023-06-21 由 5→10）。**優先比對 `document_date`（文書作成日）**、未提供才以 `service_base_date` 近似並於 calc_trace 誠實標明；該日早於施行日 → `needs_manual_review` + calc_trace 說明，**不臆測重算舊法**（沿革表僅含已查證者、寧缺勿錯；非空 document_date 格式錯誤直接回 error、不靜默落髒資料）。`compute_deadline` 回傳加 `stated_period_days` / `period_match`（match/mismatch/not_provided）。
 
 **裁定期間強制複核安全網**（`COURT_SET_PERIODS`，與固定天數種子 `STATUTORY_PERIODS` 分開的獨立表）：限期補正（`type='correction'`）等裁定期間，天數由法院在裁定當下載明、**非法定固定值**——`COURT_SET_PERIODS` 只登記 `period_type='court_set'` / `severity` / 描述 / 觸發語 / 裁定文號提示，**絕不含 `statutory_days`**（律師必讀裁定填、引擎不回填不預設；上訴 20 日寫死在法律可回填，補正期間是法院個案訂的、回填＝臆測）。`create_deadline` 凡最終 `period_type='court_set'` 一律強制 `needs_manual_review`：裁定天數純人輸入、無固定法定種子可交叉驗證，是反捏造風險最高一類，calc_trace 留「裁定所定期間強制複核」理由。缺天數 / 裁定文號 → 給「讀裁定」針對性提示擋下、不以 0 硬算。漏補正＝駁回起訴，小所最高頻時限之一。
 
@@ -379,7 +379,7 @@ OS cron scan_deadlines.py 每日07:00
 
 - 計算引擎新檔（建議）：`/mnt/d/gitDir/sme-ai-kit/mcp-servers/business-db/shared/deadlines.py`（`compute_deadline` + `scan_and_enqueue_due_reminders`，鏡像 `shared/escalation.py`）
 - cron 薄殼新檔：`/mnt/d/gitDir/sme-ai-kit/mcp-servers/business-db/scan_deadlines.py`（鏡像 `flush_escalations.py`）
-- migration 新檔：`/mnt/d/gitDir/sme-ai-kit/mcp-servers/business-db/migrations/011_matters.sql`、`012_deadlines.sql`、`013_office_calendar.sql`（在途表 `014_transit_period.sql` 留完整版）
+- migration 實際檔（均在 `mcp-servers/business-db/migrations/`、已落地）：`011_matters.sql`（含 `matters` + `deadlines` 兩表）、`012_legal_calendar_transit.sql`（`office_calendar` + `transit_period` 兩表、查表路徑 `lookup_transit_days` 已通；未做的只是逐筆灌 B0010020/A0020097 種子資料）、`013_deadline_safety_calendar.sql`（安全網 + 行事曆欄）、`014_pending_intakes.sql`（#H2 待確認暫存）、`015_deadline_period_unit.sql`（消滅時效 `period_unit`/`period_value`）
 - enqueue 母版（必對齊簽名）：`/mnt/d/gitDir/sme-ai-kit/mcp-servers/business-db/shared/escalation.py:175`（`enqueue_escalation`，新增 `deadline_approaching`/`deadline_missed` 進 `DEFAULT_ENABLED_EVENTS` L32 + `ESCALATION_LABELS` L428）
 - 投遞三層（零改動複用）：`shared/escalation.py:457`（`flush_pending_escalations`）+ `shared/db.py:96-147`（commit 後 fire-and-forget）
 - cron 安裝段（新 cron 照此加 marker）：`/mnt/d/gitDir/sme-ai-kit/install.sh:184-205`

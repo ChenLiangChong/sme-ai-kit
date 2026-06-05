@@ -15,8 +15,8 @@
 LINE 訊息含 `[圖片]` 路徑或 PDF → 用 Read 工具看內容。抽出這幾個**事實**（不要算天數、不要推斷法條）：
 
 1. **文書類型** → 對應 `type`：
-   - 一審判決 → 上訴：民事 `appeal_civil` / 刑事 `appeal_criminal` / 行政 `appeal_admin` / 家事 `appeal_family`
-   - 裁定 → 抗告：民事 `abjection_civil` / 刑事 `abjection_criminal`
+   - 一審判決 → 上訴：民事 `appeal_civil` / 刑事 `appeal_criminal` / 行政 `appeal_admin` / 家事**訴訟事件** `appeal_family`
+   - 裁定 → 抗告：民事 `abjection_civil` / 刑事 `abjection_criminal` / 家事**非訟事件** `abjection_family`（10 日、與家事訴訟上訴 20 日不同、勿混用）
    - 第三審上訴理由書補提 `appeal_reason`、訴願 `petition_appeal`、支付命令異議 `payment_order_objection`
    - **限期補正裁定**（命補正當事人能力／法定代理／書狀程式／裁判費等）→ `type='correction'`（裁定期間、特殊處理見下方「限期補正」）
    - 開庭通知 → 不是「期間」是「期日」，建 `type='custom'` + `period_type='court_set'`、或直接寫行事曆庭期（見下方「開庭通知」）
@@ -82,7 +82,7 @@ create_deadline(
 )
 ```
 
-- **type 在種子表內**（appeal_civil/abjection_civil/appeal_criminal/abjection_criminal/appeal_admin/appeal_family/appeal_reason/petition_appeal/payment_order_objection）→ `statutory_days`/`statutory_basis`/`period_type`/`description` 自動回填，你不用查。
+- **type 在種子表內**（appeal_civil/abjection_civil/appeal_criminal/abjection_criminal/appeal_admin/appeal_family/abjection_family/appeal_reason/petition_appeal/payment_order_objection）→ `statutory_days`/`statutory_basis`/`period_type`/`description` 自動回填，你不用查。
 - **type 不在種子表**（罕見特別期間）→ **必須**手動帶 `statutory_days` + `statutory_basis` + `period_type`，否則引擎擋下（反捏造：缺法條依據不給算）。**法條依據要查證、不要編**，查不到就請律師給。
 - **無當地代理人又要算在途** → 帶 `court_region` + `party_region`（如 `court_region="taipei"`, `party_region="kinmen"`）查在途表；查不到引擎標複核。
 - 回傳含 `internal_deadline`（盯這個）/ `statutory_deadline`（底線）/ `calc_trace`（逐步軌跡）。**回報給人時兩個日期都講、叫他盯內部期限。**

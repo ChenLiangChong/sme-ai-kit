@@ -2805,6 +2805,23 @@ _assert("deadlines: 同日重掃冪等不重推（reminders_sent 去重）",
 # 案件建時限、把機密時限標 filed、還回內容。修後：mutator 入口讀母案件、機密 + 非全權限層→擋下。
 _section("Deadlines HIGH-1：機密軸寫入 gate")
 
+# actor fail-closed 後 floored 寫入需 verified active-request（真實由 line-channel 驗簽寫）；本節模擬
+# 受限層測「機密 gate」，補上 verified 脈絡、否則 create_deadline 會被 actor gate（非機密 gate）擋下。
+import json as _jH1  # noqa: E402
+import time as _tH1  # noqa: E402
+
+
+def _ar_general(uid="Uverified_h1"):
+    with open(os.path.join(_TEST_STATE_DIR, "active-request-general.json"), "w", encoding="utf-8") as _f:
+        _jH1.dump({"user_id": uid, "written_ms": _tH1.time() * 1000}, _f)
+
+
+def _ar_clear():
+    try:
+        os.remove(os.path.join(_TEST_STATE_DIR, "active-request-general.json"))
+    except OSError:
+        pass
+
 # 建一個機密案件 + 一筆其下的（非機密層下不可見的）pending 時限（用 operator 全權限路徑建）
 _rcm = server.create_matter(title="機密案件H1", matter_no="2026-密-001", confidential=1,
                             has_local_agent=1, created_by="老闆")
@@ -2826,8 +2843,9 @@ _cnt_before = _dbh1b.execute(
     "SELECT COUNT(*) FROM deadlines WHERE matter_id=?", (_cmid,)).fetchone()[0]
 _dbh1b.close()
 
-# 切到受限層（general）
+# 切到受限層（general）+ verified active-request（過 actor gate、才測得到機密 gate 本身）
 os.environ["SME_FLOOR"] = "general"
+_ar_general()
 try:
     # create_deadline 對機密案件 → 被擋、不寫入、不洩漏內容
     _rh1c = server.create_deadline(
@@ -2857,6 +2875,7 @@ try:
             _st_after == "pending", detail=_st_after)
 finally:
     os.environ.pop("SME_FLOOR", None)
+    _ar_clear()
 
 # 非機密案件：受限層照常可建（gate 只擋機密、不過度收斂）
 _rnm = server.create_matter(title="一般案件H1", matter_no="2026-普-001", confidential=0,
@@ -2865,6 +2884,7 @@ _dbh1n = server.get_db()
 _nmid = _dbh1n.execute("SELECT id FROM matters WHERE matter_no='2026-普-001'").fetchone()[0]
 _dbh1n.close()
 os.environ["SME_FLOOR"] = "general"
+_ar_general()
 try:
     _rh1ok = server.create_deadline(
         matter_id=_nmid, type="appeal_civil", trigger_event="一審判決送達",
@@ -2874,6 +2894,7 @@ try:
             _has(_rh1ok, "時限", "已建立"), detail=_rh1ok)
 finally:
     os.environ.pop("SME_FLOOR", None)
+    _ar_clear()
 
 # 全權限層（operator）：不受影響（baseline 已驗建/標 filed 皆可）
 _rh1full = server.mark_deadline_filed(_cdid, filed_by="老闆")

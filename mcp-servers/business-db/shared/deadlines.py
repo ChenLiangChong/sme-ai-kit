@@ -66,7 +66,7 @@ STATUTORY_PERIODS = {
     },
     "appeal_criminal": {
         "statutory_days": 20, "period_type": "peremptory",
-        "statutory_basis": "刑訴§349", "statutory_basis_version": "刑事訴訟法§349 110.06.16修正版（10→20日）",
+        "statutory_basis": "刑訴§349", "statutory_basis_version": "刑事訴訟法§349 109.01.15修正版（10→20日，自公布日施行）",
         "label": "刑事上訴（對第一審判決）",
     },
     "abjection_criminal": {  # 刑事抗告
@@ -79,10 +79,15 @@ STATUTORY_PERIODS = {
         "statutory_basis": "行政訴訟法§241", "statutory_basis_version": "行政訴訟法§241 現行",
         "label": "行政訴訟上訴",
     },
-    "appeal_family": {
+    "appeal_family": {  # 家事「訴訟事件」終局判決→上訴（準用民訴上訴 20 日）
         "statutory_days": 20, "period_type": "peremptory",
         "statutory_basis": "家事事件法§44準用民訴§440", "statutory_basis_version": "家事事件法§44 現行",
-        "label": "家事事件抗告/上訴",
+        "label": "家事訴訟事件上訴（對終局判決）",
+    },
+    "abjection_family": {  # 家事「非訟事件」第一審裁定→抗告（10 日，與訴訟上訴 20 日不同、勿混用）
+        "statutory_days": 10, "period_type": "peremptory",
+        "statutory_basis": "家事事件法§93", "statutory_basis_version": "家事事件法§93 現行（抗告10日不變期間）",
+        "label": "家事非訟事件抗告（對第一審裁定）",
     },
     "appeal_reason": {  # 上訴理由書補提（三審逾期逕駁，§471/§382）
         "statutory_days": 20, "period_type": "peremptory",
@@ -178,7 +183,7 @@ def limitation_type(type_code):
 
 # ── 期間「日數」修法沿革（法版檢核：反捏造安全網）──
 # STATUTORY_PERIODS 編的是「現行法」日數。若**文書作成日**（判決/裁定日，非送達日）早於某法條
-# 「期間日數修正施行日」，舊文書可能適用修正前日數（如刑訴§349 上訴 2021-06-16 前 10 日、後 20 日）。
+# 「期間日數修正施行日」，舊文書可能適用修正前日數（如刑訴§349 上訴 2020-01-15 前 10 日、後 20 日）。
 # compute_deadline 對「statutory_basis 命中此表、且文書日期早於 effective」標 needs_manual_review
 # + calc_trace 說明——「不臆測重算舊法、只擋下請律師確認適用版本與確切施行日」。
 #
@@ -189,8 +194,8 @@ def limitation_type(type_code):
 _PERIOD_AMENDMENTS = (
     {
         "matcher": re.compile(r"刑(?:事訴訟法|訴)\s*(?:§|第)\s*349(?![\d之])"),
-        "effective": "2021-06-16", "prior_days": 10,
-        "note": "刑訴§349 上訴期間 民國110.06.16修正公布由 10 日延長為 20 日",
+        "effective": "2020-01-15", "prior_days": 10,
+        "note": "刑訴§349 上訴期間 民國109.01.15修正公布由 10 日延長為 20 日（§349 不在六個月施行例外、自公布日施行；110.06.16 動的是§348 非§349）",
     },
     {
         "matcher": re.compile(r"刑(?:事訴訟法|訴)\s*(?:§|第)\s*406(?![\d之])"),
@@ -432,6 +437,10 @@ def compute_deadline(
         return {"error": f"service_type 必須是 {sorted(_VALID_SERVICE_TYPES)}，got {service_type!r}"}
     if period_unit not in ("day", "year", "month"):
         return {"error": f"period_unit 必須是 day/year/month，got {period_unit!r}"}
+    # 縱深防禦（codex+workflow）：年/月曆法分支＝消滅時效、period_type 必為 statutory。純函式層也擋
+    # 「year/month + 非 statutory」組合，使 cron / 直接呼叫純函式的路徑同樣不接受法律性質錯置的輸入。
+    if period_unit in ("year", "month") and period_type != "statutory":
+        return {"error": f"period_unit={period_unit}（消滅時效曆法）要求 period_type=statutory，got {period_type!r}"}
     if not statutory_basis or not str(statutory_basis).strip():
         return {"error": "statutory_basis 不可為空（反捏造：每個法定天數都要有法條依據）"}
     # statutory_days 僅「日數路徑（period_unit='day'）」適用且必 > 0；年/月（消滅時效）路徑改用
@@ -508,6 +517,16 @@ def compute_deadline(
                     f"教示比對：判決書教示 {spd} 日 ≠ 引擎採用 {si} 日（不符）"
                     f"→ 須人工確認（可能法定期間判斷有誤、或屬特別期間）"
                 )
+        else:
+            # 有帶值但無法解析為整數（如 OCR/轉錄抽到「二十日」「20日」）：教示比對是揪錯的安全網，
+            # 不可靜默旁路退成 not_provided（codex MED）→ 標複核 + 把原文記進 calc_trace 供人核對
+            # （反捏造：安全網默默放掉＝失去防線；stated_period_days 是 INTEGER 欄存不了原文，故落 trace）。
+            period_match = "unparseable"
+            needs_manual_review = True
+            trace.append(
+                f"教示比對：判決書教示天數原文『{stated_period_days}』無法解析為整數、無法與引擎採用 "
+                f"{si} 日交叉比對 → 須人工核對原文（反捏造：安全網不靜默旁路）"
+            )
 
     # ── 步驟 1：送達生效日 ──
     if _is_statute_period:
@@ -1054,6 +1073,14 @@ def scan_and_enqueue_due_reminders(today=None) -> dict:
             attorney = (d["d_assignee"] or d["lead_attorney"] or "").strip()
             atty_text = f" 承辦：{attorney}" if attorney else ""
             bu = d["m_bu"] or ""
+            # needs_manual_review 警語（codex HIGH）：未複核時限仍要推（甚至更要推），但 summary 須明示
+            # 「未經律師複核、勿逕依此倒數」、detail 帶 flag——不可把未複核日期當乾淨權威倒數呈現，
+            # 否則架空「不確定因素→needs_manual_review、不自動倚賴」的設計目的。
+            review_note = (
+                "\n[未複核·非權威] 此期限含不確定因素（送達/在途/法版/教示/裁定/消滅時效起算之一）、"
+                "尚未經律師複核，請先核對計算無誤再倚賴，勿逕依此倒數。"
+                if d["needs_manual_review"] else ""
+            )
 
             changed = False
 
@@ -1065,6 +1092,7 @@ def scan_and_enqueue_due_reminders(today=None) -> dict:
                     summary=(
                         f"【逾期】{matter_no} {title} {desc} "
                         f"內部{internal}（法定{statutory}·{basis}）已逾期，請即啟動回復原狀評估{atty_text}"
+                        f"{review_note}"
                     ),
                     detail={
                         "deadline_id": str(d["id"]),
@@ -1072,6 +1100,7 @@ def scan_and_enqueue_due_reminders(today=None) -> dict:
                         "statutory_deadline": str(statutory or ""),
                         "internal_deadline": str(internal),
                         "assignee": str(attorney),
+                        "needs_manual_review": str(d["needs_manual_review"] or 0),
                         "kind": "deadline_missed",
                     },
                     actor_user_id="",
@@ -1097,6 +1126,7 @@ def scan_and_enqueue_due_reminders(today=None) -> dict:
                         summary=(
                             f"【{matter_no} {title}】{desc} "
                             f"內部{internal}（法定{statutory}·{basis}）剩{n_int}個工作日{atty_text}"
+                            f"{review_note}"
                         ),
                         detail={
                             "deadline_id": str(d["id"]),
@@ -1105,6 +1135,7 @@ def scan_and_enqueue_due_reminders(today=None) -> dict:
                             "statutory_deadline": str(statutory or ""),
                             "internal_deadline": str(internal),
                             "assignee": str(attorney),
+                            "needs_manual_review": str(d["needs_manual_review"] or 0),
                             "kind": "deadline_approaching",
                         },
                         actor_user_id="",
