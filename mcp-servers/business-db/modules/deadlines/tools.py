@@ -290,6 +290,68 @@ def mark_deadline_reviewed(deadline_id: int, reviewed_by: str = "", note: str = 
 
 
 @mcp.tool()
+def amend_deadline(
+    deadline_id: int,
+    reason: str,
+    amended_by: str = "",
+    service_base_date: str = "",
+    service_type: str = "",
+    statutory_days: int = -1,
+    period_value: int = -1,
+    in_transit_days: int = -1,
+    buffer_days: int = -1,
+    document_date: str = "",
+    stated_period_days: int = -1,
+) -> str:
+    """異動既有時限的輸入（送達日填錯、裁定天數讀錯等）→ 確定性重算雙日期 + 留稽核 + 通報主持律師。
+
+    反捏造：重算一律走引擎 compute_deadline（不心算）。本工具會：
+    - 寫 deadline_audit（before/after 快照 + 變動欄位 + 異動人 + 原因）。
+    - **清除原覆核（reviewed_by/reviewed_at）並重設需人工複核**——舊覆核不可套在新計算上，須重新覆核。
+    - 同 tx 上報 deadline_amended 給主持律師（時限雙日期被改是高風險動作、不擋但通知）。
+    只對 status='pending' 生效（已遞交/取消不可重算）。period_type/statutory_basis/type 不可由本工具改
+    （法律性質固定；要改性質請重建時限）。
+
+    Args:
+        deadline_id: 時限 ID
+        reason: 異動原因（必填，留稽核軌跡）
+        amended_by: 異動人（floored session 由系統取 verified 員工名、忽略此傳入值）
+        service_base_date: 新送達/基準日 YYYY-MM-DD（''=不改，最常見的修正）
+        service_type: 新送達類型（''=不改）
+        statutory_days: 新法定/裁定日數（-1=不改；court_set 改讀錯的裁定天數用）
+        period_value: 新年/月期間數（-1=不改）
+        in_transit_days: 新在途天數人工指定（僅 >0 生效＝手動 override；0/-1 皆＝不指定、沿用建立當下的
+            在途來源[查表/§162但書]，與 create 同語義、避免把「不 override」漂成「手動 0 日」）
+        buffer_days: 新內部緩衝天數（-1=不改）
+        document_date: 新文書作成日 YYYY-MM-DD（''=不改）
+        stated_period_days: 新判決書教示天數（-1=不改）
+    """
+    return service.amend_deadline(
+        deadline_id=deadline_id,
+        reason=reason,
+        amended_by=amended_by,
+        service_base_date=service_base_date,
+        service_type=service_type,
+        statutory_days=statutory_days,
+        period_value=period_value,
+        in_transit_days=in_transit_days,
+        buffer_days=buffer_days,
+        document_date=document_date,
+        stated_period_days=stated_period_days,
+    )
+
+
+@mcp.tool()
+def get_deadline_audit(deadline_id: int) -> str:
+    """查某時限的異動歷程（每次 amend 的時間/人/原因/變動欄位）。
+
+    Args:
+        deadline_id: 時限 ID
+    """
+    return service.get_deadline_audit(deadline_id)
+
+
+@mcp.tool()
 def mark_deadline_calendared(
     deadline_id: int,
     calendar_event_id: str,

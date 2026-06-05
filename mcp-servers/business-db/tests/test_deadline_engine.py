@@ -1541,6 +1541,161 @@ finally:
         _osFC.environ["LINE_STATE_DIR"] = _saved_ls_rv
 
 
+# === amend_deadline 重算 + deadline_audit 稽核（信任/稽核 #6b）===
+print("\n=== amend_deadline 重算 + deadline_audit ===")
+from shared.escalation import DEFAULT_ENABLED_EVENTS as _DEE  # noqa: E402
+_assert("amend: deadline_amended 已註冊為預設啟用 escalation 事件",
+        "deadline_amended" in _DEE)
+_midAm = db.execute(
+    "INSERT INTO matters (matter_no, title, status, has_local_agent, confidential) "
+    "VALUES ('2026-am-001', '異動測試案', 'open', 1, 0)").lastrowid
+db.commit()
+# 建 appeal_civil 上訴20日 送達2026-06-01（calendar 已載入→deterministic）
+_rAm = _svcSN.create_deadline(
+    matter_id=_midAm, type="appeal_civil", description="", trigger_event="判決送達",
+    service_base_date="2026-06-01", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=-1, in_transit_days=0,
+    court_region="", party_region="", buffer_days=1, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="王律師")
+import re as _reAm  # noqa: E402
+_amId = int(_reAm.search(r"#(\d+)", _rAm).group(1))
+_amBefore = db.execute("SELECT statutory_deadline FROM deadlines WHERE id=?", (_amId,)).fetchone()["statutory_deadline"]
+# 先覆核（待會驗證 amend 會作廢覆核）
+_svcSN.mark_deadline_reviewed(_amId, "王律師", "確認")
+_amRevBefore = db.execute("SELECT reviewed_by FROM deadlines WHERE id=?", (_amId,)).fetchone()["reviewed_by"]
+_assert("amend 前置: 已覆核（reviewed_by=王律師）", _amRevBefore == "王律師")
+# 缺 reason → ERROR
+_assert("amend 防呆: 缺 reason → ERROR",
+        "ERROR" in _svcSN.amend_deadline(_amId, "", "王律師", service_base_date="2026-06-10"))
+# 改送達日 2026-06-01→2026-06-10 重算
+_rAmend = _svcSN.amend_deadline(_amId, "送達回證更正為6/10", "王律師", service_base_date="2026-06-10")
+_amAfter = db.execute(
+    "SELECT statutory_deadline,reviewed_by,reviewed_at,needs_manual_review,service_base_date "
+    "FROM deadlines WHERE id=?", (_amId,)).fetchone()
+_assert("amend: 重算法定末日改變（送達+9日）+ 回覆含 before→after",
+        _amAfter["statutory_deadline"] != _amBefore and "→" in _rAmend
+        and _amAfter["service_base_date"] == "2026-06-10", detail=_rAmend[:140])
+_assert("amend: 原覆核作廢（reviewed_by/at 清空、needs_manual_review 重設）",
+        _amAfter["reviewed_by"] is None and _amAfter["reviewed_at"] is None,
+        detail=str(dict(_amAfter)))
+# deadline_audit 留痕
+_amAudit = db.execute(
+    "SELECT amended_by,reason,changed_fields,before_snapshot,after_snapshot FROM deadline_audit "
+    "WHERE deadline_id=? ORDER BY id DESC LIMIT 1", (_amId,)).fetchone()
+_assert("amend: deadline_audit 落 before/after 快照 + changed_fields + 具名 + 原因",
+        _amAudit and _amAudit["amended_by"] == "王律師" and "6/10" in _amAudit["reason"]
+        and "statutory_deadline" in _amAudit["changed_fields"]
+        and _amBefore in _amAudit["before_snapshot"], detail=str(dict(_amAudit)) if _amAudit else "None")
+# 上報 deadline_amended（同 tx enqueue）
+_amEsc = db.execute(
+    "SELECT summary,detail FROM pending_escalations WHERE event_type='deadline_amended' "
+    "AND summary LIKE '%2026-am-001%' ORDER BY id DESC LIMIT 1").fetchone()
+_assert("amend: enqueue deadline_amended 上報（summary 含異動 + 覆核作廢提示）",
+        _amEsc and "時限異動" in _amEsc["summary"] and "覆核已作廢" in _amEsc["summary"],
+        detail=str(dict(_amEsc)) if _amEsc else "None")
+# interaction_log 留痕
+_amLog = db.execute(
+    "SELECT actor,detail FROM interaction_log WHERE action='deadline_amended' AND target_id=? "
+    "ORDER BY id DESC LIMIT 1", (_amId,)).fetchone()
+_assert("amend: interaction_log 留痕 deadline_amended（具名+原因）",
+        _amLog and _amLog["actor"] == "王律師" and "6/10" in _amLog["detail"],
+        detail=str(dict(_amLog)) if _amLog else "None")
+# 覆核作廢納入稽核（codex 稽核#6b finding#2）：reviewed_by 在 changed_fields + before/after 快照可回放
+_assert("amend: 覆核作廢可回放（changed_fields 含 reviewed_by、before 有人/after None）",
+        "reviewed_by" in _amAudit["changed_fields"]
+        and "王律師" in _amAudit["before_snapshot"]
+        and '"reviewed_by": null' in _amAudit["after_snapshot"],
+        detail=_amAudit["changed_fields"])
+# get_deadline_audit 列歷程
+_getAud = _svcSN.get_deadline_audit(_amId)
+_assert("amend: get_deadline_audit 列出異動歷程（含 王律師 + 原因）",
+        "異動歷程" in _getAud and "王律師" in _getAud and "6/10" in _getAud, detail=_getAud[:120])
+
+# 在途 provenance 忠實（codex 稽核#6b finding#1）：create 用手動 in_transit override=5、amend 改送達日，
+# 在途值與來源不被 drift（仍 5、仍「手動指定」，不被謊報/重derive）
+_midPv = db.execute(
+    "INSERT INTO matters (matter_no, title, status, has_local_agent, confidential) "
+    "VALUES ('2026-pv-001', '在途provenance案', 'open', 0, 0)").lastrowid
+db.commit()
+_rPv = _svcSN.create_deadline(
+    matter_id=_midPv, type="appeal_civil", description="", trigger_event="判決送達",
+    service_base_date="2026-06-01", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=0, in_transit_days=5,
+    court_region="", party_region="", buffer_days=1, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="王律師")
+_pvId = int(_reAm.search(r"#(\d+)", _rPv).group(1))
+_pvBefore = db.execute("SELECT in_transit_days,in_transit_source,compute_in_transit_override,"
+                       "compute_has_local_agent FROM deadlines WHERE id=?", (_pvId,)).fetchone()
+_assert("provenance 前置: create 落 compute_in_transit_override=5 + has_local_agent=0 蓋章",
+        _pvBefore["compute_in_transit_override"] == 5 and _pvBefore["compute_has_local_agent"] == 0
+        and _pvBefore["in_transit_days"] == 5, detail=str(dict(_pvBefore)))
+_svcSN.amend_deadline(_pvId, "送達日更正", "王律師", service_base_date="2026-06-05")
+_pvAfter = db.execute("SELECT in_transit_days,in_transit_source FROM deadlines WHERE id=?", (_pvId,)).fetchone()
+_assert("provenance: amend 改送達日後在途仍=5、來源仍「手動指定」（不 drift、不謊報）",
+        _pvAfter["in_transit_days"] == 5 and "手動指定" in _pvAfter["in_transit_source"],
+        detail=str(dict(_pvAfter)))
+# codex R2 finding#1：amend(in_transit_days=0) 不可把「不 override」漂成「手動 0 日」、應沿用原 override=5
+_svcSN.amend_deadline(_pvId, "再改送達日、在途不動", "王律師", service_base_date="2026-06-08", in_transit_days=0)
+_pv0 = db.execute("SELECT in_transit_days,compute_in_transit_override FROM deadlines WHERE id=?", (_pvId,)).fetchone()
+_assert("provenance: amend(in_transit_days=0) 不漂成手動0日、沿用原 override=5（0 與 create 同語義）",
+        _pv0["in_transit_days"] == 5 and _pv0["compute_in_transit_override"] == 5,
+        detail=str(dict(_pv0)))
+# 連鎖①：amend 改成新正值 7 → 再 amend(in_transit_days=-1) 仍沿用 7（新 override 被持久化、延續）
+_svcSN.amend_deadline(_pvId, "在途改7", "王律師", in_transit_days=7)
+_svcSN.amend_deadline(_pvId, "再改送達日、在途不動", "王律師", service_base_date="2026-06-09")
+_pvChain = db.execute("SELECT in_transit_days,compute_in_transit_override FROM deadlines WHERE id=?", (_pvId,)).fetchone()
+_assert("provenance 連鎖: amend→正值7→amend(不指定) 仍沿用 7（新 override 持久化延續）",
+        _pvChain["in_transit_days"] == 7 and _pvChain["compute_in_transit_override"] == 7,
+        detail=str(dict(_pvChain)))
+# 連鎖②：create 無 override（has_local_agent=1→在途0、source 非手動）→ amend(0/-1) 不平白生出 override
+_midNo = db.execute(
+    "INSERT INTO matters (matter_no, title, status, has_local_agent, confidential) "
+    "VALUES ('2026-noov-001', '無override案', 'open', 1, 0)").lastrowid
+db.commit()
+_rNo = _svcSN.create_deadline(
+    matter_id=_midNo, type="appeal_civil", description="", trigger_event="判決送達",
+    service_base_date="2026-06-01", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=-1, in_transit_days=0,
+    court_region="", party_region="", buffer_days=1, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="王律師")
+_noId = int(_reAm.search(r"#(\d+)", _rNo).group(1))
+_svcSN.amend_deadline(_noId, "改送達日、不碰在途", "王律師", service_base_date="2026-06-05", in_transit_days=0)
+_noAfter = db.execute("SELECT in_transit_days,in_transit_source,compute_in_transit_override FROM deadlines WHERE id=?", (_noId,)).fetchone()
+_assert("provenance 連鎖: create 無 override → amend(0) 不平白生出手動 override（在途仍0、source 非手動指定）",
+        _noAfter["in_transit_days"] == 0 and "手動指定" not in (_noAfter["in_transit_source"] or "")
+        and _noAfter["compute_in_transit_override"] is None, detail=str(dict(_noAfter)))
+# 另建一筆 pending 供 fail-closed 用（_amId 待會會被標 filed）
+_rAm2 = _svcSN.create_deadline(
+    matter_id=_midAm, type="appeal_civil", description="", trigger_event="判決送達",
+    service_base_date="2026-06-01", service_type="normal", statutory_days=0, statutory_basis="",
+    statutory_basis_version="", period_type="", severity="", has_local_agent=-1, in_transit_days=0,
+    court_region="", party_region="", buffer_days=1, stated_period_days=0, document_date="",
+    assignee="", assignee_line_user_id="", escalation_lead_days="", created_by="王律師")
+_amId2 = int(_reAm.search(r"#(\d+)", _rAm2).group(1))
+# 已遞交不可 amend
+_svcSN.mark_deadline_filed(_amId, "王律師")
+_assert("amend 防呆: 已遞交(filed)不可重算 → ERROR",
+        "ERROR" in _svcSN.amend_deadline(_amId, "x", "王律師", service_base_date="2026-07-01"))
+# fail-closed：floored 無 verified → 拒 amend（用仍 pending 的 _amId2）
+_saved_fl_am = _osFC.environ.get("SME_FLOOR")
+_saved_ls_am = _osFC.environ.get("LINE_STATE_DIR")
+_osFC.environ["SME_FLOOR"] = "general"
+_osFC.environ["LINE_STATE_DIR"] = "/tmp/_no_ar_amend_xyz"
+try:
+    _rAmFC = _svcSN.amend_deadline(_amId2, "fc", "agent自填", service_base_date="2026-07-01")
+    _assert("amend fail-closed: floored 無 verified → 拒重算（防偽造異動人）",
+            "ERROR" in _rAmFC and "無法驗證" in _rAmFC, detail=_rAmFC[:90])
+finally:
+    if _saved_fl_am is None:
+        _osFC.environ.pop("SME_FLOOR", None)
+    else:
+        _osFC.environ["SME_FLOOR"] = _saved_fl_am
+    if _saved_ls_am is None:
+        _osFC.environ.pop("LINE_STATE_DIR", None)
+    else:
+        _osFC.environ["LINE_STATE_DIR"] = _saved_ls_am
+
+
 db.close()
 
 

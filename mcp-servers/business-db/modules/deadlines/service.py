@@ -520,6 +520,9 @@ def create_deadline(
             hla = bool(matter["has_local_agent"])
         else:
             hla = bool(has_local_agent)
+        # 蓋章「計算輸入」供 amend 忠實重算（migration 018、codex 稽核#6b finding#1）：
+        # in_transit override 原值（None=當時未 override、由 has_local_agent/查表決定）。
+        _transit_override_in = in_transit_days if in_transit_days else None
 
         # ── 核心：確定性計算（讀同一 db 連線查 office_calendar / 在途）──
         # court_region / party_region：無當地代理人（has_local_agent=False）且未手動指定 in_transit_days
@@ -534,7 +537,7 @@ def create_deadline(
             has_local_agent=hla,
             court_region=court_region or "",
             party_region=party_region or "",
-            in_transit_days_override=(in_transit_days if in_transit_days else None),
+            in_transit_days_override=_transit_override_in,
             buffer_days=buffer_days if buffer_days >= 0 else 1,
             stated_period_days=(stated_period_days if stated_period_days else None),
             document_date=document_date or "",
@@ -600,6 +603,11 @@ def create_deadline(
             "reminders_sent": "[]",
             "recovery_window": json.dumps(result["recovery_window"], ensure_ascii=False),
             "business_unit": None,
+            # 計算輸入蓋章（migration 018）：amend 忠實重算用、避免在途 provenance drift（codex 稽核#6b）
+            "compute_has_local_agent": 1 if hla else 0,
+            "compute_court_region": (court_region or None),
+            "compute_party_region": (party_region or None),
+            "compute_in_transit_override": _transit_override_in,
         }
         _actor, _err = _writer_or_error(db, created_by)  # fail-closed：未驗證拒寫（對齊 #10）、須在 insert 前
         if _err:
@@ -935,6 +943,270 @@ def mark_deadline_reviewed(deadline_id: int, reviewed_by: str, note: str) -> str
     return (
         f"時限 #{deadline_id}（{d['description']}）已由 {_actor or '系統'} 覆核留痕{_cleared}。"
     )
+
+
+# amend 重算可改的輸入欄（snapshot 比對 + 顯示用）；計算衍生欄另列
+_AMEND_SNAPSHOT_FIELDS = (
+    "service_base_date", "service_type", "statutory_days", "period_unit", "period_value",
+    "in_transit_days", "buffer_days", "document_date", "stated_period_days",
+    "statutory_deadline", "internal_deadline", "needs_manual_review",
+    # 覆核狀態納入快照（codex 稽核#6b finding#2）：amend 作廢舊覆核這件事本身要可回放、
+    # 即使雙日期沒變、changed_fields 也能自證「已覆核→未覆核」的信任狀態轉移。
+    "reviewed_by", "reviewed_at",
+)
+
+
+def amend_deadline(
+    deadline_id: int,
+    reason: str,
+    amended_by: str,
+    service_base_date: str = "",
+    service_type: str = "",
+    statutory_days: int = -1,
+    period_value: int = -1,
+    in_transit_days: int = -1,
+    buffer_days: int = -1,
+    document_date: str = "",
+    stated_period_days: int = -1,
+) -> str:
+    """異動既有時限的輸入（如送達日填錯、裁定天數讀錯）→ 確定性重算雙日期 + before/after 稽核 + 上報。
+
+    反捏造：重算一律走 compute_deadline（不心算）。改動會：
+    - 寫 deadline_audit（before/after 快照 + changed_fields + amended_by + reason）。
+    - **清除 reviewed_by/reviewed_at 並重設 needs_manual_review**（舊覆核不可套在新計算上、codex 稽核#6a 註記）。
+    - 同 tx enqueue deadline_amended 上報主持律師（鏡像 transaction_deleted）。
+    只對 status='pending' 生效（已遞交/取消不可重算改日期）。actor fail-closed（floored 取 verified 員工名）。
+
+    sentinel：字串參數 ''＝不改、整數參數 -1＝不改（0 為合法值故不能當 sentinel）。
+    period_type / statutory_basis / type 不可由本工具改（法律性質固定；要改性質應重建時限）。
+    """
+    if not reason or not reason.strip():
+        return "ERROR: reason（異動原因）不可為空——時限異動須留痕（漏期=執業過失）"
+
+    from shared.floor_policy import is_full_access
+    from shared.escalation import enqueue_escalation
+
+    with transaction() as db:
+        d = repository.get_deadline(db, deadline_id)
+        if not d:
+            return f"ERROR: 找不到時限 #{deadline_id}"
+        m = repository.get_matter(db, d["matter_id"])
+        if m and m["confidential"] and not is_full_access():
+            # 機密軸 + 存在性洩漏防護：受限層對機密時限回「與不存在相同」的泛化錯誤
+            return f"ERROR: 找不到時限 #{deadline_id}"
+        if d["status"] != "pending":
+            cur_st = _DEADLINE_STATUS_ZH.get(d["status"], d["status"])
+            return f"ERROR: 時限 #{deadline_id} 目前狀態為「{cur_st}」、非待處理，不可重算異動"
+        # actor 具名 + 防偽造 fail-closed（對齊 #10）：須在任何寫入前
+        _actor, _err = _writer_or_error(db, amended_by)
+        if _err:
+            return _err
+
+        # ── 合併輸入（未指定者沿用現值）──
+        new_sbd = service_base_date.strip() if service_base_date and service_base_date.strip() else d["service_base_date"]
+        new_svc = service_type.strip() if service_type and service_type.strip() else d["service_type"]
+        new_sd = statutory_days if statutory_days is not None and statutory_days >= 0 else (d["statutory_days"] or 0)
+        new_pv = period_value if period_value is not None and period_value >= 0 else d["period_value"]
+        new_buf = buffer_days if buffer_days is not None and buffer_days >= 0 else (d["buffer_days"] if d["buffer_days"] is not None else 1)
+        new_doc = document_date.strip() if document_date and document_date.strip() else (d["document_date"] or "")
+        new_stated = stated_period_days if stated_period_days is not None and stated_period_days >= 0 else d["stated_period_days"]
+
+        # ── 忠實重算（codex 稽核#6b finding#1）：用「建立當下蓋章的計算輸入」(migration 018) 重建、
+        #    不從現 row 的 in_transit_days 回推（否則查表得出的在途會被謊報成「手動指定」＝反捏造）。──
+        # has_local_agent / court_region / party_region / in_transit override 一律取 create 蓋章值；
+        # 舊時限（migration 018 前建、欄為 NULL）fallback 用 matter.has_local_agent（與舊行為一致、誠實）。
+        try:
+            _ck = d.keys()
+        except Exception:
+            _ck = []
+        _has_compute_cols = "compute_has_local_agent" in _ck
+        if _has_compute_cols and d["compute_has_local_agent"] is not None:
+            _hla = bool(d["compute_has_local_agent"])
+        else:
+            _hla = bool(m["has_local_agent"]) if m else True
+        _court = (d["compute_court_region"] if _has_compute_cols else None) or ""
+        _party = (d["compute_party_region"] if _has_compute_cols else None) or ""
+        _orig_override = d["compute_in_transit_override"] if _has_compute_cols else None
+        # 在途 override：與 create 同語義鎖（codex R2 finding#1）——只有「>0」才算「人工指定在途」；
+        # 0/-1 一律視為「不指定手動 override」、沿用 create 蓋章的 _orig_override（None→仍由
+        # has_local_agent/查表決定）。避免 amend(...,in_transit_days=0) 把「不 override」漂成「手動指定 0 日」。
+        _amend_transit = in_transit_days if (in_transit_days is not None and in_transit_days > 0) else None
+        if _amend_transit is not None:
+            new_transit_override = _amend_transit
+        else:
+            new_transit_override = _orig_override
+
+        period_unit = d["period_unit"] or "day"
+        # counting_regime 由 type 推導（與 create 同邏輯；type 不可由 amend 改、regime 因此穩定）
+        _is_calendar = period_unit in ("year", "month")
+        counting_regime = "limitation" if (_is_calendar and not procedural_calendar_type(d["type"])) else "procedural"
+
+        result = compute_deadline(
+            period_type=d["period_type"],
+            statutory_days=int(new_sd or 0),
+            statutory_basis=d["statutory_basis"],
+            service_type=new_svc or "normal",
+            service_base_date=new_sbd,
+            has_local_agent=_hla,
+            court_region=_court,
+            party_region=_party,
+            in_transit_days_override=new_transit_override,
+            buffer_days=new_buf if new_buf is not None and new_buf >= 0 else 1,
+            stated_period_days=(new_stated if new_stated else None),
+            document_date=new_doc or "",
+            period_unit=period_unit,
+            period_value=new_pv,
+            counting_regime=counting_regime,
+            db=db,
+        )
+        if "error" in result:
+            return f"ERROR: 重算失敗 — {result['error']}"
+
+        force_review = (d["period_type"] == "court_set") or (counting_regime == "limitation")
+        if force_review and d["period_type"] == "court_set":
+            result["calc_trace"].append(
+                f"裁定所定期間（court_set）：期間 {int(new_sd or 0)} 日由人工讀裁定填、非法定固定值"
+                f"（依據 {d['statutory_basis']}）→ 強制人工複核（異動重算）"
+            )
+
+        # ── before 快照（重算前現值）──
+        before = {k: d[k] for k in _AMEND_SNAPSHOT_FIELDS}
+
+        # ── 落欄（重算衍生欄 + 清覆核 + 重設 needs_review）──
+        upd = {
+            "service_base_date": new_sbd,
+            "service_type": new_svc or "normal",
+            "statutory_days": result["statutory_days"],
+            "period_unit": result.get("period_unit", "day"),
+            "period_value": result.get("period_value"),
+            "in_transit_days": result["in_transit_days"],
+            "in_transit_source": result["in_transit_source"],
+            "effective_date": result["effective_date"],
+            "start_date": result["start_date"],
+            "statutory_deadline": result["statutory_deadline"],
+            "buffer_days": result["buffer_days"],
+            "internal_deadline": result["internal_deadline"],
+            "stated_period_days": result["stated_period_days"],
+            "document_date": new_doc or None,
+            "calc_trace": json.dumps(result["calc_trace"], ensure_ascii=False),
+            "needs_manual_review": 1 if (result["needs_manual_review"] or force_review) else 0,
+            "recovery_window": json.dumps(result["recovery_window"], ensure_ascii=False),
+            # 舊覆核作廢（codex 稽核#6a 註記：不可讓舊 reviewed 套在新計算上）
+            "reviewed_by": None,
+            "reviewed_at": None,
+        }
+        # 若本次顯式改在途 override（僅 >0 算人工指定），持久化新 override 值（供下次 amend 忠實重算、不 drift）
+        if _amend_transit is not None:
+            upd["compute_in_transit_override"] = new_transit_override
+        rows = repository.update_deadline_fields(db, deadline_id, upd)
+        if rows == 0:
+            return f"ERROR: 時限 #{deadline_id} 重算落欄失敗（狀態已變動）"
+
+        # ── after 快照 + changed_fields（只列真的變動的）──
+        after = {
+            "service_base_date": upd["service_base_date"],
+            "service_type": upd["service_type"],
+            "statutory_days": upd["statutory_days"],
+            "period_unit": upd["period_unit"],
+            "period_value": upd["period_value"],
+            "in_transit_days": upd["in_transit_days"],
+            "buffer_days": upd["buffer_days"],
+            "document_date": upd["document_date"],
+            "stated_period_days": upd["stated_period_days"],
+            "statutory_deadline": upd["statutory_deadline"],
+            "internal_deadline": upd["internal_deadline"],
+            "needs_manual_review": upd["needs_manual_review"],
+            # 覆核狀態（finding#2）：after 一律 None（amend 作廢覆核）→ 與 before 比對自證信任狀態轉移
+            "reviewed_by": None,
+            "reviewed_at": None,
+        }
+        changed = [k for k in _AMEND_SNAPSHOT_FIELDS if before.get(k) != after.get(k)]
+        _was_reviewed = bool(d["reviewed_by"] or d["reviewed_at"])
+
+        repository.insert_deadline_audit(db, {
+            "deadline_id": deadline_id,
+            "matter_id": d["matter_id"],
+            "amended_by": _actor or None,
+            "amended_at": _now(),
+            "reason": reason.strip(),
+            "changed_fields": json.dumps(changed, ensure_ascii=False),
+            "before_snapshot": json.dumps(before, ensure_ascii=False),
+            "after_snapshot": json.dumps(after, ensure_ascii=False),
+        })
+        repository.insert_interaction_log(
+            db,
+            actor=_actor or "system",
+            action="deadline_amended",
+            target_type="deadline",
+            target_id=deadline_id,
+            detail=f"{d['description']}：{'、'.join(changed) or '（無欄位變動）'}；原因：{reason.strip()}",
+            business_unit=None,
+        )
+
+        # 上報主持律師（同 tx、鏡像 transaction_deleted）：時限雙日期被改是高風險動作、不擋但通知
+        matter_no = (m["matter_no"] if m else None) or f"#{d['matter_id']}"
+        enqueue_escalation(
+            db,
+            event_type="deadline_amended",
+            summary=(
+                f"【時限異動】{matter_no} {d['description']} 經 {_actor or '系統'} 重算："
+                f"法定 {before.get('statutory_deadline')}→{after['statutory_deadline']}、"
+                f"內部 {before.get('internal_deadline')}→{after['internal_deadline']}"
+                f"（變動：{'、'.join(changed) or '無'}）。原因：{reason.strip()}。"
+                + ("此筆原已覆核、異動後覆核已作廢、需重新覆核。" if _was_reviewed else "")
+            ),
+            detail={
+                "kind": "deadline_amended",
+                "deadline_id": str(deadline_id),
+                "changed_fields": json.dumps(changed, ensure_ascii=False),
+                "statutory_before": str(before.get("statutory_deadline") or ""),
+                "statutory_after": str(after["statutory_deadline"] or ""),
+                "was_reviewed": "1" if _was_reviewed else "0",
+            },
+            actor_user_id="",
+            actor_label=_actor or "系統·時限異動",
+            business_unit=(m["business_unit"] if m else "") or "",
+            channel_id=None,
+        )
+
+    _rev_note = "、原覆核已作廢（需重新覆核）" if _was_reviewed else ""
+    return (
+        f"時限 #{deadline_id}（{d['description']}）已重算異動（{_actor or '系統'}）{_rev_note}。\n"
+        f"- 變動欄位：{'、'.join(changed) or '（重算後無欄位變動）'}\n"
+        f"- 法定期限：{before.get('statutory_deadline')} → {after['statutory_deadline']}\n"
+        f"- 內部期限：{before.get('internal_deadline')} → {after['internal_deadline']}\n"
+        f"- 原因：{reason.strip()}（已留稽核軌跡 deadline_audit、並通報主持律師）"
+    )
+
+
+def get_deadline_audit(deadline_id: int) -> str:
+    """查某時限的異動歷程（信任/稽核）：列出每次 amend 的時間/人/原因/變動欄位。"""
+    from shared.floor_policy import is_full_access
+
+    db = get_db()
+    try:
+        d = repository.get_deadline(db, deadline_id)
+        if not d:
+            return f"ERROR: 找不到時限 #{deadline_id}"
+        m = repository.get_matter(db, d["matter_id"])
+        if m and m["confidential"] and not is_full_access():
+            return f"ERROR: 找不到時限 #{deadline_id}"
+        rows = repository.list_deadline_audit(db, deadline_id)
+        if not rows:
+            return f"時限 #{deadline_id}（{d['description']}）無異動紀錄。"
+        lines = [f"## 時限 #{deadline_id} 異動歷程（{len(rows)} 筆、最新在前）"]
+        for r in rows:
+            try:
+                cf = json.loads(r["changed_fields"] or "[]")
+            except (json.JSONDecodeError, TypeError):
+                cf = []
+            lines.append(
+                f"- [{r['amended_at']}] {r['amended_by'] or '?'}：改 {('、'.join(cf) or '無')}"
+                f"；原因：{r['reason'] or ''}"
+            )
+        return "\n".join(lines)
+    finally:
+        db.close()
 
 
 def mark_deadline_calendared(

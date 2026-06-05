@@ -444,6 +444,20 @@ check("legal(覆核留痕): deadlines 有 reviewed_by + reviewed_at 欄（migrat
       "reviewed_by" in _dl_cols and "reviewed_at" in _dl_cols,
       detail=str(sorted(_dl_cols)))
 
+# 時限異動稽核（migration 017）：deadline_audit 表 + index
+_tables017 = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+check("legal(異動稽核): deadline_audit 表已建（migration 017）", "deadline_audit" in _tables017)
+_da_cols = {r[1] for r in conn.execute("PRAGMA table_info(deadline_audit)")}
+check("legal(異動稽核): deadline_audit 有 before/after_snapshot + changed_fields + amended_by 欄",
+      {"before_snapshot", "after_snapshot", "changed_fields", "amended_by", "reason"} <= _da_cols,
+      detail=str(sorted(_da_cols)))
+
+# 計算輸入蓋章（migration 018）：amend 忠實重算用、避免在途 provenance drift
+check("legal(計算輸入蓋章): deadlines 有 compute_has_local_agent/court_region/party_region/in_transit_override（migration 018）",
+      {"compute_has_local_agent", "compute_court_region", "compute_party_region",
+       "compute_in_transit_override"} <= _dl_cols,
+      detail=str(sorted(_dl_cols)))
+
 # index 落地（含 partial WHERE status='pending'）
 lindexes = {r[0] for r in conn.execute(
     "SELECT name FROM sqlite_master WHERE type='index'"

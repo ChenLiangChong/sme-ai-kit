@@ -186,6 +186,38 @@ def mark_filed(
     return cur.rowcount
 
 
+def update_deadline_fields(db: sqlite3.Connection, deadline_id: int, fields: dict) -> int:
+    """動態欄位 UPDATE（amend 重算落欄用）。只更新 fields 內的鍵、其餘不動。回 rowcount。
+    僅對 status='pending' 生效（已遞交/取消不可重算改日期）。"""
+    if not fields:
+        return 0
+    cols = list(fields.keys())
+    set_clause = ",".join(f"{c}=?" for c in cols)
+    cur = db.execute(
+        f"UPDATE deadlines SET {set_clause} WHERE id=? AND status='pending'",
+        [fields[c] for c in cols] + [deadline_id],
+    )
+    return cur.rowcount
+
+
+def insert_deadline_audit(db: sqlite3.Connection, fields: dict) -> int:
+    """寫一筆時限異動稽核（before/after 快照 + changed_fields + amended_by + reason）。"""
+    cols = list(fields.keys())
+    placeholders = ",".join("?" for _ in cols)
+    cursor = db.execute(
+        f"INSERT INTO deadline_audit ({','.join(cols)}) VALUES ({placeholders})",
+        [fields[c] for c in cols],
+    )
+    return cursor.lastrowid
+
+
+def list_deadline_audit(db: sqlite3.Connection, deadline_id: int) -> list[sqlite3.Row]:
+    """某時限的異動歷程（最新在前）。"""
+    return db.execute(
+        "SELECT * FROM deadline_audit WHERE deadline_id=? ORDER BY id DESC", (deadline_id,)
+    ).fetchall()
+
+
 def mark_reviewed(
     db: sqlite3.Connection, deadline_id: int, reviewed_by: str | None, reviewed_at: str
 ) -> int:
