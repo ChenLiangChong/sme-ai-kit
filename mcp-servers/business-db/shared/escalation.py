@@ -666,17 +666,19 @@ def mark_sent_tool(escalation_id: int, claim_token: str = "", sent_text: str = "
     內才落 log → 不會對未持租約 / token 不符的 row 留假紀錄。"""
     from shared.db import _now, transaction
     tok = (claim_token or "").strip()
-    if tok:
-        token_clause = " AND claim_token = ?"
-        params = (_now(), escalation_id, _CLAIM_TTL_MIN, tok)
-    else:
-        # 不帶 token：只匹配 legacy「無 token 租約」（claim_token IS NULL）；新碼寫了 token 的他人租約配不上。
-        token_clause = " AND claim_token IS NULL"
-        params = (_now(), escalation_id, _CLAIM_TTL_MIN)
+    # 一律要 token（修補複審第三輪 E-HIGH 收尾）：移除舊「claim_token IS NULL」legacy 相容分支——
+    # 那分支讓 migration 019 前已 claim、claim_token 為 NULL 的舊 row 在 TTL 內仍可被任何知道 id 的
+    # caller 不帶 token 標 sent（洞縮小但未閉合）。改成沒帶 token 直接拒；migration 邊界的無 token 舊
+    # 租約 row 等 TTL 過後由 cron / notifier 以 _CLAIM_UPDATE reclaim（一定寫新 token）再正常送，
+    # 至多延遲 _CLAIM_TTL_MIN，安全不雙送、不被誤清。
+    if not tok:
+        return (f"上報 #{escalation_id} 未帶 claim_token、不可標記送達"
+                f"（須先經 list_pending_escalations claim 取得租約 token 再回帶）")
     with transaction() as db:
         rc = db.execute(
             "UPDATE pending_escalations SET status='sent', sent_at=? "
-            "WHERE " + _MARK_SENT_BASE_WHERE + token_clause, params,
+            "WHERE " + _MARK_SENT_BASE_WHERE + " AND claim_token = ?",
+            (_now(), escalation_id, _CLAIM_TTL_MIN, tok),
         ).rowcount
         if rc == 1:
             r = db.execute(

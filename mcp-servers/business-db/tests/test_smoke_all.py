@@ -2340,12 +2340,14 @@ try:
     _assert("#27: operator 空 actor 訊息不出現「未具名」", "未具名" not in _msg_op)
 
     # 落 log（notifier 路徑）：mark_sent_tool(sent_text=...) 落「實際送出內容」到 interaction_log
-    # 租約 guard（codex E-HIGH/E-MED）：mark_sent 要求 row 目前持有未逾 TTL 租約、裸 pending 不可標——
-    # 先模擬 notifier claim-on-read 取得租約（寫 claimed_at），才標 sent（正路）。
+    # 租約 guard（codex E-HIGH/E-MED + 複審：一律要 token）：mark_sent 要求 row 目前持有未逾 TTL 租約
+    # 且 caller 帶回相符 claim_token——裸 pending / 無 token 不可標。先模擬 notifier claim-on-read
+    # 取得租約（寫 claimed_at + 隨機 claim_token），帶該 token 才標 sent（正路）。
     with _tx27() as _dclm:
-        _dclm.execute("UPDATE pending_escalations SET claimed_at=datetime('now','localtime') WHERE id=?",
-                      (_eid_op,))
-    _res_mark = _mark27(_eid_op, sent_text="【系統通報】帳目被刪除 #999（這是我送出的文字）")
+        _dclm.execute("UPDATE pending_escalations SET claimed_at=datetime('now','localtime'), "
+                      "claim_token='optok27' WHERE id=?", (_eid_op,))
+    _res_mark = _mark27(_eid_op, claim_token="optok27",
+                        sent_text="【系統通報】帳目被刪除 #999（這是我送出的文字）")
     _db_m = _getdb27()
     _log_m = _db_m.execute(
         "SELECT detail FROM interaction_log WHERE action='escalation_sent' AND target_id=?",
