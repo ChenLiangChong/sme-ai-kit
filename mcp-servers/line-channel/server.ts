@@ -302,6 +302,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           chat_id: { type: 'string', description: 'LINE user/group ID' },
           text: { type: 'string', description: '回覆文字' },
+          message_id: { type: 'string', description: '正在回覆的那則訊息 id（從 <channel> tag 的 message_id 取得）；帶上可精準標記該則為已回覆、避免誤標同聊天室其他待處理訊息' },
           ...channelIdProp,
         },
         required: ['chat_id', 'text'],
@@ -316,6 +317,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           chat_id: { type: 'string', description: 'LINE user/group ID' },
           alt_text: { type: 'string', description: '替代文字（不支援 Flex 的裝置顯示）' },
           flex_json: { type: 'string', description: 'Flex Message JSON 內容' },
+          message_id: { type: 'string', description: '正在回覆的那則訊息 id（從 <channel> tag 取得）；帶上可精準標記' },
           ...channelIdProp,
         },
         required: ['chat_id', 'alt_text', 'flex_json'],
@@ -341,6 +343,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         type: 'object' as const,
         properties: {
           chat_id: { type: 'string', description: 'LINE user/group ID' },
+          message_id: { type: 'string', description: '要標記已處理的那則訊息 id（從 <channel> tag 取得）；帶上可精準標記該則、不掃掉同聊天室其他訊息' },
           ...channelIdProp,
         },
         required: ['chat_id'],
@@ -376,16 +379,24 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         try {
           const d = getDb()
           const col = isGroup ? 'group_id' : 'user_id'
-          d.run(
-            // per-message ack（codex 全專案審 MED）：只結清「最舊一筆」pending inbound（FIFO、
-            // agent 序列處理先進先出），不再一次標掉全部——避免把同聊天室稍後到、尚未處理的訊息
-            // 被前一次回覆提前標成 replied 而漏處理。
-            `UPDATE line_messages SET status = 'replied', reply_content = ? WHERE id = (
-               SELECT id FROM line_messages WHERE ${col} = ? AND channel_id = ?
-               AND direction = 'inbound' AND status IN ('queued', 'processed')
-               ORDER BY id ASC LIMIT 1)`,
-            [text.slice(0, 200), chatId, chId]
-          )
+          const msgId = (args.message_id as string) || ''
+          // per-message ack（codex 全專案審 MED）：帶 message_id → 精準標記那一則（首選、不誤動其他）；
+          // 沒帶 → FIFO 只結清最舊一筆 pending inbound（向後相容、不再一次標掉全部）。
+          if (msgId) {
+            d.run(
+              `UPDATE line_messages SET status = 'replied', reply_content = ? WHERE line_message_id = ?
+                 AND channel_id = ? AND direction = 'inbound' AND status IN ('queued', 'processed')`,
+              [text.slice(0, 200), msgId, chId]
+            )
+          } else {
+            d.run(
+              `UPDATE line_messages SET status = 'replied', reply_content = ? WHERE id = (
+                 SELECT id FROM line_messages WHERE ${col} = ? AND channel_id = ?
+                 AND direction = 'inbound' AND status IN ('queued', 'processed')
+                 ORDER BY id ASC LIMIT 1)`,
+              [text.slice(0, 200), chatId, chId]
+            )
+          }
         } catch (e) {
           process.stderr.write(`line-channel: reply DB status update failed: ${e}\n`)
         }
@@ -410,14 +421,23 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         try {
           const d = getDb()
           const col = isGroupFlex ? 'group_id' : 'user_id'
-          d.run(
-            // per-message ack（codex 全專案審 MED）：FIFO 只結清最舊一筆 pending inbound
-            `UPDATE line_messages SET status = 'replied' WHERE id = (
-               SELECT id FROM line_messages WHERE ${col} = ? AND channel_id = ?
-               AND direction = 'inbound' AND status IN ('queued', 'processed')
-               ORDER BY id ASC LIMIT 1)`,
-            [chatId, chId]
-          )
+          const msgId = (args.message_id as string) || ''
+          // per-message ack（codex 全專案審 MED）：帶 message_id 精準標記、否則 FIFO 最舊一筆
+          if (msgId) {
+            d.run(
+              `UPDATE line_messages SET status = 'replied' WHERE line_message_id = ?
+                 AND channel_id = ? AND direction = 'inbound' AND status IN ('queued', 'processed')`,
+              [msgId, chId]
+            )
+          } else {
+            d.run(
+              `UPDATE line_messages SET status = 'replied' WHERE id = (
+                 SELECT id FROM line_messages WHERE ${col} = ? AND channel_id = ?
+                 AND direction = 'inbound' AND status IN ('queued', 'processed')
+                 ORDER BY id ASC LIMIT 1)`,
+              [chatId, chId]
+            )
+          }
         } catch (e) {
           process.stderr.write(`line-channel: reply_flex DB status update failed: ${e}\n`)
         }
@@ -454,15 +474,22 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           const d = getDb()
           const isGroupMark = chatId.startsWith('C') || chatId.startsWith('R')
           const col = isGroupMark ? 'group_id' : 'user_id'
-          // per-message ack（codex 全專案審 MED）：FIFO 只結清最舊一筆 queued（agent 每回合處理
-          // 一則訊息、以 reply 或 mark_read 結束之），不掃掉處理期間新到、尚未看過的訊息。
-          const result = d.run(
-            `UPDATE line_messages SET status = 'processed' WHERE id = (
-               SELECT id FROM line_messages WHERE ${col} = ? AND channel_id = ?
-               AND direction = 'inbound' AND status = 'queued'
-               ORDER BY id ASC LIMIT 1)`,
-            [chatId, chId]
-          )
+          const msgId = (args.message_id as string) || ''
+          // per-message ack（codex 全專案審 MED）：帶 message_id 精準標記那一則；否則 FIFO 最舊一筆
+          // queued（agent 每回合處理一則、以 reply 或 mark_read 結束之），不掃掉處理期間新到的訊息。
+          const result = msgId
+            ? d.run(
+                `UPDATE line_messages SET status = 'processed' WHERE line_message_id = ?
+                   AND channel_id = ? AND direction = 'inbound' AND status = 'queued'`,
+                [msgId, chId]
+              )
+            : d.run(
+                `UPDATE line_messages SET status = 'processed' WHERE id = (
+                   SELECT id FROM line_messages WHERE ${col} = ? AND channel_id = ?
+                   AND direction = 'inbound' AND status = 'queued'
+                   ORDER BY id ASC LIMIT 1)`,
+                [chatId, chId]
+              )
           clearActiveRequest()
           return { content: [{ type: 'text' as const, text: `✅ 已標記 ${result.changes} 則訊息為已處理` }] }
         } catch (e) {
@@ -621,6 +648,7 @@ const profileCache = new Map<string, string>()
 // 綁 port 卻失敗（被別 instance 搶先），退回當 client、不再 stranding（codex 全專案審 MED）。
 let ipcBuffer = ''
 let ipcConnected = false
+let ownerBindFailed = false  // TOCTOU：以為自己是 owner 但 Bun.serve 綁 port 失敗 → 退回 client、ngrok 跳過
 function connectIpc(): void {
   if (ipcConnected) return
   ipcConnected = true
@@ -945,15 +973,20 @@ if (portAlreadyInUse) {
       process.stderr.write(`line-channel: IPC server 啟動失敗: ${e}\n`)
     }
   } catch (e) {
-    process.stderr.write(`line-channel: port ${WEBHOOK_PORT} 綁定失敗: ${e}\n`)
-    process.stderr.write(`line-channel: webhook server 未啟動，僅 MCP tools 可用\n`)
+    // TOCTOU（codex 全專案審 MED）：isPortInUse 偵測時沒人、Bun.serve 卻綁不上 = 別 instance
+    // 搶先成為 owner。退回當 IPC client（連 owner 的 broadcast socket）、不再 stranded 收不到廣播；
+    // 並標記 ownerBindFailed 讓 autoSetupNgrok 跳過（本 instance 不是 owner、不該重設 ngrok/webhook）。
+    process.stderr.write(`line-channel: port ${WEBHOOK_PORT} 綁定失敗（被搶先成為 owner）: ${e}\n`)
+    process.stderr.write(`line-channel: 退回 IPC client 模式接收廣播\n`)
+    ownerBindFailed = true
+    connectIpc()
   }
 }
 
 // === ngrok 固定域名 + LINE Webhook 自動設定（多 OA）===
 
 async function autoSetupNgrok(): Promise<void> {
-  if (portAlreadyInUse) {
+  if (portAlreadyInUse || ownerBindFailed) {
     process.stderr.write('line-channel: 跳過 ngrok（已有 instance 在處理）\n')
     return
   }
