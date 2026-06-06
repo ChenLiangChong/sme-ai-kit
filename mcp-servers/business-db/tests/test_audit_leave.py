@@ -261,6 +261,51 @@ _r8c = lsvc.approve_leave(_lid8, _aid8, "陳經理")
 _assert("MED-T8: 已作廢審核無法再 approve_leave 消費", _r8c.startswith("ERROR"), detail=_r8c[:120])
 
 
+# ============================================================
+# MED: request_leave 把 actor 傳進 create_in_tx → approval_pending 上報 actor 非空
+# （codex 複審第二輪：第一輪沒傳 actor_user_id、approval_pending 以空 actor 入庫）
+# ============================================================
+
+def _latest_approval_pending_actor(approval_id):
+    """撈該 approval 的 approval_pending 上報 row 的 actor。"""
+    r = _q1(
+        "SELECT actor FROM pending_escalations WHERE event_type='approval_pending' "
+        "AND detail LIKE ? ORDER BY id DESC LIMIT 1",
+        (f'%"approval_id": {approval_id}%',),
+    )
+    return r["actor"] if r else None
+
+
+# T9：operator 路徑（無 floor）傳 actor_user_id=申請者 LINE id → 上報 actor 解析成員工名（非空）
+_r9 = lsvc.request_leave(
+    employee_id=EMP_ID, leave_type_code="annual",
+    start_date="2026-08-01", end_date="2026-08-02", days=2, reason="家庭",
+    actor_user_id="Uemp_basic",
+)
+_lid9 = _id(_r9.split("\n")[0])
+_aid9 = _q1("SELECT approval_id FROM leave_requests WHERE id=?", (_lid9,))["approval_id"]
+_actor9 = _latest_approval_pending_actor(_aid9)
+_assert("MED-T9 setup: request_leave 建了 pending + approval", _aid9 is not None, detail=_r9[:120])
+_assert("MED-T9: approval_pending 上報 actor 非空（傳了 actor_user_id）",
+        bool(_actor9) and _actor9 != "__unverified__", detail=f"actor={_actor9!r}")
+_assert("MED-T9: actor 解析成申請者員工名（Uemp_basic→小員）", _actor9 == "小員", detail=f"actor={_actor9!r}")
+
+# T10：floored 申請者（verified）→ 上報 actor 用 verified 員工名（忽略 agent 自填 actor_user_id）
+def _floored_request():
+    return lsvc.request_leave(
+        employee_id=EMP_ID, leave_type_code="annual",
+        start_date="2026-09-01", end_date="2026-09-01", days=1, reason="事假",
+        actor_user_id="冒名想填的",  # floored 應被 re-resolve 成 verified
+    )
+
+_r10 = _with_floor("general", _floored_request, user_id="Uemp_basic")
+_lid10 = _id(_r10.split("\n")[0])
+_aid10 = _q1("SELECT approval_id FROM leave_requests WHERE id=?", (_lid10,))["approval_id"]
+_actor10 = _latest_approval_pending_actor(_aid10)
+_assert("MED-T10: floored 申請 → 上報 actor 用 verified 員工名（非空、非 agent 自填）",
+        _actor10 == "小員", detail=f"actor={_actor10!r}")
+
+
 print(f"\n{'='*50}\n{passed} passed, {failed} failed")
 if failures:
     print("FAILURES:")

@@ -275,6 +275,15 @@ def resolve(approval_id: int, decision: str, decided_by: str) -> str:
                 )
             # 受限層：簽核身份一律用 verified 名、忽略 agent / caller 傳入
             decided_by = verified_by
+        else:
+            # 全權限層（confidential / operator）best-effort 歸因（codex 複審 hitl）：
+            # confidential 層雖屬全權限、但若本 session 綁定了 LINE verified 脈絡（老闆本人 LINE），
+            # 稽核仍優先記 verified 員工名、不採 caller 自填（防同層他人冒名）；查無 LINE 脈絡
+            # （operator / Cowork 終端直打、本就受信任）→ 保留 caller 傳入 decided_by、不卡放行。
+            from shared.auth import _resolve_actor_label
+            _label = _resolve_actor_label(db, "")
+            if _label and _label not in ("__unverified__", "system"):
+                decided_by = _label
 
         approval = repository.get_waiting(db, approval_id)
         if not approval:

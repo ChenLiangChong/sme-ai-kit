@@ -18,11 +18,15 @@ def _read_active_request(floor: str = ""):
     自己這層的**。此檔在 ~/.claude/channels/line 下、被 LINE-runtime 的 sandbox denyRead，agent 的 bash
     碰不到、也無 Write 權限 → 無法偽造；只有非 sandbox 的 MCP 進程讀得到。
 
-    fail-closed 硬化（codex 全專案審 E-HIGH）：
+    fail-closed 硬化（codex 全專案審 E-HIGH + 修補複審 A-HIGH）：
     - **floored session 不讀舊全域 active-request.json**——別層/舊請求殘留的全域檔會讓本層誤信他人 verified
       user_id（無法回 __unverified__）。只信本層 per-floor 檔。
     - `written_ms` **缺失即視為過期**（不再「有才檢查」）——少了寫入時戳就無法證明新鮮、寧可拒。
     - 逾 10 分鐘過期（防 crash 殘留誤歸因）。
+    - **檔內 target_floor 必須等於本次請求的 floor**（修補複審 A-HIGH，第一輪只砍全域 fallback 沒驗檔內
+      層標）：line-channel 依 target_floor 寫 active-request-<floor>.json，檔名雖已綁層，但若檔內容（被
+      錯寫 / 殘留 / 跨層複製）的 target_floor 指向別層，仍代表「不是本層該信的脈絡」→ fail-closed 回 None。
+      相容舊檔：欄位不存在（舊 line-channel 未寫 target_floor）時不擋（但 written_ms 仍必須）。
     """
     base = os.environ.get("LINE_STATE_DIR") or os.path.expanduser("~/.claude/channels/line")
     if floor:
@@ -37,6 +41,11 @@ def _read_active_request(floor: str = ""):
     written_ms = data.get("written_ms", 0)
     if not written_ms or (time.time() * 1000 - written_ms) > 600_000:
         return None  # 缺時戳 or 逾 10 分鐘 → fail-closed 視為無效脈絡
+    # target_floor 一致性（修補複審 A-HIGH）：檔內若帶 target_floor 且與本次請求的 floor 不符 → 不一致、
+    # 視為非本層脈絡、fail-closed。舊檔無此欄則略過（不擋、向後相容）。
+    tgt = data.get("target_floor")
+    if tgt is not None and tgt != floor:
+        return None
     return data
 
 

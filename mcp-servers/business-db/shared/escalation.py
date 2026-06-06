@@ -427,10 +427,19 @@ _CLAIMABLE_WHERE = (
     "AND (last_attempt_at IS NULL OR "
     "     last_attempt_at <= datetime('now','localtime','-'||(retry_count*?)||' minutes'))"
 )
-# 原子 claim（同候選條件 + 指定 id）。params 順序：(now, id, claim_ttl_min, backoff_base_min)。
+# 原子 claim（同候選條件 + 指定 id）。claim 一律寫一個隨機 claim_token（codex 修補複審 E-HIGH：lease
+# 持有者驗證），把「這張租約是誰拿的」綁進 row；reclaim 會換新 token → 舊持有者的舊 token 永遠對不上新
+# 租約、杜絕 stale-lease 雙送。params 順序：(now, claim_token, id, claim_ttl_min, backoff_base_min)。
 _CLAIM_UPDATE = (
-    "UPDATE pending_escalations SET claimed_at=? WHERE id=? AND " + _CLAIMABLE_WHERE
+    "UPDATE pending_escalations SET claimed_at=?, claim_token=? WHERE id=? AND " + _CLAIMABLE_WHERE
 )
+
+
+def _new_claim_token() -> str:
+    """產生一張租約的隨機 token（claim 當下寫進 row、回傳給該次 claimer，mark 時憑此驗持有者）。
+    用 secrets 不可預測、避免亂呼叫的品質層 LLM 猜中別人的租約 token 強標 sent。"""
+    import secrets
+    return secrets.token_hex(16)
 
 ESCALATION_LABELS = {
     "approval_pending": "待核准審核",
@@ -496,9 +505,13 @@ def flush_pending_escalations(push_fn, *, max_retry=FLUSH_MAX_RETRY,
     for row in rows:
         # 原子 claim：搶到 claimed_at 才送（codex#1）。輸的那路 rowcount=0 → skip、不重送不重 log。
         # claim 條件含 backoff（codex r2#2）：與 SELECT 一致、防 SELECT→claim 窗內 backoff 狀態變動。
+        # 每次 claim 寫一張新 token（codex 修補複審 E-HIGH）：本路後續 send/retry/fail 一律 scope 此 token
+        # （AND claim_token=?），若期間租約逾 TTL 被另一路 reclaim（token 已換）→ 本路的 mark rowcount=0、
+        # 不再覆寫他人租約結果（cron 保證層也綁持有者、不雙送）。
+        token = _new_claim_token()
         with transaction() as cdb:
             claimed = cdb.execute(
-                _CLAIM_UPDATE, (_now(), row["id"], _CLAIM_TTL_MIN, backoff_base_min),
+                _CLAIM_UPDATE, (_now(), token, row["id"], _CLAIM_TTL_MIN, backoff_base_min),
             ).rowcount
         if claimed != 1:
             stats["skipped"] += 1
@@ -510,12 +523,17 @@ def flush_pending_escalations(push_fn, *, max_retry=FLUSH_MAX_RETRY,
             ok = False
         with transaction() as wdb:
             if ok:
-                wdb.execute(
-                    "UPDATE pending_escalations SET status='sent', sent_at=? WHERE id=?",
-                    (_now(), row["id"]),
-                )
+                marked = wdb.execute(
+                    "UPDATE pending_escalations SET status='sent', sent_at=? "
+                    "WHERE id=? AND claim_token=?",
+                    (_now(), row["id"], token),
+                ).rowcount
+                if marked != 1:
+                    # 本路租約已被 reclaim（token 換掉）→ 不落 log、不計 sent（接手者會自行處理）。
+                    stats["skipped"] += 1
+                    continue
                 stats["sent"] += 1
-                # 稽核（#27）：claim 成功者才送才落 log → 唯一一筆、不重不漏（確定性 format 產）。
+                # 稽核（#27）：claim 成功且仍持有 token 者才送才落 log → 唯一一筆、不重不漏（確定性 format 產）。
                 wdb.execute(
                     "INSERT INTO interaction_log "
                     "(actor, action, target_type, target_id, detail, business_unit) "
@@ -528,16 +546,17 @@ def flush_pending_escalations(push_fn, *, max_retry=FLUSH_MAX_RETRY,
                 if new_count >= max_retry:
                     wdb.execute(
                         "UPDATE pending_escalations SET status='failed', retry_count=?, "
-                        "last_attempt_at=?, claimed_at=NULL WHERE id=?",
-                        (new_count, _now(), row["id"]),
+                        "last_attempt_at=?, claimed_at=NULL, claim_token=NULL "
+                        "WHERE id=? AND claim_token=?",
+                        (new_count, _now(), row["id"], token),
                     )
                     stats["failed"] += 1
                 else:
-                    # 釋放租約讓下輪 backoff 後可重試（claimed_at=NULL）
+                    # 釋放租約讓下輪 backoff 後可重試（claimed_at=NULL + 清 token，下次 claim 換新 token）
                     wdb.execute(
                         "UPDATE pending_escalations SET retry_count=?, last_attempt_at=?, "
-                        "claimed_at=NULL WHERE id=?",
-                        (new_count, _now(), row["id"]),
+                        "claimed_at=NULL, claim_token=NULL WHERE id=? AND claim_token=?",
+                        (new_count, _now(), row["id"], token),
                     )
                     stats["retried"] += 1
     return stats
@@ -577,16 +596,21 @@ def list_pending_for_notifier(limit: int = 50) -> str:
         ).fetchall()
     finally:
         db.close()
-    claimed_ids = []
+    # 每筆 claim 各寫一張新 token（codex 修補複審 E-HIGH）；記住「這次拿到的 token」、隨 row 回傳給 notifier。
+    # notifier 推完該筆後必須帶回此 token 呼 mark_escalation_sent，否則標 sent 被拒（裸 pending / 租約被
+    # reclaim 換 token 都對不上）→ 防別的 caller 標掉本路正持有中的租約、防 reclaim 後雙投。
+    claimed_tokens: dict = {}
     for r in cand:
+        token = _new_claim_token()
         with transaction() as cdb:
             rc = cdb.execute(
-                _CLAIM_UPDATE, (_now(), r["id"], _CLAIM_TTL_MIN, FLUSH_BACKOFF_BASE_MIN),
+                _CLAIM_UPDATE, (_now(), token, r["id"], _CLAIM_TTL_MIN, FLUSH_BACKOFF_BASE_MIN),
             ).rowcount
         if rc == 1:
-            claimed_ids.append(r["id"])
-    if not claimed_ids:
+            claimed_tokens[r["id"]] = token
+    if not claimed_tokens:
         return json.dumps({"pending": [], "count": 0}, ensure_ascii=False)
+    claimed_ids = list(claimed_tokens.keys())
     db = get_db()
     try:
         placeholders = ",".join("?" * len(claimed_ids))
@@ -597,41 +621,62 @@ def list_pending_for_notifier(limit: int = 50) -> str:
         ).fetchall()
     finally:
         db.close()
-    items = [dict(r) for r in rows]
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["claim_token"] = claimed_tokens.get(r["id"], "")  # 本次租約 token，mark 時憑此驗持有者
+        items.append(d)
     return json.dumps({"pending": items, "count": len(items)}, ensure_ascii=False)
 
 
-# 標記送達時的「持有有效租約」條件（codex E-HIGH / E-MED）：mark_sent 不可只憑 id+pending 就標 sent，
-# 否則品質層 LLM 誤呼叫 / 亂呼叫會把「從未經 list_pending_for_notifier 取得租約、根本沒推出去」的高風險
-# 上報永久清成 sent、cron 不再補送（資料牆破口）。要求：該 row 目前由「某個 caller」持有未逾期租約
-# （claimed_at IS NOT NULL 且仍在 _CLAIM_TTL_MIN 內）才允許標 sent。
-#   - 裸 pending（claimed_at IS NULL、未經任何 claim）→ rowcount=0 → 拒絕（不可直接標 sent）。
-#   - 租約逾 TTL（claimed_at <= now-TTL，已被 cron / 另一支 notifier 視為可 reclaim）→ rowcount=0 → 拒絕；
-#     舊 notifier 卡超 TTL 被 reclaim 後仍想標 sent / 雙投 → 在此擋下（codex E-MED：送出/標記皆綁 lease）。
+# 標記送達時的「持有有效租約」條件（codex E-HIGH / E-MED + 修補複審 E-HIGH 補 token）：mark_sent 不可
+# 只憑 id+pending 就標 sent，否則品質層 LLM 誤呼叫 / 亂呼叫會把「從未經 list_pending_for_notifier 取得
+# 租約、根本沒推出去」的高風險上報永久清成 sent、cron 不再補送（資料牆破口）。要求兩件事都成立：
+#   (a) 該 row 目前持有未逾 _CLAIM_TTL_MIN 的租約（claimed_at IS NOT NULL 且在 TTL 內）；且
+#   (b) caller 帶回的 claim_token 與 row 目前的 claim_token 相符＝確實是「本路當初拿到的那張租約」。
+# 為什麼要 (b)（修補複審 E-HIGH，第一輪只做了 (a) 沒真正閉合）：
+#   - 只驗 (a) 時，任何知道 id 的 caller 都能標掉「別人正持有中的有效租約」（亂呼叫 / 跨 notifier）。
+#   - stale-lease race：TTL 過後新投遞器 reclaim 刷新 claimed_at，舊投遞器之後仍因「row 目前有有效
+#     claimed_at」通過 (a) 成功 mark_sent → 雙送。reclaim 一定換新 token（_CLAIM_UPDATE 寫新 token）→
+#     舊持有者的舊 token 對不上新租約、(b) 擋下，stale-lease 雙送杜絕。
+#   - 裸 pending（claimed_at IS NULL）→ (a) 不過 → rowcount=0 → 拒絕。
+# token 子句在 mark_sent_tool 內依「caller 是否帶 token」動態組：
+#   - 帶非空 token（新碼正路：notifier 從 list 回傳取得 / cron 自己 claim 拿到）→ AND claim_token = ?（嚴格）。
+#   - 不帶 token（''/None；向後相容 cron 直接 raw SQL 設 claimed_at 未寫 token 的 legacy 租約）→
+#     AND claim_token IS NULL（只配對「無 token 租約」、不會誤標到新碼寫了 token 的他人租約）。
 # 與 _CLAIMABLE_WHERE 的 TTL 子句同義反向：可投遞＝claimed_at 為空或已逾期；可標 sent＝claimed_at 在 TTL 內。
-# 參數順序固定 (id, claim_ttl_min)。
-_MARK_SENT_WHERE = (
+_MARK_SENT_BASE_WHERE = (
     "id=? AND status='pending' AND claimed_at IS NOT NULL "
     "AND claimed_at > datetime('now','localtime','-'||?||' minutes')"
 )
 
 
-def mark_sent_tool(escalation_id: int, sent_text: str = "") -> str:
+def mark_sent_tool(escalation_id: int, claim_token: str = "", sent_text: str = "") -> str:
     """標記上報已送達（pending→sent）+ 落 notifier 實際送出內容供稽核（#27）。
 
+    claim_token = 投遞器先前經 list_pending_escalations(=list_pending_for_notifier) claim 該筆時拿到的
+        租約 token（在回傳 JSON 的 pending[].claim_token）。憑此驗「確實是本路持有的那張租約」。
     sent_text = claude -p notifier 回報它真正推給主管的文字（品質層自報、與 cron 確定性 log 互補）；
-    投遞器推送成功後呼叫。
+        投遞器推送成功後呼叫。
 
-    租約 guard（codex E-HIGH / E-MED）：只有「目前持有未逾 _CLAIM_TTL_MIN 租約」的 row 可標 sent
-    （見 _MARK_SENT_WHERE）。caller 必須先經 list_pending_escalations(=list_pending_for_notifier)
-    claim 到這筆才推、推完才標——裸 pending（沒 claim）/ 租約已逾期被 reclaim 都 rowcount=0、拒絕標記，
-    避免未送出的高風險上報被誤清成 sent、保住 cron 補送。rowcount guard 內才落 log → 不會對未持租約的
-    row 留假紀錄。"""
+    租約 + token guard（codex E-HIGH / E-MED + 修補複審 E-HIGH）：只有「目前持有未逾 _CLAIM_TTL_MIN 租約
+    且 token 相符」的 row 可標 sent。caller 必須先 claim 到這筆（拿到 token）才推、推完帶回該 token 才標——
+    裸 pending（沒 claim）/ 租約已逾期被 reclaim 換 token / token 不符（標到別人正持有的租約）都 rowcount=0、
+    拒絕標記，避免未送出的高風險上報被誤清成 sent、避免 stale-lease 雙送、保住 cron 補送。rowcount guard
+    內才落 log → 不會對未持租約 / token 不符的 row 留假紀錄。"""
     from shared.db import _now, transaction
+    tok = (claim_token or "").strip()
+    if tok:
+        token_clause = " AND claim_token = ?"
+        params = (_now(), escalation_id, _CLAIM_TTL_MIN, tok)
+    else:
+        # 不帶 token：只匹配 legacy「無 token 租約」（claim_token IS NULL）；新碼寫了 token 的他人租約配不上。
+        token_clause = " AND claim_token IS NULL"
+        params = (_now(), escalation_id, _CLAIM_TTL_MIN)
     with transaction() as db:
         rc = db.execute(
             "UPDATE pending_escalations SET status='sent', sent_at=? "
-            "WHERE " + _MARK_SENT_WHERE, (_now(), escalation_id, _CLAIM_TTL_MIN),
+            "WHERE " + _MARK_SENT_BASE_WHERE + token_clause, params,
         ).rowcount
         if rc == 1:
             r = db.execute(
@@ -648,8 +693,8 @@ def mark_sent_tool(escalation_id: int, sent_text: str = "") -> str:
                  f"[notifier→{to}] {sent_text or '（notifier 未回報送出內容）'}", bu),
             )
     return (f"上報 #{escalation_id} 已標記 sent" if rc == 1
-            else f"上報 #{escalation_id} 未持有有效租約、不可標記送達"
-                 f"（已送/不存在/未經 claim/租約逾期被 reclaim）")
+            else f"上報 #{escalation_id} 未持有此上報的有效租約、不可標記送達"
+                 f"（已被 reclaim / 已送 / token 不符 / 未經 claim / 不存在）")
 
 
 # ── claude -p single-shot 通報投遞器（#9g、老闆「直接觸發、聰明通報」）──
@@ -659,7 +704,8 @@ def mark_sent_tool(escalation_id: int, sent_text: str = "") -> str:
 _NOTIFIER_PROMPT = (
     "你是 SME-AI-Kit 的「主管上報投遞器」。只做這件事、做完即結束：\n"
     "1. 呼叫 list_pending_escalations 取得待投遞上報（回 JSON：pending[] 各含 "
-    "id / event_type / summary / actor / business_unit / source_floor / target_line_user_id / channel_id）。\n"
+    "id / event_type / summary / actor / business_unit / source_floor / target_line_user_id / channel_id / "
+    "claim_token）。claim_token 是這次取得的「租約憑證」，務必逐筆記住、第 4 步要原樣帶回。\n"
     "2. 若 count=0，直接結束、什麼都不做。\n"
     "3. 對每一筆，用 mcp__line__reply 推送：chat_id 一律用「該筆的 target_line_user_id」"
     "（絕不自行更改或猜測收件人）、channel_id 用該筆的 channel_id（空字串就省略走 default）、"
@@ -672,8 +718,10 @@ _NOTIFIER_PROMPT = (
     "actor 空/null【不可寫「未具名」】、改寫『來源層 + 系統操作』（如 source_floor 空＝『全權限層 operator/cowork 系統操作』）。\n"
     "   若多筆的 target_line_user_id 相同、可合併成一則精簡摘要推給該收件人；target_line_user_id 不同的"
     "【絕對不可合併】、各自一則、每則只含自己那筆內容（嚴防把 A 的金額/單號寫進給 B 的通報＝跨收件人洩密）。\n"
-    "4. 每成功推一筆就呼叫 mark_escalation_sent(該筆 id, sent_text=你剛推給該收件人的完整文字)"
-    "——sent_text 讓系統留底稽核「實際送出了什麼」，務必帶上你真正送出的那段文字。\n"
+    "4. 每成功推一筆就呼叫 mark_escalation_sent(該筆 id, claim_token=該筆的 claim_token, "
+    "sent_text=你剛推給該收件人的完整文字)——claim_token 必須原樣帶回第 1 步該筆拿到的值（系統憑此驗證"
+    "「確實是你這次取得的租約」、防標到別人正持有的租約 / 防租約過期被接手後重複送）；sent_text 讓系統"
+    "留底稽核「實際送出了什麼」，務必帶上你真正送出的那段文字。token 帶錯 / 漏帶會被系統拒絕標記。\n"
     "限制：只用 list_pending_escalations / mcp__line__reply / mark_escalation_sent；"
     "不讀檔、不執行指令、不做別的事。"
 )

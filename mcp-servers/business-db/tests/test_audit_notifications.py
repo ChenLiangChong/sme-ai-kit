@@ -9,6 +9,8 @@
 - register_line_group：floored 但「無 verified LINE 脈絡」→ ERROR 擋下（不寫 row、不 raise）
 - register_line_group：floored 有 verified 員工 → 用 verified 員工名寫入 + audit（忽略 agent 自填 actor）
 - register_line_group：受限層覆寫既有群組（update 路徑）同樣需 verified、未驗證擋下（防跨部門汙染）
+- [修補複審 B-HIGH/E-HIGH] search_messages / list_line_groups（讀）受限層第二道防線：
+  is_full_access() 早退、非全權限層回 ERROR（萬一工具未被 floor gate 移除仍擋）；全權限層正常可讀。
 - 結構性：service / tools 模組可 import（無語法/相依錯）
 """
 import atexit
@@ -194,6 +196,45 @@ _row4 = _q1("SELECT group_type, purpose FROM line_groups WHERE group_id=? AND ch
 _assert("T4: 既有群組未被竄改（仍 work / 原始用途）",
         _row4 is not None and _row4["group_type"] == "work" and _row4["purpose"] == "原始用途",
         detail=str(dict(_row4)) if _row4 else "None")
+
+
+# ============================================================
+# T5：[修補複審 B-HIGH/E-HIGH] search_messages / list_line_groups 受限層第二道防線（is_full_access 早退）
+#     工具已由 floor_policy.LINE_DATA_TOOLS 物理移除（第一道），這裡測 service 層 defense-in-depth：
+#     萬一工具未被移除（floor-map 設定錯 / 名單漏列），受限層仍被擋下、不洩漏全公司 LINE 訊息 / 群組。
+# ============================================================
+# operator（全權限）先確認讀路徑正常（非全擋）：search 無資料回「沒有找到」、list 有 T1~T4 寫入的群組
+_r5_op_search = nsvc.search_messages(
+    query="", user_id="", user_name="", direction="", channel_id="", days=7, limit=30)
+_assert("T5: operator search_messages 可讀（非 ERROR、走正常查詢路徑）",
+        not _r5_op_search.startswith("ERROR"), detail=_r5_op_search[:120])
+_r5_op_list = nsvc.list_line_groups(group_type="", channel_id="")
+_assert("T5: operator list_line_groups 可讀（非 ERROR、列出既有群組）",
+        not _r5_op_list.startswith("ERROR") and "LINE 群組" in _r5_op_list, detail=_r5_op_list[:120])
+
+# 受限層（general）→ search / list 被 is_full_access() 早退擋下（回 ERROR、不查 DB、不洩漏）
+_r5_r_search = _with_floor(
+    "general",
+    lambda: nsvc.search_messages(query="機密", user_id="", user_name="", direction="",
+                                 channel_id="", days=30, limit=50),
+    user_id="Uverified_notif_test")
+_assert("T5: 受限層 search_messages → ERROR 擋下（第二道防線、僅全權限可用）",
+        _r5_r_search.startswith("ERROR") and "全權限層" in _r5_r_search, detail=_r5_r_search[:120])
+
+_r5_r_list = _with_floor(
+    "general",
+    lambda: nsvc.list_line_groups(group_type="", channel_id=""),
+    user_id="Uverified_notif_test")
+_assert("T5: 受限層 list_line_groups → ERROR 擋下（第二道防線、僅全權限可用）",
+        _r5_r_list.startswith("ERROR") and "全權限層" in _r5_r_list, detail=_r5_r_list[:120])
+
+# __unexpanded__（fail-closed 受限未知層）→ 同樣擋下（is_full_access 對 __unexpanded__ 回 False）
+_r5_unexp = _with_floor(
+    "${SME_FLOOR}",
+    lambda: nsvc.list_line_groups(group_type="", channel_id=""),
+    user_id=None)
+_assert("T5: __unexpanded__ fail-closed 層 list_line_groups → ERROR 擋下",
+        _r5_unexp.startswith("ERROR"), detail=_r5_unexp[:120])
 
 
 print(f"\n{'='*50}\n{passed} passed, {failed} failed")

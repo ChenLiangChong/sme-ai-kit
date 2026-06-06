@@ -199,6 +199,28 @@ _assert("INV-T7: 無 BU 扣全域成功", not _r7.startswith("ERROR"), detail=_r
 _assert("INV-T7: 全域庫存 100→95", _stock("WIDGET", None) == 95)
 _assert("INV-T7: brand_a 庫存未被動（仍 40）", _stock("WIDGET", "brand_a") == 40)
 
+# T8b：未登錄 BU + 全新 SKU（BU 與 SKU 都不存在）→ ERROR、不新建懸空 BU 庫存列
+# （codex 複審第二輪殘留：第一輪只堵「BU 打錯誤改全域」、但 BU 不存在會直接新建 no_such_bu 列）
+_n_before = _q1("SELECT COUNT(*) c FROM inventory")["c"]
+_r8b = inv.update_stock(
+    sku="BRANDNEW-SKU", quantity_change=20, reason="進貨", name="新品", sell_price=-1,
+    unit_cost=-1, min_stock=-1, unit="個", category="", business_unit="ghost_bu",
+)
+_n_after = _q1("SELECT COUNT(*) c FROM inventory")["c"]
+_assert("INV-T8b: 未登錄 BU + 新 SKU → ERROR（不新建懸空 BU 列）",
+        _r8b.startswith("ERROR") and "找不到事業體" in _r8b, detail=_r8b[:140])
+_assert("INV-T8b: 確實沒新建任何庫存列", _n_before == _n_after, detail=f"{_n_before}->{_n_after}")
+_assert("INV-T8b: 沒有 ghost_bu 庫存列",
+        _q1("SELECT COUNT(*) c FROM inventory WHERE business_unit='ghost_bu'")["c"] == 0)
+
+# T8c：已登錄 BU（brand_a）+ 全新 SKU → 正常新建（BU 存在不擋一般新品）
+_r8c = inv.update_stock(
+    sku="BRAND-A-NEW", quantity_change=15, reason="進貨", name="A新品", sell_price=-1,
+    unit_cost=-1, min_stock=-1, unit="個", category="", business_unit="brand_a",
+)
+_assert("INV-T8c: 已登錄 BU + 新 SKU → 正常新建", not _r8c.startswith("ERROR"), detail=_r8c[:120])
+_assert("INV-T8c: brand_a 新品庫存 = 15", _stock("BRAND-A-NEW", "brand_a") == 15)
+
 
 # ============================================================
 # tasks.list_tasks — parent_task_id sentinel

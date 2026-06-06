@@ -122,6 +122,16 @@ _exec(
     "INSERT INTO employees (name, line_user_id, permissions, active) VALUES (?,?,?,1)",
     ("王老闆", "Uadmin_boss", "admin"),
 )
+# 建一個 basic 基層員工（綁 LINE id），測 explicit/decision manager-gate
+_exec(
+    "INSERT INTO employees (name, line_user_id, permissions, active) VALUES (?,?,?,1)",
+    ("小職員", "Ubasic_emp", "basic"),
+)
+# 建一個 manager 員工（綁 LINE id），反證 manager 可寫 explicit/decision
+_exec(
+    "INSERT INTO employees (name, line_user_id, permissions, active) VALUES (?,?,?,1)",
+    ("林經理", "Umgr_emp", "manager"),
+)
 
 
 # ============================================================
@@ -259,6 +269,92 @@ _assert("T5: 受限層仍看得到公開規則段", "機敏關鍵字規則" in _
 _assert("T5: 受限層不洩任務", "機敏關鍵字任務" not in _q5r, detail=_q5r[:200])
 _assert("T5: 受限層不洩客戶", "機敏關鍵字客戶" not in _q5r, detail=_q5r[:200])
 _assert("T5: 受限層不洩庫存", "機敏關鍵字品" not in _q5r, detail=_q5r[:200])
+
+
+# ============================================================
+# T6：store_fact explicit / log_decision 需 manager（codex 複審第二輪殘留 finding）
+# ============================================================
+# verified basic 員工寫 source_type='explicit' 正式規則 → 被擋（manager gate）、不入庫
+def _basic_explicit():
+    return ksvc.store_fact(
+        category="sop", title="基層想立的正式規則", content="某 SOP",
+        source_type="explicit", source_quote="我說的", set_by="小職員",
+        business_unit="", confidential=False, related_rule_ids=[],
+    )
+
+_t6a = _with_floor("general", _basic_explicit, user_id="Ubasic_emp")
+_assert("T6: verified basic 寫 explicit 被擋（需 manager）",
+        _t6a.startswith("ERROR") and "manager" in _t6a, detail=_t6a[:140])
+_cnt6a = _q1("SELECT COUNT(*) c FROM business_rules WHERE title='基層想立的正式規則'")
+_assert("T6: 被擋的 explicit 規則未入庫", _cnt6a["c"] == 0, detail=str(_cnt6a["c"]))
+
+# 同一 basic 員工寫 source_type='observed'（觀察慣例）→ 放行（不阻一般知識沉澱）
+def _basic_observed():
+    return ksvc.store_fact(
+        category="sop", title="基層觀察到的慣例", content="大家習慣這樣做",
+        source_type="observed", source_quote="", set_by="小職員",
+        business_unit="", confidential=False, related_rule_ids=[],
+    )
+
+_t6b = _with_floor("general", _basic_observed, user_id="Ubasic_emp")
+_assert("T6: verified basic 寫 observed 放行（非 explicit 不擋）",
+        not _t6b.startswith("ERROR") and _id(_t6b) is not None, detail=_t6b[:140])
+
+# verified manager 寫 explicit → 放行
+def _mgr_explicit():
+    return ksvc.store_fact(
+        category="sop", title="經理立的正式規則", content="正式 SOP",
+        source_type="explicit", source_quote="經理說的", set_by="林經理",
+        business_unit="", confidential=False, related_rule_ids=[],
+    )
+
+_t6c = _with_floor("general", _mgr_explicit, user_id="Umgr_emp")
+_rid6c = _id(_t6c)
+_assert("T6: verified manager 寫 explicit 放行", _rid6c is not None and not _t6c.startswith("ERROR"),
+        detail=_t6c[:140])
+# set_by 仍是 verified 員工名（非 agent 自填）
+_setby6c = _q1("SELECT set_by FROM business_rules WHERE id=?", (_rid6c,)) if _rid6c else None
+_assert("T6: manager explicit set_by 用 verified 員工名", _setby6c and _setby6c["set_by"] == "林經理",
+        detail=str(dict(_setby6c)) if _setby6c else "")
+
+# verified basic 寫 log_decision（正式決策）→ 被擋
+def _basic_decision():
+    return ksvc.log_decision(
+        title="基層想留的決策", reason="某決策", supersedes_rule_ids=[], related_rule_ids=[],
+        source_quote="我說的", set_by="小職員", business_unit="", confidential=True,
+    )
+
+_t6d = _with_floor("general", _basic_decision, user_id="Ubasic_emp")
+_assert("T6: verified basic 寫 log_decision 被擋（需 manager）",
+        _t6d.startswith("ERROR") and "manager" in _t6d, detail=_t6d[:140])
+_cnt6d = _q1("SELECT COUNT(*) c FROM business_rules WHERE title='基層想留的決策'")
+_assert("T6: 被擋的決策未入庫", _cnt6d["c"] == 0, detail=str(_cnt6d["c"]))
+
+# verified manager 寫 log_decision → 放行
+def _mgr_decision():
+    return ksvc.log_decision(
+        title="經理留的決策", reason="正式決策", supersedes_rule_ids=[], related_rule_ids=[],
+        source_quote="經理說的", set_by="林經理", business_unit="", confidential=True,
+    )
+
+_t6e = _with_floor("general", _mgr_decision, user_id="Umgr_emp")
+_assert("T6: verified manager 寫 log_decision 放行", _id(_t6e) is not None and not _t6e.startswith("ERROR"),
+        detail=_t6e[:140])
+
+# operator（無 SME_FLOOR、is_full_access）寫 explicit / decision → 放行（受信任開發 / 老闆層）
+_t6f = ksvc.store_fact(
+    category="sop", title="operator 立的正式規則", content="x",
+    source_type="explicit", source_quote="原話", set_by="任意名",
+    business_unit="", confidential=False, related_rule_ids=[],
+)
+_assert("T6: operator（空 floor）寫 explicit 放行", _id(_t6f) is not None and not _t6f.startswith("ERROR"),
+        detail=_t6f[:140])
+_t6g = ksvc.log_decision(
+    title="operator 留的決策", reason="x", supersedes_rule_ids=[], related_rule_ids=[],
+    source_quote="原話", set_by="任意名", business_unit="", confidential=True,
+)
+_assert("T6: operator（空 floor）寫 log_decision 放行", _id(_t6g) is not None and not _t6g.startswith("ERROR"),
+        detail=_t6g[:140])
 
 
 print(f"\n{'='*50}\n{passed} passed, {failed} failed")

@@ -80,6 +80,14 @@ def update_stock(
 ) -> str:
     with transaction() as db:
         if business_unit:
+            # 指定 BU 必須先存在於 business_entities（codex 複審第二輪殘留 finding）：
+            # 第一輪只堵「BU 打錯誤改全域」，但 BU 不存在且該 SKU 也不存在時會直接新建一筆
+            # business_unit='no_such_bu' 的懸空庫存列。新建前 fail-closed 驗 BU 存在、不存在回 ERROR。
+            if not repository.business_unit_exists(db, business_unit):
+                return (
+                    f"ERROR: 找不到事業體 {business_unit}（請先 register_business_entity 登錄）。"
+                    f"未登錄的事業體不可新建 / 異動庫存，以免產生懸空 BU 庫存列。"
+                )
             # BU 有指定 → 嚴格按該 BU 找。找不到時「不」靜默 fallback 到全域共用庫存
             # （find_by_sku 會 fallback、BU 打錯會誤扣別的庫存列）→ 只在該 BU 內判斷。
             item = repository.find_by_sku_exact(db, sku, business_unit)

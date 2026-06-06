@@ -278,6 +278,54 @@ _assert("UPD-RECALC-c: 清除客戶 → 乙 -4000", _total_paid(CUST_B) == _befo
 
 
 # ============================================================
+# Finding [MED] update_transaction 逆向路徑：paid → pending/overdue 回沖客戶累計
+# （codex 複審第二輪：第一輪只補正向 pending→paid、反向轉未付沒回沖、paid_amount 也沒歸零）
+# ============================================================
+# (d) paid → pending：客戶累計負向回沖 + paid_amount 歸零
+_t_rev = _kw(amount=3500.0, status="paid", cust=CUST_A)  # 建一筆已付、計入甲
+_before_rev = _total_paid(CUST_A)
+_paid_before = _q1("SELECT paid_amount FROM transactions WHERE id=?", (_t_rev,))["paid_amount"]
+_assert("UPD-REV-d setup: 已付帳 paid_amount=3500", _paid_before == 3500.0, detail=str(_paid_before))
+acct.update_transaction(
+    transaction_id=_t_rev, category="", description="", business_unit="__SKIP__",
+    payment_status="pending", due_date="", related_order_id=-1, related_customer_id=-1,
+    actor_user_id="",
+)
+_assert("UPD-REV-d: paid→pending → 甲 total_paid -3500（負向回沖）",
+        _total_paid(CUST_A) == _before_rev - 3500.0, detail=f"{_before_rev}→{_total_paid(CUST_A)}")
+_paid_after = _q1("SELECT paid_amount, payment_status FROM transactions WHERE id=?", (_t_rev,))
+_assert("UPD-REV-d: paid_amount 歸零（轉未付）", _paid_after["paid_amount"] == 0,
+        detail=str(dict(_paid_after)))
+_assert("UPD-REV-d: payment_status 確實改成 pending", _paid_after["payment_status"] == "pending",
+        detail=str(dict(_paid_after)))
+
+# (e) paid → overdue：同樣回沖 + 歸零（涵蓋另一個未付狀態）
+_t_rev2 = _kw(amount=2200.0, status="paid", cust=CUST_B)
+_before_rev2 = _total_paid(CUST_B)
+acct.update_transaction(
+    transaction_id=_t_rev2, category="", description="", business_unit="__SKIP__",
+    payment_status="overdue", due_date="", related_order_id=-1, related_customer_id=-1,
+    actor_user_id="",
+)
+_assert("UPD-REV-e: paid→overdue → 乙 total_paid -2200", _total_paid(CUST_B) == _before_rev2 - 2200.0,
+        detail=f"{_before_rev2}→{_total_paid(CUST_B)}")
+_assert("UPD-REV-e: paid_amount 歸零",
+        _q1("SELECT paid_amount FROM transactions WHERE id=?", (_t_rev2,))["paid_amount"] == 0)
+
+# (f) 反向回復 overdue → paid：再補回客戶累計（正反向對稱、無漏算）
+_before_rev3 = _total_paid(CUST_B)
+acct.update_transaction(
+    transaction_id=_t_rev2, category="", description="", business_unit="__SKIP__",
+    payment_status="paid", due_date="", related_order_id=-1, related_customer_id=-1,
+    actor_user_id="",
+)
+_assert("UPD-REV-f: overdue→paid 再補回 → 乙 total_paid +2200",
+        _total_paid(CUST_B) == _before_rev3 + 2200.0, detail=f"{_before_rev3}→{_total_paid(CUST_B)}")
+_assert("UPD-REV-f: paid_amount 補滿 = amount",
+        _q1("SELECT paid_amount FROM transactions WHERE id=?", (_t_rev2,))["paid_amount"] == 2200.0)
+
+
+# ============================================================
 # Finding [MED] recorded_by：floored session 用 verified actor（非 agent 自填）
 # ============================================================
 # floored、verified=王經理，但 agent 自填 recorded_by='偽造者' → 應記成王經理

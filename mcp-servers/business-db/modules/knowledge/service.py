@@ -52,6 +52,23 @@ def store_fact(
         if err:
             return err
 
+        # 正式規則需 manager（codex 複審第二輪殘留 finding）：writer_or_error 只擋「偽造他人名」、
+        # 但 verified 的 basic 基層員工仍能寫 source_type='explicit'（會被當老闆正式指示 SOP）。
+        # explicit 規則寫入前再加 manager gate fail-closed（floored basic 擋下、operator/manager+ 放行）；
+        # source_type='observed'/'inferred'（觀察慣例 / AI 推斷）維持 basic 可寫、不阻一般知識沉澱。
+        # 比照 approve_leave：非全權限層才驗（_check_permission 傳 "" → floored 取 verified user_id）；
+        # operator（無 SME_FLOOR、is_full_access）放行＝受信任開發 / 老闆層。set_by 是名字非 user_id、
+        # 不能拿去 _check_permission 查 line_user_id（會誤擋 operator），故走 floor gate。
+        from shared.floor_policy import is_full_access
+        if source_type == "explicit" and not is_full_access():
+            perm_err = _check_permission(db, "", "manager")
+            if perm_err:
+                return (
+                    f"ERROR: 寫入正式規則（source_type=explicit）需 manager 以上權限"
+                    f"（{perm_err.removeprefix('ERROR: ')}）。"
+                    "若是觀察到的慣例請用 source_type='observed'、AI 推斷用 'inferred'。"
+                )
+
         like = _like_param(title)
         if business_unit:
             conflicts = db.execute(
@@ -1160,6 +1177,19 @@ def log_decision(
         actor, err = writer_or_error(db, set_by)
         if err:
             return err
+
+        # 正式決策一律需 manager（codex 複審第二輪殘留 finding）：log_decision 寫的是
+        # decision_record（公司治理級決策），不是一般觀察。verified 的 basic 基層員工不應能
+        # 留正式決策。比照 store_fact(explicit)：非全權限層才驗（_check_permission 傳 "" → floored
+        # 取 verified user_id）；operator（is_full_access）放行。set_by 是名字非 user_id、走 floor gate。
+        from shared.floor_policy import is_full_access
+        if not is_full_access():
+            perm_err = _check_permission(db, "", "manager")
+            if perm_err:
+                return (
+                    f"ERROR: 記錄正式決策需 manager 以上權限"
+                    f"（{perm_err.removeprefix('ERROR: ')}）。"
+                )
 
         cur = db.execute(
             "INSERT INTO business_rules "

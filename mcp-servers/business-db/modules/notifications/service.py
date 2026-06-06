@@ -2,11 +2,13 @@
 
 層次邊界：transaction ownership 在這層，repository 不 commit。
 
-安全（codex 全專案審）：受限層的工具移除（search_line_messages / list_line_groups /
-register_line_group）由 shared.floor_policy.LINE_DATA_TOOLS 在 MCP 註冊後物理移除負責。
-本層另加 defense-in-depth：萬一工具未被移除（floor-map 設定錯 / 全權限誤呼），register_line_group
-這個寫入仍走 writer_or_error 做 actor fail-closed + audit 具名。**列級 channel/BU 縮限尚未實作**——
-search / list 不在碼或回傳宣稱「部門層只看自己 channel」，可見度收斂只靠 floor 工具移除這一道。
+安全（codex 全專案審 + 修補複審）：受限層的工具移除（search_line_messages / list_line_groups /
+register_line_group）由 shared.floor_policy.LINE_DATA_TOOLS 在 MCP 註冊後物理移除負責（第一道）。
+本層另加 defense-in-depth（第二道、萬一工具未被移除：floor-map 設定錯 / 名單漏列 / 全權限誤呼）：
+- search_messages / list_line_groups（讀）開頭以 is_full_access() 早退、非全權限層回 ERROR；
+- register_line_group（寫）走 writer_or_error 做 actor fail-closed + audit 具名。
+**列級 channel/BU 縮限尚未實作**——可見度收斂在全權限層內仍是「全公司 LINE 訊息 / 群組」、不分 channel；
+受限層由上述兩道整支擋掉。碼或回傳不宣稱「部門層只看自己 channel」。
 """
 from shared.auth import writer_or_error
 from shared.db import get_db, transaction
@@ -31,6 +33,12 @@ def search_messages(
     days: int,
     limit: int,
 ) -> str:
+    # defense-in-depth（codex 修補複審 B-HIGH/E-HIGH）：本工具已由 floor_policy.LINE_DATA_TOOLS 從受限層
+    # 物理移除，但 service 層再加一道——萬一工具未被移除（floor-map 設定錯 / 名單漏列），仍擋下受限層橫向
+    # 讀全公司 LINE 訊息（無列級 channel/BU 縮限）。is_full_access()：operator('')/confidential 才放行。
+    from shared.floor_policy import is_full_access
+    if not is_full_access():
+        return "ERROR: 此工具僅全權限層可用"
     db = get_db()
     try:
         rows = repository.search_messages(
@@ -120,6 +128,10 @@ def register_line_group(
 
 
 def list_line_groups(group_type: str, channel_id: str) -> str:
+    # defense-in-depth（codex 修補複審 B-HIGH/E-HIGH）：同 search_messages，已由 floor gate 移除、此為第二道。
+    from shared.floor_policy import is_full_access
+    if not is_full_access():
+        return "ERROR: 此工具僅全權限層可用"
     db = get_db()
     try:
         rows = repository.list_line_groups(db, group_type, channel_id)

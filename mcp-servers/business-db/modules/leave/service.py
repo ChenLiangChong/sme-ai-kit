@@ -152,6 +152,7 @@ def request_leave(
     end_date: str,
     days: float,
     reason: str,
+    actor_user_id: str = "",
 ) -> str:
     # 基本驗證
     if days <= 0:
@@ -238,6 +239,11 @@ def request_leave(
                 requester=employee["name"],
                 approver="",
                 business_unit=emp_bu or "",
+                # actor_user_id 傳原始 caller 的 LINE user_id（codex 複審第二輪殘留 finding）：
+                # 第一輪沒傳 → approval_pending 上報以空 actor 入庫、簽核人看不出是誰申請的。
+                # 比照 accounting/orders，enqueue 當下會 _resolve_trusted_actor（floored→re-resolve
+                # active-request verified user_id 忽略此值、operator→用傳入），來源層 + 操作者確定性蓋章。
+                actor_user_id=actor_user_id,
             )
             repository.set_request_approval_id(db, leave_request_id, approval_id)
         else:

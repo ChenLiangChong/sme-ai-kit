@@ -42,6 +42,14 @@ def find_global_by_sku(db: sqlite3.Connection, sku: str) -> sqlite3.Row | None:
     ).fetchone()
 
 
+def business_unit_exists(db: sqlite3.Connection, business_unit: str) -> bool:
+    """指定 BU 是否登錄於 business_entities（update_stock 新建前驗證、防誤建懸空 BU 庫存列）。"""
+    row = db.execute(
+        "SELECT 1 FROM business_entities WHERE id = ? LIMIT 1", (business_unit,)
+    ).fetchone()
+    return row is not None
+
+
 def search_by_keyword(
     db: sqlite3.Connection, query: str, business_unit: str
 ) -> list[sqlite3.Row]:

@@ -18,6 +18,7 @@ collect_ignore = [
     "test_health_intake.py",
     "test_audit_accounting.py",
     "test_audit_approvals.py",
+    "test_audit_auth.py",
     "test_audit_crm_inv_tasks.py",
     "test_audit_escalation.py",
     "test_audit_knowledge.py",

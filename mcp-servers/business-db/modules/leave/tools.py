@@ -64,6 +64,7 @@ def request_leave(
     end_date: str,
     days: float,
     reason: str = "",
+    actor_user_id: str = "",
 ) -> str:
     """員工請假申請。
 
@@ -81,6 +82,8 @@ def request_leave(
         end_date: 結束日期（YYYY-MM-DD，含當日）
         days: 請假天數（可為小數，如 0.5 半天）
         reason: 請假原因（選填）
+        actor_user_id: 申請者 LINE user_id（供 approval_pending 上報標來源；floored 由系統
+            以 verified user_id 覆寫、operator 可省略）
     """
     return service.request_leave(
         employee_id=employee_id,
@@ -89,6 +92,7 @@ def request_leave(
         end_date=end_date,
         days=days,
         reason=reason,
+        actor_user_id=actor_user_id,
     )
 
 

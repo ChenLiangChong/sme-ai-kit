@@ -2,7 +2,7 @@
 
 層次邊界：transaction ownership 在這層，repository 不 commit。
 """
-from shared.auth import _check_permission, _resolve_actor_label
+from shared.auth import _check_permission, _resolve_actor_label, writer_or_error
 from shared.db import _now, get_db, transaction
 
 from . import repository
@@ -166,18 +166,46 @@ def list_entities() -> str:
 
 # ---- session_handoffs ----
 
-def save_handoff(session_id: str, summary: str, pending_items: str) -> str:
+def save_handoff(
+    session_id: str, summary: str, pending_items: str, actor_user_id: str = ""
+) -> str:
+    """session_handoffs = 跨 session 控制面（下個 session 開機會自動撈來接手）。受限層能寫
+    就能污染老闆 session 的承接內容 → 寫入前 actor fail-closed（codex 複審第二輪殘留 finding）。
+
+    floored 無 verified LINE 脈絡 → writer_or_error 擋下；operator（無 SME_FLOOR）放行。
+    不從 floor 移除此工具（受限層仍需存自己的 handoff），靠 actor 驗證即可。audit 用可信 actor。
+    """
     with transaction() as db:
+        # fail-closed 必須在任何寫入「之前」：transaction() 對 return 字串仍會 commit。
+        actor_label, err = writer_or_error(db, actor_user_id)
+        if err:
+            return err
         handoff_id = repository.insert_handoff(db, session_id, summary, pending_items)
+        repository.insert_interaction_log(
+            db, actor=actor_label, action="handoff_saved",
+            target_type="session_handoff", target_id=handoff_id,
+            detail=f"儲存 session 交接（session={session_id[:16]}）",
+        )
     return f"Session 交接 #{handoff_id} 已儲存（{session_id[:8]}...）"
 
 
-def resolve_handoff(handoff_id: int, note: str) -> str:
+def resolve_handoff(handoff_id: int, note: str, actor_user_id: str = "") -> str:
+    """標記 handoff 已接手。受限層能 resolve 就能把老闆未承接的交接標掉（變相隱藏）→
+    寫入前 actor fail-closed（codex 複審第二輪殘留 finding）。floored 無 verified 擋下、operator 放行。"""
     with transaction() as db:
+        # fail-closed 在任何寫入之前。
+        actor_label, err = writer_or_error(db, actor_user_id)
+        if err:
+            return err
         row = repository.get_handoff_status(db, handoff_id)
         if not row:
             return f"ERROR: 找不到 handoff #{handoff_id}"
         if row["status"] == "resolved":
             return f"handoff #{handoff_id} 已是 resolved 狀態，無需重複"
         repository.mark_handoff_resolved(db, handoff_id, _now(), note or None)
+        repository.insert_interaction_log(
+            db, actor=actor_label, action="handoff_resolved",
+            target_type="session_handoff", target_id=handoff_id,
+            detail=(f"標記 handoff 已接手" + (f"：{note}" if note else "")),
+        )
     return f"handoff #{handoff_id} 已標記 resolved" + (f"（{note}）" if note else "")

@@ -91,28 +91,38 @@ def list_business_entities() -> str:
 
 
 @mcp.tool()
-def save_session_handoff(session_id: str, summary: str, pending_items: str = "[]") -> str:
+def save_session_handoff(
+    session_id: str, summary: str, pending_items: str = "[]", actor_user_id: str = ""
+) -> str:
     """儲存 session 交接資訊。在關閉 session 或定期保存時呼叫。
 
     新建的 handoff 預設 status='active'。新 session 接手後請呼叫 resolve_handoff 標記完成，
     否則下次 get_context_summary 還會撈到（變成過期 handoff trap）。
 
+    handoff = 跨 session 控制面，寫入前 actor fail-closed：floored session 由系統取 verified
+    user_id、查無 verified LINE 脈絡擋下；operator（無 SME_FLOOR）放行。
+
     Args:
         session_id: 當前 session ID
         summary: 交接摘要（目前在做什麼、等待什麼）
         pending_items: JSON 格式的待處理項目清單
+        actor_user_id: 操作者 LINE user_id（floored 由系統覆寫；operator 可省略）
     """
-    return service.save_handoff(session_id, summary, pending_items)
+    return service.save_handoff(session_id, summary, pending_items, actor_user_id)
 
 
 @mcp.tool()
-def resolve_handoff(handoff_id: int, note: str = "") -> str:
+def resolve_handoff(handoff_id: int, note: str = "", actor_user_id: str = "") -> str:
     """標記 session_handoff 為已接手。新 session 讀到 handoff 並完成承接後呼叫。
 
     標記後 get_context_summary 就不會再撈到這筆（但 audit log 保留）。
 
+    寫入前 actor fail-closed（同 save_session_handoff）：floored 取 verified user_id、
+    查無 verified LINE 脈絡擋下；operator 放行。
+
     Args:
         handoff_id: 要標記的 handoff id（從 get_context_summary 或 save_session_handoff 回傳）
         note: 可選備註（如「接手完成、已切到 P2.1」）
+        actor_user_id: 操作者 LINE user_id（floored 由系統覆寫；operator 可省略）
     """
-    return service.resolve_handoff(handoff_id, note)
+    return service.resolve_handoff(handoff_id, note, actor_user_id)

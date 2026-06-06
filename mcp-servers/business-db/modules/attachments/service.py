@@ -85,6 +85,14 @@ def add(
 
 
 def list_for(target_type: str, target_id: int) -> str:
+    # 未知 target_type 回 ERROR（codex 複審第二輪殘留 finding）：add() 已對白名單外類型擋下，
+    # 但 list_for() 對未知 target_type 靜默回空（看不出是「真的沒附件」還是「打錯 target_type」）。
+    # 與 add 一致的白名單；target 存在性不強檢（合法 target 沒附件回空列表是正常的）。
+    if target_type not in _TARGET_TABLE:
+        return (
+            f"ERROR: 不支援的附件對象類型「{target_type}」"
+            f"（可用：{', '.join(_TARGET_TABLE)}）"
+        )
     db = get_db()
     try:
         rows = repository.list_by_target(db, target_type, target_id)

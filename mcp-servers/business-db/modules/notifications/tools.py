@@ -85,11 +85,15 @@ def list_line_groups(group_type: str = "", channel_id: str = "") -> str:
 
 @mcp.tool()
 def list_pending_escalations(limit: int = 50) -> str:
-    """列出待投遞的主管上報（status=pending、已解析收件人）。全權限層限定（部門層由 floor gate 移除）。
+    """列出待投遞的主管上報（status=pending、已解析收件人）+ 原子 claim 該批租約。全權限層限定
+    （部門層由 floor gate 移除）。
 
     給 claude -p 通報投遞器用：讀出後逐筆用 mcp__line__reply 推給「該筆的 target_line_user_id」
-    （收件人一律照 row、不可自行決定），再呼叫 mark_escalation_sent(id)。
-    回 JSON：{"pending":[{id,event_type,summary,actor,business_unit,target_line_user_id,channel_id}],"count"}。
+    （收件人一律照 row、不可自行決定），再呼叫 mark_escalation_sent(id, claim_token=該筆的 claim_token)。
+    每筆回傳的 claim_token 是「本次取得的租約憑證」，標記送達時務必原樣帶回（系統憑此驗持有者、防誤標他人
+    租約 / 防 reclaim 後雙送）。
+    回 JSON：{"pending":[{id,event_type,summary,actor,business_unit,source_floor,
+    target_line_user_id,channel_id,claim_token}],"count"}。
 
     Args:
         limit: 最多回幾筆（預設 50）
@@ -98,13 +102,16 @@ def list_pending_escalations(limit: int = 50) -> str:
 
 
 @mcp.tool()
-def mark_escalation_sent(escalation_id: int, sent_text: str = "") -> str:
+def mark_escalation_sent(escalation_id: int, claim_token: str = "", sent_text: str = "") -> str:
     """標記某筆主管上報已送達（status pending→sent）+ 落實際送出內容供稽核。投遞器推送成功後呼叫。
 
-    rowcount guard 防重複送（已 sent / 不存在 → 回無法標記、不報錯）。
+    租約 + token guard：只有「目前持有未逾期租約且 claim_token 相符」的 row 可標 sent；裸 pending（未經
+    list_pending_escalations claim）/ 租約逾期被 reclaim 換 token / token 不符 → 回無法標記、不報錯
+    （防誤把未送出的上報清成 sent、防 reclaim 後雙送）。
 
     Args:
         escalation_id: pending_escalations 的 id
+        claim_token: 先前 list_pending_escalations 取得該筆時回傳的租約憑證（原樣帶回；憑此驗持有者）
         sent_text: 投遞器真正推給主管的完整文字（系統落 interaction_log 留底「實際送出了什麼」）
     """
-    return _escalation.mark_sent_tool(escalation_id, sent_text=sent_text)
+    return _escalation.mark_sent_tool(escalation_id, claim_token=claim_token, sent_text=sent_text)

@@ -1,0 +1,24 @@
+-- 019: pending_escalations 加 claim_token（codex 修補複審 E-HIGH：mark_sent 無 lease 持有者驗證）
+--
+-- 缺口（migration 010 的 claimed_at 只擋「TTL 內 / 外」、不擋「是誰持有」）：
+--   1) mark_sent_tool 只驗 claimed_at 在 _CLAIM_TTL_MIN 內（_MARK_SENT_WHERE），任何知道 id 的 caller
+--      （亂呼叫的品質層 LLM / 任何能呼 mark_escalation_sent 的全權限 session）都能標掉「別人正持有中的
+--      lease」→ 把尚未真正送出的高風險上報誤清成 sent、cron 不再補送（資料牆破口）。
+--   2) stale-lease race：TTL 過後新投遞器 reclaim 刷新 claimed_at，舊投遞器之後仍可因「row 目前有有效
+--      claimed_at」成功 mark_sent → 雙送（舊持有者送一次、新持有者送一次）。只驗「有沒有有效租約」、不驗
+--      「這個有效租約是不是我當初拿到的那一張」。
+--
+-- 修法：claim 時（list_pending_for_notifier / flush_pending_escalations 的 _CLAIM_UPDATE）寫入一個隨機
+--   claim_token（Python secrets.token_hex）並把 token 隨 row 回傳給該次 claimer；mark_sent_tool 要求傳入
+--   claim_token，UPDATE 條件加 AND claim_token = ?（與 id + 仍在 TTL 一起）。token 對不上（裸 pending、
+--   被 reclaim 後 token 已換、根本沒 claim 過）→ rowcount=0 → 拒絕標 sent。reclaim 一定換新 token →
+--   舊持有者的舊 token 永遠對不上新租約 → 杜絕 stale-lease 雙送。
+--
+--   既有 row 的 claim_token 為 NULL：尚未跑 migration 的舊 claimed row（如 cron 直接 raw SQL 設 claimed_at
+--   而未寫 token）視為「無 token 租約」、mark_sent 以「未帶 token（''/None）對 claim_token IS NULL」匹配
+--   （向後相容、不破壞 cron 直 claim→mark 同流程；新碼 claim 一律寫 token、走嚴格比對）。
+--
+-- 慣例：pending_escalations 只走 migration、不寫進 schema.sql（同 007/009/010）。純 DDL、單 statement、過
+--   splitter guard（無 TRIGGER / BEGIN / COMMIT）。fresh install 走 init_db 既有 ALTER + 此 migration 不崩。
+
+ALTER TABLE pending_escalations ADD COLUMN claim_token TEXT;

@@ -2480,7 +2480,9 @@ _assert("#27(codex1): list_pending_for_notifier claim-on-read（lease 該筆）"
         _leased and _row_l["claimed_at"] is not None)
 _assert("#27(codex1): notifier 已 lease 的 row、同窗 cron flush 不重送（仍 pending）",
         "Ulease27" not in _sent_lease and _row_l["status"] == "pending")
-_mark27(_eid_lease, sent_text="【系統通報】帳目被刪除（notifier lease 後送出）")
+# mark_sent 需持有 claim_token（codex 全專案審複審 E-HIGH）：從 claim-on-read 回傳取本筆 token
+_tok_lease = next(_it["claim_token"] for _it in _listed["pending"] if _it["id"] == _eid_lease)
+_mark27(_eid_lease, claim_token=_tok_lease, sent_text="【系統通報】帳目被刪除（notifier lease 後送出）")
 _db_l2 = _getdb27()
 _st_lease2 = _db_l2.execute("SELECT status FROM pending_escalations WHERE id=?", (_eid_lease,)).fetchone()["status"]
 _log_lease = _db_l2.execute(
