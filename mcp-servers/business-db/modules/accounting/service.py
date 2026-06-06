@@ -563,13 +563,14 @@ def update_transaction(
             if payment_status == "paid":
                 updates.append("paid_amount = amount")
                 new_paid = txn["amount"]  # paid → paid_amount 補滿，比照 SQL
-            else:
-                # 逆向路徑（codex 複審第二輪殘留 finding）：paid → pending/overdue＝「轉未付」，
-                # 第一輪只補了 pending→paid 正向，反向沒回沖：paid_amount 仍留舊值、客戶 total_paid
-                # 也沒扣 → 客戶累計虛高。轉未付時 paid_amount 歸零（SQL + new_paid 同步），下方差額
-                # 重算就會把這筆對客戶的貢獻負向回沖。
+            elif txn["payment_status"] == "paid":
+                # 逆向路徑（codex 複審第二輪殘留 finding）：**從「已付清」轉未付**＝paid_amount 當初是
+                # 補滿的全額標記 → 歸零（SQL + new_paid 同步），下方差額重算把這筆對客戶的貢獻負向回沖。
+                # 第三輪修正（codex 新 MED）：只在「原本是 paid」時歸零；若本來就是 pending/overdue
+                # （paid_amount 可能是 record_payment 累積的部分收款）→ 不碰 paid_amount，避免抹掉既有已收額。
                 updates.append("paid_amount = 0")
                 new_paid = 0.0
+            # else：本來就未付、改 overdue↔pending 之間 → 保留既有 paid_amount（部分收款不動）
             detail_parts.append(f"狀態→{payment_status}")
         if due_date:
             updates.append("due_date = ?"); params.append(due_date)

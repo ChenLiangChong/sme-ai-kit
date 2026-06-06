@@ -324,6 +324,24 @@ _assert("UPD-REV-f: overdue→paid 再補回 → 乙 total_paid +2200",
 _assert("UPD-REV-f: paid_amount 補滿 = amount",
         _q1("SELECT paid_amount FROM transactions WHERE id=?", (_t_rev2,))["paid_amount"] == 2200.0)
 
+# (g) 第三輪修正（codex 新 MED）：本來就未付、且有部分收款（record_payment 累積）的帳，
+# 改 pending↔overdue 之間時不可把 paid_amount 抹成 0、也不可誤扣客戶已收額。
+_t_partial = _kw(amount=1000.0, status="pending", cust=CUST_B)
+with transaction() as db:  # 模擬 record_payment 部分收款 400：paid_amount 累積 + 客戶 total_paid +400
+    db.execute("UPDATE transactions SET paid_amount=400 WHERE id=?", (_t_partial,))
+    db.execute("UPDATE customers SET total_paid = COALESCE(total_paid,0) + 400 WHERE id=?", (CUST_B,))
+_before_g = _total_paid(CUST_B)
+acct.update_transaction(
+    transaction_id=_t_partial, category="", description="", business_unit="__SKIP__",
+    payment_status="overdue", due_date="", related_order_id=-1, related_customer_id=-1,
+    actor_user_id="",
+)
+_assert("UPD-REV-g: 本來就未付+部分收款改 overdue → paid_amount 保留 400（不抹既有已收）",
+        _q1("SELECT paid_amount FROM transactions WHERE id=?", (_t_partial,))["paid_amount"] == 400,
+        detail=str(_q1("SELECT paid_amount FROM transactions WHERE id=?", (_t_partial,))["paid_amount"]))
+_assert("UPD-REV-g: 客戶 total_paid 不被誤扣（pending→overdue 不動已收）",
+        _total_paid(CUST_B) == _before_g, detail=f"{_before_g}→{_total_paid(CUST_B)}")
+
 
 # ============================================================
 # Finding [MED] recorded_by：floored session 用 verified actor（非 agent 自填）
