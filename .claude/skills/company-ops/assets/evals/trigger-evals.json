@@ -1,143 +1,158 @@
 [
   {
-    "id": "trigger-01-stock",
-    "query": "倉庫的 A 商品還剩幾個？",
+    "id": "t01-task-admin",
+    "query": "幫我開個行政待辦：請助理週五前把這週的收文都掃描歸檔",
     "should_trigger": true,
-    "category": "inventory"
+    "category": "task-ops",
+    "notes": "純行政待辦（非法定時限）→ company-ops task-ops"
   },
   {
-    "id": "trigger-02-record",
-    "query": "今天買咖啡花 350 元、幫我記一下帳",
+    "id": "t02-task-assign",
+    "query": "下個月所內消防演練、建一個任務指派給行政小陳並提醒她",
     "should_trigger": true,
-    "category": "accounting"
+    "category": "task-ops",
+    "notes": "所務行政任務指派 → task-ops"
   },
   {
-    "id": "trigger-03-leave",
-    "query": "員工小李想請下週三的特休、可以嗎？",
+    "id": "t03-leave-request",
+    "query": "助理小陳想請下週三的特休、幫我送簽核",
     "should_trigger": true,
-    "category": "leave"
+    "category": "leave-ops"
   },
   {
-    "id": "trigger-04-approve",
+    "id": "t04-leave-balance",
+    "query": "我今年的特休還剩幾天？",
+    "should_trigger": true,
+    "category": "leave-ops"
+  },
+  {
+    "id": "t05-hitl-approve",
     "query": "核准 #42",
     "should_trigger": true,
     "category": "hitl"
   },
   {
-    "id": "trigger-05-dashboard",
-    "query": "今天有什麼事？",
+    "id": "t06-dashboard",
+    "query": "今天所裡有什麼要處理的？",
     "should_trigger": true,
-    "category": "dashboard"
+    "category": "ops-dashboard"
   },
   {
-    "id": "trigger-06-order",
-    "query": "下週三 KFC 客戶下單 100 個 B 產品、麻煩開單",
+    "id": "t07-knowledge-sop",
+    "query": "記一條所規：對外書狀寄出前一律要主持律師覆核",
     "should_trigger": true,
-    "category": "order"
+    "category": "knowledge-capture"
   },
   {
-    "id": "trigger-07-rule",
-    "query": "幫我記一下：以後超過 5 萬的單一定要先簽核",
-    "should_trigger": true,
-    "category": "knowledge"
-  },
-  {
-    "id": "trigger-08-onboarding",
-    "query": "新員工 Sam 今天到職、要綁 LINE",
+    "id": "t08-onboarding-staff",
+    "query": "新進助理今天報到、幫忙建檔並綁定 LINE",
     "should_trigger": true,
     "category": "onboarding"
   },
   {
-    "id": "trigger-09-overdue",
-    "query": "張董那邊的尾款還沒收吧？逾期多久？",
+    "id": "t09-onboarding-firm",
+    "query": "我們事務所要開始導入這套系統、先把所內人員名冊和基本設定建起來",
     "should_trigger": true,
-    "category": "accounting-ar"
+    "category": "knowledge-capture-import"
   },
   {
-    "id": "trigger-10-line-line",
-    "query": "<channel source=\"line\" chat_id=\"Uxxx\" user=\"客戶\" channel_id=\"brand_a\" business_unit=\"brand_a\">想下單 50 個</channel>",
+    "id": "t10-report",
+    "query": "幫我整理這週的所務週報",
     "should_trigger": true,
-    "category": "line-channel"
+    "category": "report-gen"
   },
   {
-    "id": "trigger-11-monthly",
-    "query": "這個月收支多少？brand_a 業績呢？",
+    "id": "t11-setup",
+    "query": "所內 LINE 還沒接、幫我設定一下",
     "should_trigger": true,
-    "category": "monthly-summary"
+    "category": "setup"
   },
   {
-    "id": "trigger-12-broadcast",
-    "query": "幫我寫一封給所有客戶的中秋節祝福訊息、要走 LINE 廣播",
+    "id": "t12-line-internal",
+    "query": "<channel source=\"line\" chat_id=\"Uxxx\" user=\"所長\" user_id=\"Uboss\" channel_id=\"firm_oa\" channel_name=\"所內OA\">明天 10 點所務會議、幫我提醒大家</channel>",
     "should_trigger": true,
-    "category": "broadcast"
+    "category": "line-comms"
   },
 
   {
-    "id": "non-01-code",
+    "id": "f01-deadline-calc",
+    "query": "判決書今天收到、上訴期限算到哪一天？",
+    "should_trigger": false,
+    "category": "should-be-legal-admin",
+    "notes": "法定時限計算屬 legal-admin 垂直核心、company-ops 不得搶"
+  },
+  {
+    "id": "f02-matter-create",
+    "query": "幫我開一個新案件、案由是給付貨款",
+    "should_trigger": false,
+    "category": "should-be-legal-admin",
+    "notes": "建案件 matter → legal-admin"
+  },
+  {
+    "id": "f03-matter-query",
+    "query": "幫我查那個給付貨款的案子現在到哪個階段了",
+    "should_trigger": false,
+    "category": "should-be-legal-admin",
+    "notes": "案件查詢 → legal-admin matter-query"
+  },
+  {
+    "id": "f04-consult-booking",
+    "query": "有人來電想約下週二下午的諮詢",
+    "should_trigger": false,
+    "category": "should-be-legal-admin",
+    "notes": "委任人諮詢預約 → legal-admin"
+  },
+  {
+    "id": "f05-intake",
+    "query": "這份開庭通知幫我看一下、要記到行事曆",
+    "should_trigger": false,
+    "category": "should-be-legal-admin",
+    "notes": "收件抽取 + 行事曆 → legal-admin deadline-intake"
+  },
+  {
+    "id": "f06-inventory-dropped",
+    "query": "倉庫的庫存還剩多少？",
+    "should_trigger": false,
+    "category": "dropped-inventory",
+    "notes": "律所無庫存鏈、inventory-ops 已刪 → 不得觸發"
+  },
+  {
+    "id": "f07-accounting-dropped",
+    "query": "今天買辦公文具花 350 元、幫我記個帳",
+    "should_trigger": false,
+    "category": "dropped-accounting",
+    "notes": "記帳/會計 SPEC 移出產品、accounting-ops 已刪 → 不得觸發"
+  },
+  {
+    "id": "f08-order-dropped",
+    "query": "幫客戶開一張 100 件的訂單",
+    "should_trigger": false,
+    "category": "dropped-order",
+    "notes": "律所無訂單鏈、order-ops 已刪 → 不得觸發"
+  },
+  {
+    "id": "f09-broadcast-dropped",
+    "query": "寫個中秋祝福、群發給所有當事人",
+    "should_trigger": false,
+    "category": "dropped-broadcast",
+    "notes": "對外行銷/廣播 律師倫理限制、所內專用無對外通道 → 不得觸發"
+  },
+  {
+    "id": "f10-coding",
     "query": "幫我寫一段 Python 把 csv 排序",
     "should_trigger": false,
     "category": "pure-coding"
   },
   {
-    "id": "non-02-design",
-    "query": "做一份 competitive battlecard 給老闆看",
+    "id": "f11-skill-edit",
+    "query": "幫我改 SKILL.md 的 description",
     "should_trigger": false,
-    "category": "should-be-sme-design",
-    "expected_skill": "sme-design"
+    "category": "should-be-skill-creator-advanced"
   },
   {
-    "id": "non-03-social",
-    "query": "我 IG 上週貼文觸及怎樣？",
-    "should_trigger": false,
-    "category": "should-be-social-media",
-    "expected_skill": "social-media"
-  },
-  {
-    "id": "non-04-skill-edit",
-    "query": "幫我改一下 SKILL.md 的 description",
-    "should_trigger": false,
-    "category": "should-be-skill-creator-advanced",
-    "expected_skill": "skill-creator-advanced"
-  },
-  {
-    "id": "non-05-prototype",
-    "query": "做一個 iOS app prototype HTML",
-    "should_trigger": false,
-    "category": "should-be-huashu-design",
-    "expected_skill": "huashu-design"
-  },
-  {
-    "id": "non-06-ui-component",
-    "query": "design a glassmorphism modal in React",
-    "should_trigger": false,
-    "category": "should-be-ui-ux-pro-max",
-    "expected_skill": "ui-ux-pro-max"
-  },
-  {
-    "id": "non-07-pdf",
-    "query": "把這份 PDF 拆成 5 個檔",
-    "should_trigger": false,
-    "category": "should-be-pdf",
-    "expected_skill": "pdf"
-  },
-  {
-    "id": "non-08-excel",
-    "query": "Excel VLOOKUP 怎麼寫",
-    "should_trigger": false,
-    "category": "should-be-xlsx",
-    "expected_skill": "xlsx"
-  },
-  {
-    "id": "non-09-conversation",
+    "id": "f12-meta",
     "query": "你是誰？",
     "should_trigger": false,
     "category": "meta"
-  },
-  {
-    "id": "non-10-yt",
-    "query": "幫我把這 YT 影片轉逐字稿",
-    "should_trigger": false,
-    "category": "should-be-yt-transcribe",
-    "expected_skill": "yt-transcribe"
   }
 ]

@@ -1,76 +1,56 @@
-# Quality Checklist — company-ops
+# Quality Checklist — company-ops（律所版）
 
-最後更新：2026-04-03
+最後更新：2026-06-07（legal-admin branch 全律所化 reframe）
+
+> 本檔是 **company-ops 技能包自身的品質檢核清單**（dev / 維護者用、非 agent runtime 載入、不列入 CLAUDE.md / SKILL.md 模組表）。
+> 本 branch 已把 company-ops 從通用 SME 改寫成**律師事務所所內營運橫向層**；檢核項依此調整。
 
 ---
 
-## 格式確認
+## 模組集（律所版、8 個 reference）
+
+保留並已律所化：`setup` / `ops-dashboard` / `task-ops` / `knowledge-capture` / `leave-ops` / `line-comms` / `report-gen` / `onboarding`。
+
+**已刪除（依 `docs/legal/SPEC.md`〈不做〉— 移出產品 / 不適用律所）**：
+- `order-ops`（訂單）、`inventory-ops`（庫存）：律所無實體商品 / 出貨 / 庫存鏈。
+- `accounting-ops`（記帳 / 會計 / 信託帳）：SPEC 移出產品；信託帳系統無原生支援、寫進文件＝反捏造。
+- `crm-ops`（完整 CRM）：當事人只需 `matters.client_name` 輕量查詢（走 legal-admin matter-query）。
+- `brand-voice`（對外行銷文案）：律師倫理限制廣告招攬、所內專用無對外通道。
+
+---
+
+## 格式 / 結構確認
 
 | 檢查項 | 結果 | 備註 |
 |--------|------|------|
-| format_check.py | ✅ 0 error, 0 warning | |
-| quick_validate.py | ✅ valid | |
-| audit_unreferenced_files.py | ✅ 0 issues (11 referenced / 11 files) | order-ops.md 已加入 |
-| audit_skill_references.py | ✅ 0 issues | |
-| Frontmatter name/description | ✅ | description 用雙引號避免 YAML `>` 問題 |
-| Trailing whitespace | ✅ 已修復 | knowledge-capture.md, report-gen.md |
+| SKILL.md 模組表 = 8 模組、連結正確 | ⬜ | 砍掉 order/inventory/accounting/crm/brand-voice 五列 |
+| description frontmatter 無 SME 觸發詞 | ⬜ | 不得殘留 庫存 / 下單 / QC / 出貨 / 退貨 / 廣播 / Flex 行銷 / 多事業體；與 legal-admin 觸發明確分工 |
+| 各 reference 有明確觸發情境 | ⬜ | |
+| 語言一致（繁體中文） | ⬜ | |
+| 對 5 個已刪模組零交叉引用 | ⬜ | `grep -rE 'crm-ops|order-ops|inventory-ops|accounting-ops|brand-voice'`（排除「已移出」說明句） |
 
 ---
 
-## 要求/規範確認
+## 律所版內容稽核（反捏造為一級）
 
-| 項目 | 狀態 | 備註 |
-|------|------|------|
-| SKILL.md 有模組表格 | ✅ | 11 個模組（含 order-ops），連結語法正確 |
-| 每個 reference 有明確觸發情境 | ✅ | |
-| 語言一致（繁體中文） | ✅ | |
-| MCP tool 名稱正確 | ✅ | line-comms.md `get_line_quota` 已移除，改為手動查詢說明 |
-| 跨模組 handoff 清楚 | ✅ | inventory-ops 第四節已補進貨→記帳串接；order-ops 第十節有完整交互表 |
-| 品牌語氣裝飾器定位被其他模組尊重 | ✅ | crm-ops、line-comms、report-gen、onboarding 正確引用 |
-| 啟動流程一致性 | ✅ | ops-dashboard 已與 CLAUDE.md 啟動流程對齊 |
-| LINE 處理流程一致性 | ✅ | line-comms 已與 CLAUDE.md LINE 訊息處理完全一致 |
-| 催收邏輯一致性 | ✅ | accounting-ops 帳齡表與自動催收已統一，無矛盾 |
-
----
-
-## 內容審計發現（2026-04-03）
-
-### 🔴 嚴重（全部已修正）
-
-1. ~~**訂單管理流程完全缺席**~~ → ✅ 已新增 order-ops.md（11 節完整指南：生命週期、建單、確認、QC、出貨、到貨、收款、退貨、查詢、跨模組交互）
-2. ~~**`get_line_quota` 工具不存在**~~ → ✅ line-comms.md 第九節已改為手動查詢說明（LINE MCP 尚未支援 quota API）
-3. ~~**accounting-ops HITL 矛盾**~~ → ✅ 第一節已修正：明確審核判斷由 AI 負責，`record_transaction` 不自動攔截
-
-### 🟡 中等（全部已修正）
-
-4. ~~缺少 `update_employee` tool~~ → ✅ 已新增，CLAUDE.md 和 onboarding.md 都正確引用
-5. ~~進貨與記帳跨模組串接缺失~~ → ✅ inventory-ops 第四節步驟 5 已補完整進貨記帳流程
-6. ~~`check_overdue` 未被任何模組引用~~ → ✅ 已在 ops-dashboard、accounting-ops、order-ops 中引用
-7. ~~`save_session_handoff`、`add_attachment`、`list_attachments` 未被引用~~ → ✅ save_session_handoff 在 CLAUDE.md；add_attachment 在 crm-ops、order-ops、task-ops、inventory-ops、accounting-ops
-8. ~~RFM 的 Frequency 資料來源不明~~ → ✅ crm-ops 已加註使用 `list_orders` 統計訂單筆數
-9. ~~report-gen 引用不存在的 `xlsx` skill~~ → ✅ 已改為引用 xlsx/pdf/docx skill（皆存在）
-10. ~~task-ops 的 `blocked` 狀態需確認 DB schema~~ → ✅ 已改為 `[BLOCKED]` 描述標記法，不依賴 DB 狀態欄
-
----
-
-## 一致性修正記錄（2026-04-03）
-
-| 修正項 | 涉及檔案 | 說明 |
-|--------|---------|------|
-| 啟動流程對齊 | ops-dashboard.md | 加入首次啟動判斷（Step 2），與 CLAUDE.md 完全一致 |
-| LINE 處理流程對齊 | line-comms.md | 第一步~第四步重寫，與 CLAUDE.md 完全一致；陌生人處理段同步 |
-| 權限不足回覆統一 | line-comms.md | 改為「這個操作需要主管權限。」（去掉多餘的「請聯繫」） |
-| 權限表統一 | line-comms.md | 移除「對應模組」欄，合併「回報進度」和「建立任務」，與 CLAUDE.md 一致 |
-| register_employee 參數 | onboarding.md | 資訊收集清單補上 permissions 參數說明 |
-| 催收邏輯統一 | accounting-ops.md | 帳齡表設為主表，自動催收改為引用帳齡表的摘要，消除門檻矛盾 |
-
----
-
-## 最終判定
-
-| 維度 | 評級 |
+| 維度 | 要求 |
 |------|------|
-| 格式合規 | ✅ PASS |
-| 內容品質 | ✅ A（3 個嚴重 + 7 個中等問題全部已修正） |
-| 跨模組一致性 | ✅ PASS（CLAUDE.md 與各模組完全對齊） |
-| 整體 Readiness | ✅ PASS |
+| **反捏造 — 不宣稱不存在的能力** | 文件**絕不**宣稱：信託帳負值阻擋 / per-當事人餘額 / 利益衝突自動偵測 / `update_matter`（不存在）/ deadline 重指派工具（不存在）。離職案件 / 時限交接走 `store_fact` 記錄 + `create_task` + 人工。 |
+| **反捏造 — 法律事實** | 法條 / 期間天數 / 在途**絕不出現在 company-ops 文件**；一律 legal-admin 引擎確定性計算附 `statutory_basis`。dashboard / report 只「讀取」、不重算。 |
+| **天數語意硬邊界** | `task.due_date` / `leave_request.days` 檔首聲明「**≠ 法定時限**」（task-ops / leave-ops 對稱、交叉引用 legal-admin）。 |
+| **核心機制原樣保留** | floor 兩道牆 / SME_FLOOR 三態 / escalation 上報 / actor 身份信任 / HITL gate（resume_params + consumed_at）/ 機密軸 / 知識寫入 flow / context 壓縮恢復＝領域無關、一字不改義（只改領域範例）。 |
+| **單一律所定位** | `business_unit` 多事業體軸退化、留空 inert；個人律所不設 `SME_FLOOR`（floor 分支標「多人版才適用」、非主敘述）。 |
+| **所內專用** | 無對外通道：非所內名冊不回覆業務內容；無陌生人意圖分層路由、無對外行銷 / 廣播；委任人約諮詢走電話人工建（不在 LINE 開委任人對話）。 |
+| **誠實邊界** | floor 案件列級過濾（#11）未落地 → 不可宣稱「部門層只查得到自己案件」。 |
+
+---
+
+## 驗收（對齊決策 #186 三層）
+
+| 維度 | 評級 | 工具 |
+|------|------|------|
+| 覆蓋率（工具 / 流程都有文件） | ⬜ | — |
+| 觸發率（情境正確路由到模組） | ⬜ | `~/.claude/skills/skill-creator-advanced/run_eval.py`（claude -p 訂閱、跑前 `env -u ANTHROPIC_API_KEY`；company-ops 是路由型、拆包級 + 模組級） |
+| 流程正確（mechanism 不丟、反捏造） | ⬜ | codex 覆審 + 本清單反捏造維度 |
+
+> 本輪 reframe：Workflow draft→對抗驗證跑 7 個 reference（6 PASS + onboarding.md 抓到 `update_matter` 捏造、已手修）；knowledge-capture 另由手改、CLAUDE.md / SKILL.md 手改後經 codex 覆審（機制無改義 / 無捏造 / SPEC 對齊）。company-ops 現共 **8 reference + 本檔**。上線前再跑觸發率 eval。
