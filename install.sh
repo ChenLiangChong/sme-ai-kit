@@ -155,7 +155,6 @@ if [[ ! -f "$LOCAL_SETTINGS" ]]; then
     "allow": [
       "Bash(bash install.sh)",
       "Bash(bash start.sh)",
-      "Bash(bash start-force.sh)",
       "Bash(./.venv/bin/python3:*)",
       "Bash(./.venv/bin/pip:*)",
       "Read(./data/**)",
