@@ -213,3 +213,28 @@ def log_decision(
         business_unit=business_unit,
         confidential=confidential,
     )
+
+
+@mcp.tool()
+def set_rule_confidential(
+    rule_id: int, confidential: bool, reason: str, actor_user_id: str = ""
+) -> str:
+    """變更既有規則的機密等級（就地翻 confidential 旗標、不建新規則、不取代）。
+    僅全權限層（機密層／operator）可用；受限部門層無此工具。
+
+    用途：把「該機密卻被標公開」的規則（或反之）重新分級。query_knowledge 對非全權限層
+    會過濾掉 confidential=1 的規則，故翻機密＝該規則從此對受限部門層隱形（內容一字不變）。
+    翻機密前建議先 get_rule(id) 確認。翻錯可再呼叫一次翻回來（idempotent）。
+
+    Args:
+        rule_id: 規則 ID
+        confidential: True=設為機密（僅機密層可見）/ False=設為公開（全員可見）
+        reason: 變更原因（寫入稽核 log）
+        actor_user_id: 操作者 LINE user_id（floored session 由系統取 verified 值、agent 自填無效）
+    """
+    return service.set_rule_confidential(
+        rule_id=rule_id,
+        confidential=confidential,
+        reason=reason,
+        actor_user_id=actor_user_id,
+    )
