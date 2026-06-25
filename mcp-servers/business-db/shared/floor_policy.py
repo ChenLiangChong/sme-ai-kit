@@ -25,18 +25,31 @@ import os
 
 # 財務工具拆 寫/讀 兩類（決策 #171：financial_visibility 能獨立控制財務、own_bu 只留讀）
 FINANCIAL_WRITE_TOOLS = {
-    "record_transaction", "update_transaction", "delete_transaction", "record_payment",
+    "record_transaction", "update_transaction", "record_payment",
 }
 FINANCIAL_READ_TOOLS = {
     "list_transactions", "get_transaction", "monthly_summary", "check_overdue",
 }
 FINANCIAL_TOOLS = FINANCIAL_WRITE_TOOLS | FINANCIAL_READ_TOOLS
 
-# HR / 員工 PII / 請假 —— 非全權限層一律移除（v1：hr_visibility 暫不可設定、預設機密）
-HR_TOOLS = {
-    "register_employee", "update_employee", "list_employees", "lookup_employee",
-    "register_leave_type", "set_leave_balance", "get_leave_balance",
-    "request_leave", "approve_leave", "reject_leave", "cancel_leave",
+# 危險財務操作（需要 manager 權限）—— 非全權限層一律移除
+FINANCIAL_DANGER_TOOLS = {
+    "delete_transaction",
+}
+
+# HR 管理工具 —— 非全權限層一律移除（需 admin 權限或配額設定職責）
+# lookup_employee / list_employees 保留（LINE 路由辨識 + 員工通訊錄）
+# 員工自助請假工具保留（request_leave / cancel_leave / get_leave_request 等）
+HR_ADMIN_TOOLS = {
+    "register_employee", "update_employee",       # 寫入 HR，需 admin
+    "register_leave_type", "set_leave_balance",   # 配額設定，HR 管理員
+    "approve_leave", "reject_leave",              # 請假簽核，老闆/HR 才做
+}
+
+# 向後相容引用（外部若有 import HR_TOOLS / CONFIDENTIAL_ONLY_TOOLS）
+HR_TOOLS = HR_ADMIN_TOOLS | {
+    "list_employees", "lookup_employee",
+    "get_leave_balance", "request_leave", "cancel_leave",
     "list_leave_requests", "list_pending_leave_requests", "get_leave_request",
 }
 
@@ -44,6 +57,13 @@ HR_TOOLS = {
 # 只給 claude -p 通報投遞器（全權限、無 SME_FLOOR）+ operator/confidential 用。
 ESCALATION_ADMIN_TOOLS = {
     "list_pending_escalations", "mark_escalation_sent",
+}
+
+# 知識敏感度重分級工具（#168 後續）—— 非全權限層一律移除：翻 confidential 旗標是
+# 敏感度管理、只該機密層/operator 做（比照 HR_ADMIN 寫入）。受限層仍可 query_knowledge
+# /get_rule（讀），只是讀不到 confidential=1 的列、也改不了任何規則的機密等級。
+KNOWLEDGE_ADMIN_TOOLS = {
+    "set_rule_confidential",
 }
 
 # 排程提醒工具（派工器模式）—— 非全權限層一律移除：schedule_reminder 會定時推播到任意 LINE
@@ -87,9 +107,12 @@ def is_full_access() -> bool:
 def apply_floor_policy(mcp) -> list[str]:
     """依 SME_FLOOR + floor-map 能力設定從 mcp 移除該層不該有的工具。回傳被移除的工具名 list。
 
-    決策 #171：財務移除由 floor-map 的 financial_visibility 決定（'none' 預設 / 'own_bu' / 'all'）；
-    HR/員工 PII 在非全權限層一律移除（v1）。無 floor-map 條目 → 安全預設（財務 none）＝
-    完全等同改版前行為（向後相容）。
+    決策 #171（修訂）：最大化保留原則。
+    - 非全權限層一律移除：HR_ADMIN_TOOLS（寫入/簽核）+ ESCALATION_ADMIN_TOOLS + FINANCIAL_DANGER_TOOLS
+      + KNOWLEDGE_ADMIN_TOOLS（set_rule_confidential 敏感度重分級）+ REMINDER_ADMIN_TOOLS（排程推播）
+    - 財務移除由 floor-map 的 financial_visibility 決定（'all'=全保留 / 'none'=移除讀寫 / 'own_bu'=fail-closed）
+    - 保留：lookup_employee / list_employees（路由必要）/ 員工自助請假（走 HITL）/ 財務讀寫（HITL gate 控大額）
+    - 無 floor-map 條目 → 安全預設（財務 none）= 向後相容
     """
     floor = get_floor()
     if floor in FULL_ACCESS_FLOORS:
@@ -99,14 +122,20 @@ def apply_floor_policy(mcp) -> list[str]:
     from shared.floor_map import get_floor_config
     cfg = get_floor_config(floor)
 
-    to_remove: set[str] = set(HR_TOOLS) | set(ESCALATION_ADMIN_TOOLS) | set(REMINDER_ADMIN_TOOLS)  # 非全權限層：不碰 HR/員工 PII/請假 + 上報管理 + 排程提醒工具
+    # 基礎移除：HR 管理寫入 + 危險財務 + 上報管理（一律）
+    to_remove: set[str] = (
+        set(HR_ADMIN_TOOLS) | set(FINANCIAL_DANGER_TOOLS)
+        | set(ESCALATION_ADMIN_TOOLS) | set(KNOWLEDGE_ADMIN_TOOLS)
+        | set(REMINDER_ADMIN_TOOLS)
+    )
+
     fv = (cfg.financial_visibility or "none").strip()
     if fv == "all":
-        pass  # 會計層：保留全部財務工具（HR 仍移除）
+        pass  # 財務全保留（HITL gate 控大額）
     elif fv == "own_bu":
         # own_bu 需 #11 對財務「讀」做 BU-scoping 才安全；#11 未落地前 fail-closed＝連讀也移除
         to_remove |= FINANCIAL_TOOLS
-    else:  # 'none'（預設）：財務全移除
+    else:  # 'none'（預設）：財務讀寫全移除
         to_remove |= FINANCIAL_TOOLS
 
     removed: list[str] = []
