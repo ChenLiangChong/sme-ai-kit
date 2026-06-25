@@ -11,6 +11,8 @@ data/*.log
 .mcp.json
 .env
 data/line-channels.json
+data/client_secret_*.json
+data/*.apps.googleusercontent.com.json
 
 # 打包產物
 dist/
@@ -37,6 +39,10 @@ node_modules/
 __pycache__/
 *.pyc
 bun.lockb
+
+# 本地備份 / 更新工作區（含 201MB tar、舊 business.db 備份、merge 殘檔；勿入庫）
+_update-workspace/
+.tmp/
 
 # OS
 .DS_Store

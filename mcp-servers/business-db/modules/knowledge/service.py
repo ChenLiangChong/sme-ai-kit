@@ -830,6 +830,16 @@ def get_context_summary(scope: str) -> str:
                     f"\n## 主管上報\n- {esc_pending} 筆待送出（flusher 投遞中）"
                 )
 
+        # 排程提醒推送失敗（reminder 派工器、決策 #237）：once 推不出去 → failed、靜默累積；
+        # 全權限層開機提醒（對照 escalation 的 count_stuck_escalations 接法）。
+        from shared.reminders import count_failed_reminders
+        _failed_rem = count_failed_reminders(db)
+        if _failed_rem:
+            sections.append(
+                f"\n## 排程提醒推送失敗（需處理）\n- {_failed_rem} 筆 once 提醒送不出"
+                "（收件人未加 OA 好友／token 失效；查 scheduled_reminders status='failed'）"
+            )
+
         # 待處理任務
         pending = db.execute(
             "SELECT id, title, assignee, priority, due_date FROM tasks "

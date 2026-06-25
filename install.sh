@@ -48,10 +48,6 @@ elif $IS_LINUX; then
         sudo apt-get update -qq && sudo apt-get install -y -qq ngrok
     }
     command -v expect &>/dev/null || sudo apt-get install -y -qq expect
-    # bubblewrap = Claude Code 在 Linux 的 sandbox 後端：floored 層的 line-runtime-*.json 設
-    # sandbox.enabled + failIfUnavailable=true，缺 bwrap → 受限層 session fail-closed 起不來
-    # （macOS 用內建 sandbox-exec、不需此套件，故只在 Linux 段裝）。
-    command -v bwrap &>/dev/null || sudo apt-get install -y -qq bubblewrap
     if command -v npm &>/dev/null && ! command -v claude &>/dev/null; then
         npm install -g @anthropic-ai/claude-code
     fi
@@ -155,6 +151,7 @@ if [[ ! -f "$LOCAL_SETTINGS" ]]; then
     "allow": [
       "Bash(bash install.sh)",
       "Bash(bash start.sh)",
+      "Bash(bash start-force.sh)",
       "Bash(./.venv/bin/python3:*)",
       "Bash(./.venv/bin/pip:*)",
       "Read(./data/**)",
@@ -184,23 +181,30 @@ fi
 # 主管上報「品質層」是 business-db commit 後即時起的 claude -p；此 cron 是「保證層」：
 # 每 2 分確定性掃 pending_escalations 補送 claude -p 漏的/掛的（status 協調、retry/failed 終態）。
 
-step "安裝上報投遞保證層（cron flusher）"
+step "安裝 cron 投遞器（上報保證層 + 排程提醒派工器）"
 
-FLUSH_MARKER="SME-AI-Kit escalation flusher"
+# 兩支 OS-cron 笨投遞器：flush_escalations（上報保證層 #177）+ reminder_dispatcher（排程提醒派工器 #237）。
+# 冪等以「腳本路徑」判重（非 marker）→ 與 tools/cron/install-cron.sh 共存、重跑都不會雙裝。
 FLUSH_LINE="*/2 * * * * SME_DB_PATH=$DB $VENV/bin/python3 $ROOT/mcp-servers/business-db/flush_escalations.py >> $ROOT/data/flush.log 2>&1"
+REMINDER_LINE="*/2 * * * * SME_DB_PATH=$DB $VENV/bin/python3 $ROOT/mcp-servers/business-db/reminder_dispatcher.py >> $ROOT/data/reminder.log 2>&1"
 if command -v crontab >/dev/null 2>&1; then
-    if crontab -l 2>/dev/null | grep -q "$FLUSH_MARKER"; then
-        ok "cron flusher 已存在、不重複加"
-    elif ( crontab -l 2>/dev/null; echo "# === $FLUSH_MARKER（保證層）：每 2 分掃 pending_escalations 確定性投遞 ==="; echo "$FLUSH_LINE" ) | crontab -; then
-        ok "cron flusher 已安裝（每 2 分、log: data/flush.log）"
+    _cron_added=0
+    if ! crontab -l 2>/dev/null | grep -qF 'flush_escalations.py'; then
+        ( crontab -l 2>/dev/null; echo "# === SME-AI-Kit 上報保證層：每 2 分確定性投遞 pending_escalations ==="; echo "$FLUSH_LINE" ) | crontab - && _cron_added=1
+    fi
+    if ! crontab -l 2>/dev/null | grep -qF 'reminder_dispatcher.py'; then
+        ( crontab -l 2>/dev/null; echo "# === SME-AI-Kit 排程提醒派工器：每 2 分投遞到期 scheduled_reminders ==="; echo "$REMINDER_LINE" ) | crontab - && _cron_added=1
+    fi
+    if [[ "$_cron_added" == 1 ]]; then
+        ok "cron 投遞器已安裝/補齊（flush + reminder，每 2 分；log: data/flush.log、data/reminder.log）"
     else
-        err "crontab 寫入失敗、請手動加一行：$FLUSH_LINE"
+        ok "cron 投遞器已存在（flush + reminder）、不重複加"
     fi
     if [[ "$IS_LINUX" == true ]] && ! pgrep -x cron >/dev/null 2>&1 && ! pgrep -x crond >/dev/null 2>&1; then
-        err "cron daemon 沒在跑 → 保證層不會觸發。啟動：sudo service cron start（WSL 建議 systemctl enable --now cron）"
+        err "cron daemon 沒在跑 → 投遞器不會觸發。啟動：sudo service cron start（WSL 建議 systemctl enable --now cron）"
     fi
 else
-    err "找不到 crontab → 上報只剩 claude -p 品質層、無確定性保證層；請手動定時跑 mcp-servers/business-db/flush_escalations.py"
+    err "找不到 crontab → 上報/提醒無確定性保證層；請手動定時跑 flush_escalations.py 與 reminder_dispatcher.py"
 fi
 
 # ── 完成 ──────────────────────────────────────────────

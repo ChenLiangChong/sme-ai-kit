@@ -46,6 +46,13 @@ ESCALATION_ADMIN_TOOLS = {
     "list_pending_escalations", "mark_escalation_sent",
 }
 
+# 排程提醒工具（派工器模式）—— 非全權限層一律移除：schedule_reminder 會定時推播到任意 LINE
+# 對象（broadcast-ish），只該機密層/operator 排。confidential（full access）保留 → daemon 自助排程，
+# 不必每次喊老闆、也不必開 crontab 寫權限（不拆 sandbox 第一道牆）。
+REMINDER_ADMIN_TOOLS = {
+    "schedule_reminder", "cancel_reminder", "list_reminders",
+}
+
 # 向後相容引用 + 「financial_visibility=none（預設）」的完整移除集（= 改版前的清單）
 CONFIDENTIAL_ONLY_TOOLS = FINANCIAL_TOOLS | HR_TOOLS
 
@@ -92,7 +99,7 @@ def apply_floor_policy(mcp) -> list[str]:
     from shared.floor_map import get_floor_config
     cfg = get_floor_config(floor)
 
-    to_remove: set[str] = set(HR_TOOLS) | set(ESCALATION_ADMIN_TOOLS)  # 非全權限層：不碰 HR/員工 PII/請假 + 上報管理工具
+    to_remove: set[str] = set(HR_TOOLS) | set(ESCALATION_ADMIN_TOOLS) | set(REMINDER_ADMIN_TOOLS)  # 非全權限層：不碰 HR/員工 PII/請假 + 上報管理 + 排程提醒工具
     fv = (cfg.financial_visibility or "none").strip()
     if fv == "all":
         pass  # 會計層：保留全部財務工具（HR 仍移除）

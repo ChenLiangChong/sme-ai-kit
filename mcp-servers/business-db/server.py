@@ -452,6 +452,7 @@ from modules import knowledge as _knowledge_mod  # noqa: E402,F401
 from modules import leave as _leave_mod  # noqa: E402,F401
 from modules import notifications as _notifications_mod  # noqa: E402,F401
 from modules import orders as _orders_mod  # noqa: E402,F401
+from modules import reminders as _reminders_mod  # noqa: E402,F401
 from modules import settings as _settings_mod  # noqa: E402,F401
 from modules import snapshots as _snapshots_mod  # noqa: E402,F401
 from modules import tasks as _tasks_mod  # noqa: E402,F401
