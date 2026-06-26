@@ -11,7 +11,7 @@ import sqlite3
 from collections import OrderedDict, defaultdict
 from datetime import datetime, timedelta
 
-from shared.auth import _check_permission
+from shared.auth import _check_permission, _resolve_actor_label
 from shared.business_units import _validate_business_unit
 from shared.db import _now, get_db, transaction
 from shared.utils import _like_param
@@ -383,6 +383,59 @@ def update_rule(
         )
 
     return f"規則已更新：#{rule_id} → #{new_id}\n原因：{reason}" + related_warning
+
+
+# ============================================================
+# set_rule_confidential — 就地翻機密旗標（不 supersede、full-access only）
+# ============================================================
+
+def set_rule_confidential(
+    rule_id: int, confidential: bool, reason: str, actor_user_id: str
+) -> str:
+    """把既有規則的 confidential 旗標就地改掉（敏感度重分級）。
+    不動 content、不 supersede、不建新規則——翻機密只是 metadata 修正、不是新規則。
+
+    權限：敏感度重分級屬高風險，僅全權限層（operator／機密層）可用。
+    第一道牆＝floor_policy 已把本工具從非全權限層物理移除；這裡 is_full_access() 是
+    第二道防線（並擋 __unexpanded__ fail-closed）。
+    idempotent：已是目標值回 noop。
+    """
+    from shared.floor_policy import is_full_access
+    if not is_full_access():
+        return "ERROR: 變更規則機密等級僅限全權限層（機密層／operator）"
+
+    target = 1 if confidential else 0
+    with transaction() as db:
+        r = db.execute(
+            "SELECT id, title, category, confidential FROM business_rules WHERE id = ?",
+            (rule_id,),
+        ).fetchone()
+        if not r:
+            return f"ERROR: 找不到規則 #{rule_id}"
+
+        old = r["confidential"]
+        if old == target:
+            label = "機密" if target else "公開"
+            return f"規則 #{rule_id}「{r['title']}」已經是{label}，無需變更（noop）"
+
+        # in-place：只改 confidential，不動 content / superseded_by（不觸發 idx_rules_unique_active）
+        db.execute(
+            "UPDATE business_rules SET confidential = ? WHERE id = ?",
+            (target, rule_id),
+        )
+
+        actor = _resolve_actor_label(db, actor_user_id)
+        db.execute(
+            "INSERT INTO interaction_log "
+            "(actor, action, target_type, target_id, detail, business_unit) "
+            "VALUES (?,?,?,?,?,?)",
+            (actor, "rule_confidential_changed", "rule", rule_id,
+             f"confidential {old}→{target}（[{r['category']}] {r['title']}）；原因：{reason}",
+             None),
+        )
+
+    arrow = f"{'機密' if old else '公開'} → {'機密' if target else '公開'}"
+    return f"規則 #{rule_id}「{r['title']}」機密等級已變更：{arrow}\n原因：{reason}"
 
 
 # ============================================================
