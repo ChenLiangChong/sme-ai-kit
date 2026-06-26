@@ -148,21 +148,25 @@ def update_employee(
 
 
 def lookup_employee(name_or_line_id: str) -> str:
+    from shared.floor_policy import is_full_access
     db = get_db()
     try:
         emp = repository.get_employee_by_name_or_line(db, name_or_line_id)
         if not emp:
             return f"找不到員工：{name_or_line_id}"
         bu = emp["business_units"] if emp["business_units"] else "全部"
-        return (
+        out = (
             f"## {emp['name']}\n"
             f"- 角色：{emp['role']} | 權限：{emp['permissions']}\n"
             f"- 部門：{emp['department'] or '未設定'}\n"
             f"- 事業體：{bu}\n"
             f"- LINE：{'已綁定' if emp['line_user_id'] else '未綁定'}\n"
-            f"- 電話：{emp['phone'] or '未設定'}\n"
-            f"- 備註：{emp['notes'] or '無'}"
+            f"- 電話：{emp['phone'] or '未設定'}"
         )
+        # 備註可能含 HR 私下評語 / 個人狀況 → 只給全權限層；受限部門層隱藏（#171 審）
+        if is_full_access():
+            out += f"\n- 備註：{emp['notes'] or '無'}"
+        return out
     finally:
         db.close()
 

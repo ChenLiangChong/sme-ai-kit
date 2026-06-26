@@ -39,18 +39,20 @@ FINANCIAL_DANGER_TOOLS = {
 
 # HR 管理工具 —— 非全權限層一律移除（需 admin 權限或配額設定職責）
 # lookup_employee / list_employees 保留（LINE 路由辨識 + 員工通訊錄）
-# 員工自助請假工具保留（request_leave / cancel_leave / get_leave_request 等）
+# 員工自助請假 + 看誰請假保留（request_leave / cancel_leave / get_leave_request / list_leave_requests）
+# 但 list_pending_leave_requests（主管簽核佇列、含全員事由）＝管理工具、移除（#171 審）
 HR_ADMIN_TOOLS = {
     "register_employee", "update_employee",       # 寫入 HR，需 admin
     "register_leave_type", "set_leave_balance",   # 配額設定，HR 管理員
     "approve_leave", "reject_leave",              # 請假簽核，老闆/HR 才做
+    "list_pending_leave_requests",                # 主管簽核佇列（含全員事由）＝管理用、非員工自助
 }
 
 # 向後相容引用（外部若有 import HR_TOOLS / CONFIDENTIAL_ONLY_TOOLS）
 HR_TOOLS = HR_ADMIN_TOOLS | {
     "list_employees", "lookup_employee",
     "get_leave_balance", "request_leave", "cancel_leave",
-    "list_leave_requests", "list_pending_leave_requests", "get_leave_request",
+    "list_leave_requests", "get_leave_request",
 }
 
 # 主管上報管理工具（#9g）—— 非全權限層一律移除：部門層不該讀/標自己被上報的事。

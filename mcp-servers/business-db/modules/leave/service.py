@@ -552,6 +552,7 @@ def get_leave_request(leave_request_id: int) -> str:
 
     給失敗情境判讀使用：approve_leave / cancel_leave 被擋時、agent 用此 tool 看
     這筆 leave_request 現況，不要繞 sqlite。"""
+    from shared.floor_policy import is_full_access
     db = get_db()
     try:
         lr = repository.get_leave_request(db, leave_request_id)
@@ -563,7 +564,8 @@ def get_leave_request(leave_request_id: int) -> str:
         lines.append(f"- 假別：{lr['type_name']}（{lr['type_code']}）")
         lines.append(f"- 期間：{lr['start_date']} ~ {lr['end_date']}（{lr['days']:g} 天）")
         lines.append(f"- 狀態：{lr['status']}")
-        if lr["reason"]:
+        # 原因屬個人隱私 → 只給全權限層（#171 審）；受限層看得到誰/何時/狀態即可
+        if lr["reason"] and is_full_access():
             lines.append(f"- 原因：{lr['reason']}")
         if lr["approval_id"]:
             lines.append(f"- 對應審核：#{lr['approval_id']}")
@@ -603,6 +605,7 @@ def list_leave_requests(
             f"（got {status!r}）"
         )
 
+    from shared.floor_policy import is_full_access
     db = get_db()
     try:
         rows = repository.list_requests(
@@ -630,12 +633,14 @@ def list_leave_requests(
             "（" + " / ".join(title_parts) + "）" if title_parts else ""
         )
 
+        # 原因屬個人隱私 → 只給全權限層（#171 審）；受限層保留誰/何時/狀態供排班協調
+        fa = is_full_access()
         lines = [f"## 請假紀錄{title_label}（最新 {len(rows)} 筆）"]
         for r in rows:
             approval_label = (
                 f"｜審核 #{r['approval_id']}" if r["approval_id"] else ""
             )
-            reason_label = f"｜原因：{r['reason']}" if r["reason"] else ""
+            reason_label = f"｜原因：{r['reason']}" if (r["reason"] and fa) else ""
             lines.append(
                 f"- 請假 #{r['id']} {_format_employee_label(r)} "
                 f"{r['type_name']} {r['days']:g} 天"
