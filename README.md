@@ -14,10 +14,10 @@
 │   (多 OA 單 port)│                          │
 ├──────────────────┴──────────────────────────┤
 │              共用 SQLite DB                  │
-│     business-db MCP (73 tools)              │
+│     business-db MCP (80+ tools)             │
 │   + 多事業體（business_entities）支援        │
 ├─────────────────────────────────────────────┤
-│   Skills: company-ops (13) + social-media   │
+│   Skills: company-ops + social-media (+更多) │
 └─────────────────────────────────────────────┘
 ```
 
@@ -28,7 +28,12 @@
 - **多事業體支援**：一套部署可同時服務多個品牌／部門，資料按 `business_unit` 區隔
 - **多 LINE OA**：單一 process 透過路徑路由處理多個 LINE Official Account，每個 OA 對應一個事業體
 - **反捏造原則**：老闆的規則必須附上原話 (`source_quote`)，AI 推斷的規則標記為 `inferred`
-- **HITL 審核**：超過審核門檻的金額、對外行銷訊息、批次客戶變動都會先進核准流程
+- **HITL 審核**：超過審核門檻的金額、對外行銷廣播、跨多步驟的批次資料變動、請假簽核都會先進核准流程；gate 比對 `resume_params`、單次消費（`consumed_at`）、逾 72h 自動過期，老闆可在 LINE 直接回「核准 #N / 駁回 #N」跨 session 放行
+- **部門安全層（floor）**：每個 LINE / CLI session 可帶 `SME_FLOOR` 標示部門身份，兩道獨立的牆（檔案 sandbox + business-db MCP 工具白名單）依 `data/floor-map.json` 自動移除該層不該用的工具（HR 管理、刪帳、上報管理、機密規則切換、排程提醒等），財務工具去留由各層 `financial_visibility` 控制；敏感欄位（員工備註、請假原因）對受限層做欄位級遮蔽。未設層＝全權限（開發 / 老闆層）。威脅模型是防內部員工越權、非防駭客級注入
+- **主動上報（escalation）**：高風險或越權動作（記帳超門檻、刪帳、員工權限變動、訂單已出貨被取消、品檢未過、審核待簽）在執行那支工具的同一交易內硬接線寫入待投遞佇列（AI agent 跳不過），由 cron 保證層 / `claude -p` 品質層 / in-session 即時層三路投遞主動通知老闆。只通知、不擋動作
+- **排程提醒**：`schedule_reminder` 排定一次性或週期性（daily / weekdays / weekly / monthly）提醒，由 OS cron 派工器以 at-most-once 投遞到指定 LINE 對象（錯過時點不補發、不洗版）；`list_reminders` / `cancel_reminder` 管理。屬全權限層工具（受限部門層不可排）
+- **請假管理**：假別配額、員工自助請假、HITL 簽核（假別 `requires_approval=true` 時 `request_leave` 自動建 approval）、餘額查詢與待簽佇列
+- **知識機密軸**：規則 / 決策可標記 `confidential`，非全權限部門層的 `query_knowledge` 自動過濾機密內容；`set_rule_confidential` 可事後調整可見度（僅全權限層）
 
 ## 成本
 
@@ -115,7 +120,8 @@ LINE 設定完成後，Claude 偵測到空 DB，自動進入首次訪談：
 4. 商品庫存 SKU
 5. 品牌語氣
 6. 營運規則 / SOP
-7. LINE 綁定（員工掃 QR code 加好友）
+7. 假別與年度配額（特休 / 病假 / 事假，是否需簽核）
+8. LINE 綁定（員工掃 QR code 加好友）
 
 ---
 
@@ -126,14 +132,17 @@ sme-ai-kit/
 ├── install.sh              # 安裝腳本
 ├── start.sh                # daemon 啟動（expect 自動確認）
 ├── CLAUDE.md               # AI 助理操作手冊
+├── AGENTS.md               # 同 CLAUDE.md（Codex / Cursor / Gemini 讀，.githooks 自動同步）
 ├── mcp-servers/
-│   ├── business-db/        # 企業資料庫 MCP (73 tools)
-│   ├── line-channel/       # LINE Channel MCP (4 tools, 支援多 OA)
-│   └── social/             # 社群媒體 MCP (19 tools)
+│   ├── business-db/        # 企業資料庫 MCP（工具清單見 modules/*/tools.py）
+│   ├── line-channel/       # LINE Channel MCP（reply / mark_read，支援多 OA）
+│   └── social/             # 社群媒體 MCP（FB / IG / Threads，工具見 server）
 ├── .claude/
 │   ├── skills/
-│   │   ├── company-ops/    # 公司營運（13 模組）
-│   │   └── social-media/   # 社群行銷（22 模組）
+│   │   ├── company-ops/    # 公司營運（多模組，見 SKILL.md）
+│   │   ├── social-media/   # 社群行銷（多模組，見 SKILL.md）
+│   │   ├── sme-design/     # 報告 / 簡報 / battlecard 設計（HTML→PPT）
+│   │   └── docx/ pdf/ pptx/ xlsx/   # 文件處理通用 skill
 │   └── settings.local.json
 ├── data/                   # DB + 媒體（gitignored）
 │   ├── business.db
