@@ -104,7 +104,7 @@ DB 支援的訂單狀態：`pending` | `confirmed` | `shipped` | `delivered` | `
    )
    ```
    - `create_order` 會自動計算金額、套用客戶折扣、檢查審核門檻
-   - 超過門檻 → `create_order` **系統自建審核並上報簽核人**（決策 #26、比照記帳 #183），**訂單不會建立**、回「已自動建立審核 #N」。**不要 agent 手寫 `create_approval`**（系統用完整 `resume_params` 自建，確保核准後 gate 一字不差比對得過）。核准後由全權限 / 業務層帶 `approved_id` 呼叫 `create_order`，系統依審核鎖定的原始參數（customer_id / items_json / business_unit）消費、無需人工重填（gate-backed HITL A 類，見 CLAUDE.md〈HITL 審核〉）；通知主管由系統上報、非自行 reply
+   - 超過門檻 → `create_order` **系統自建審核並上報簽核人**（系統自建審核、比照記帳機制），**訂單不會建立**、回「已自動建立審核 #N」。**不要 agent 手寫 `create_approval`**（系統用完整 `resume_params` 自建，確保核准後 gate 一字不差比對得過）。核准後由全權限 / 業務層帶 `approved_id` 呼叫 `create_order`，系統依審核鎖定的原始參數（customer_id / items_json / business_unit）消費、無需人工重填（gate-backed HITL A 類，見 CLAUDE.md〈HITL 審核〉）；通知主管由系統上報、非自行 reply
    - 門檻內 → 訂單直接建立，回傳成功訊息和下一步指引
 
 5. **通知**
@@ -329,7 +329,7 @@ order-ops 只負責收款操作（`record_payment`），不重複定義催收時
 
 ### Do
 - 出貨前必須通過 QC（`qc_order`），不可跳過
-- 大額訂單超門檻時 `create_order` **系統自建審核並上報**（決策 #26、比照 #183）、**訂單不建立**、回「已自動建立審核 #N」——不要手寫 `create_approval`；核准後帶 `approved_id` 重呼 `create_order`、系統依鎖定參數消費（見第二節第 4 步）
+- 大額訂單超門檻時 `create_order` **系統自建審核並上報**（比照記帳的自建審核機制）、**訂單不建立**、回「已自動建立審核 #N」——不要手寫 `create_approval`；核准後帶 `approved_id` 重呼 `create_order`、系統依鎖定參數消費（見第二節第 4 步）
 - 取消/退貨用 `cancel_order`（自動回補庫存 + 作廢帳款）
 - 退貨後如品質不OK，手動 `update_stock(sku='退貨品 SKU', quantity_change=-退貨數量, reason='退貨損耗')` 扣回
 - 每個 tool 回傳值都有「下一步」提示，跟著做即可
@@ -368,7 +368,7 @@ order-ops 只負責收款操作（`record_payment`），不重複定義催收時
 
 - **fulfill_order 會自動扣庫存**，不要另外手動 `update_stock`
 - **出貨前必須過 QC**，不可跳過
-- **大額訂單超門檻時 `create_order` 系統自建審核並上報**（決策 #26、比照 #183、gate-backed HITL A 類）、訂單不建立、回「已自動建立審核 #N」——不要手寫 `create_approval`；核准後帶 `approved_id` 重呼 `create_order`，系統依鎖定的原始參數消費（見第二節第 4 步及 CLAUDE.md〈HITL 審核〉A 類）
+- **大額訂單超門檻時 `create_order` 系統自建審核並上報**（gate-backed HITL A 類）、訂單不建立、回「已自動建立審核 #N」——不要手寫 `create_approval`；核准後帶 `approved_id` 重呼 `create_order`，系統依鎖定的原始參數消費（見第二節第 4 步及 CLAUDE.md〈HITL 審核〉A 類）
 - 所有訂單操作建議 `log_interaction` 記錄
 - 退貨入庫**需要手動** `update_stock` 回補（fulfill_order 的反向操作不自動）
 - 客戶合約、PO 等文件用 `add_attachment(target_type='order')` 保存

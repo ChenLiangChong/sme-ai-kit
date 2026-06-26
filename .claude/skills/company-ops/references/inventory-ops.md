@@ -113,7 +113,7 @@ SKU 已存在時只更新數量，忽略其他參數。
 
 1. `check_stock` 確認目前庫存
 2. 計算進貨金額（數量 × unit_cost）
-3. 進貨金額超門檻**不要自己 `create_approval`**：記帳走第 5 步的 `record_transaction`、超門檻時它會**系統自建審核 + 上報簽核人**（決策 #183，同 accounting-ops），門檻內直接記。通知主管走上報機制、非自行 reply
+3. 進貨金額超門檻**不要自己 `create_approval`**：記帳走第 5 步的 `record_transaction`、超門檻時它會**系統自建審核 + 上報簽核人**（同 accounting-ops），門檻內直接記。通知主管走上報機制、非自行 reply
 4. `update_stock(sku, +數量, 原因)`
    > 注意：`update_stock` 的回傳值會包含「下一步：」提示，列出建議的 `record_transaction` 參數（unit_cost 已知時含計算好的 `amount`）。**一定要記帳**，否則進貨金額不會出現在帳務中。
 5. 同時記帳（跨模組串接 → accounting-ops；`record_transaction` 屬財務工具，floored 非財務層被移除、記不了帳屬正常→交給有財務工具的層或全權限層，見 line-comms 第六節）：
@@ -227,7 +227,7 @@ SKU 已存在時只更新數量，忽略其他參數。
         )
 ```
 
-> `record_transaction` 的 `type` / `amount` / `category` 為必填。報廢損失的 `amount` 不要憑感覺填——用 `check_stock` 取得 `unit_cost`，金額 = 報廢數量 × unit_cost。金額超門檻時 `record_transaction` 會系統自建審核並上報簽核人（決策 #183，同 accounting-ops），勿自行 `create_approval`。
+> `record_transaction` 的 `type` / `amount` / `category` 為必填。報廢損失的 `amount` 不要憑感覺填——用 `check_stock` 取得 `unit_cost`，金額 = 報廢數量 × unit_cost。金額超門檻時 `record_transaction` 會系統自建審核並上報簽核人（同 accounting-ops），勿自行 `create_approval`。
 
 ### 呆滯品資金佔用
 
@@ -330,7 +330,7 @@ SKU 已存在時只更新數量，忽略其他參數。
 
 如果 context 被壓縮：
 1. `get_context_summary(scope='full')` — 查看「庫存警報」區塊
-2. `low_stock_alerts()` — 列出低於安全庫存的品項（**完整清單僅全權限層**；floored 非全權限層拿到的是精簡視圖[#166]、完整盤點交全權限層，見 CLAUDE.md〈部門安全層（floor）與兩道牆〉）
+2. `low_stock_alerts()` — 列出低於安全庫存的品項（**完整清單僅全權限層**；floored 非全權限層拿到的是精簡視圖、完整盤點交全權限層，見 CLAUDE.md〈部門安全層（floor）與兩道牆〉）
 3. 對每個警報品項 `check_stock(sku)` 取得詳情
 4. 根據 ABC 分級和補貨點判斷：立即通知/本週補貨/本月補貨
 

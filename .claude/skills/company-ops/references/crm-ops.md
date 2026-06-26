@@ -278,7 +278,7 @@ NPS = 推薦者% - 批評者%
 1. `reply(channel_id='<收到客訴訊息的 channel_id>', chat_id='<客戶 chat_id>', text='收到您的反映，我們非常重視，正在處理中。')`（回同一個收到客訴的 OA、不要寫死 `default`、見 line-comms 通知頻道選擇）
 2. `log_interaction(actor='AI助理', action='complaint', target_type='customer', target_id=<客戶 customer_id>, detail='<客訴內容原文>')`（`actor`/`action` 為必填）
 3. `query_knowledge(question='<問題描述>', category='customer_service')` — 查處理規則
-4. 退款：直接 `record_transaction(type='expense', amount=<退款金額，取原訂單/原收款 transaction 的實付額、勿自行推算>, category='refund', description='退款給<客戶名>（原訂單 #<order_id>）')`——`type`/`amount`/`category` 為必填；超門檻它會用完整 `resume_params` 自動建審核並上報（決策 #183）、**勿自行 `create_approval`**；記帳完成後 LINE 通知客戶
+4. 退款：直接 `record_transaction(type='expense', amount=<退款金額，取原訂單/原收款 transaction 的實付額、勿自行推算>, category='refund', description='退款給<客戶名>（原訂單 #<order_id>）')`——`type`/`amount`/`category` 為必填；超門檻它會用完整 `resume_params` 自動建審核並上報、**勿自行 `create_approval`**；記帳完成後 LINE 通知客戶
    - **退款記帳受 floor `financial_visibility` 限制**：`general` / `external` 業務層**沒有 `record_transaction`**、記不了帳。此時不要自己想辦法繞，把退款交給**有財務工具的層**（會計層 / 全權限層）執行。跨層誰執行、核准後一條龍見 line-comms 第六節〈執行模型〉。
 
 ## 中斷恢復
@@ -293,7 +293,7 @@ NPS = 推薦者% - 批評者%
 ## 十、注意事項
 
 - 群發行銷一律走 HITL 審核（`create_approval` B 類 manual broadcast、見第四節）；建審核當下即上報簽核人。
-  - **流程上**核准者應為 admin / 主管；但**系統未對「誰能 resolve」全面 enforce**——`resolve_approval` 在非全權限（floored）層才要求 verified manager 以上身份（決策 #24/#180），operator / 全權限層的脈絡不強制 admin。真正擋越權看不該看的是 **floor gate**（HR / 財務工具在 floored 層被物理移除）、不是這條注意事項。
+  - **流程上**核准者應為 admin / 主管；但**系統未對「誰能 resolve」全面 enforce**——`resolve_approval` 在非全權限（floored）層才要求 verified manager 以上身份，operator / 全權限層的脈絡不強制 admin。真正擋越權看不該看的是 **floor gate**（HR / 財務工具在 floored 層被物理移除）、不是這條注意事項。
 - 單筆查詢不需要核准
 - 客戶資料修改建議 `log_interaction` 留痕（非系統強制 enforce）
 - 所有行銷訊息先過 brand-voice 模組

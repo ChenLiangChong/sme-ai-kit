@@ -167,7 +167,7 @@ LINE 用戶傳送的媒體會自動下載到本地：
 
 ## 四、群組管理
 
-> **權威來源：規則 #32「LINE 群組訊息路由」+ 規則 #33「新群組登入 SOP」**
+> **權威來源：「LINE 群組訊息路由」與「新群組登入 SOP」兩條規則**
 > 本節是快速查閱版，完整決策樹與安全邊界請查：
 > - `query_knowledge(question='LINE 群組訊息路由')`
 > - `query_knowledge(question='新群組登入 SOP')`
@@ -186,7 +186,7 @@ LINE MCP server（`line-channel/server.ts` L662-675）已經：
 | 類型 | 說明 | 回覆策略 |
 |------|------|---------|
 | `work` | 公司內部工作群 | Boss 白名單動作關鍵字觸發；其他人 @AI 觸發；對外永遠 HITL |
-| `customer` | 客戶/經銷商群 | 套品牌語氣（規則 #11-#13）；詢價/客訴立即通知內勤 |
+| `customer` | 客戶/經銷商群 | 套品牌語氣；詢價/客訴立即通知內勤 |
 | `supplier` | 供應商群 | 進貨/交期追蹤；不主動 |
 | `marketing` | 行銷推廣群 | 全 HITL，草擬後等核准再發 |
 | `other` | 測試群 / 暫不分類 | **完全沉默**（即使被 @ 也不回），僅被動記錄 |
@@ -201,7 +201,7 @@ LINE MCP server（`line-channel/server.ts` L662-675）已經：
 收到群組訊息（已保證被 @ 過）
   ↓
 Step 1: list_line_groups 或查 line_groups 表
-  ├─ 未登錄 → 走規則 #33（沉默 + 上報老闆，見下方 SOP）
+  ├─ 未登錄 → 走新群組登入 SOP（沉默 + 上報老闆，見下方）
   └─ 已登錄 → Step 2
 
 Step 2: 按 group_type
@@ -220,9 +220,9 @@ Step 4: 需審核的對外動作走 HITL（超門檻記帳/訂單、對外行銷
 
 > **「上報老闆」的執行方式統一**：有對外 reply 能力的層才直接 reply 老闆；受限部門 session 走上報（escalation）機制 / 由全權限層處理，**不要自己撈 `role=boss` user_id 去 push**（與本檔第六節執行模型一致、見 CLAUDE.md〈上報（escalation）機制〉）。
 >
-> **Step 4 對外動作 HITL**：記帳超門檻時直接 `record_transaction`、它會**在同一 tx 內系統自建審核並上報簽核人**（決策 #183、勿自行 `create_approval`）；對外行銷廣播走 `manual_broadcast`（HITL B 類）；建立審核**當下**就會通知簽核人（escalation `approval_pending`）。核准後的執行流程見第六節。
+> **Step 4 對外動作 HITL**：記帳超門檻時直接 `record_transaction`、它會**在同一 tx 內系統自建審核並上報簽核人**（勿自行 `create_approval`）；對外行銷廣播走 `manual_broadcast`（HITL B 類）；建立審核**當下**就會通知簽核人（escalation `approval_pending`）。核准後的執行流程見第六節。
 
-### 新群組登入 SOP（規則 #33 摘要）
+### 新群組登入 SOP（摘要）
 
 > 以下「通知老闆」的送達方式與決策樹、第六節一致：有對外 reply 能力的層直接 DM 老闆；受限部門 session 走上報（escalation）/ 全權限層，不自撈 boss user_id（見 CLAUDE.md〈上報（escalation）機制〉）。
 
@@ -296,7 +296,7 @@ Phase 1 用文字回覆（不用 Postback 按鈕）：
 - Claude 解析 → `resolve_approval(approval_id=123, decision='approved', decided_by='主管')`
 - **接續執行真正的 action**：從 approval.detail 取出 `resume_action` 與 `resume_params`，呼叫對應 tool（gate-backed：`approve_leave` / `record_transaction` / `create_order`；或 manual_ prefix 走人工多步驟），完成後 approval 才會被 consume（HITL gate 強制）
 - **裸「核准」沒帶編號**：不要猜、不要隨便撈一筆 pending approval 套上去。先 `get_context_summary` / 查 waiting approvals：剛好一筆 → 回報「您是要核准 #N（內容…）嗎？」確認後再核；多筆 → 列出來問哪一筆；零筆 → 告知沒有待核項目。
-- **簽核身份驗證（#24）**：`resolve_approval` 在非全權限層會驗操作者（須 verified manager 以上、且本人 LINE 操作）。被回「無權簽核」**不是系統錯誤**——是該操作者權限不足或非本人，照實回報、不要繞。
+- **簽核身份驗證**：`resolve_approval` 在非全權限層會驗操作者（須 verified manager 以上、且本人 LINE 操作）。被回「無權簽核」**不是系統錯誤**——是該操作者權限不足或非本人，照實回報、不要繞。
 - **執行接續可能要換層（重要）**：若你這層沒有該 `resume_action` 的工具（如部門層被移除了 `record_transaction` / 財務工具），`resolve_approval` 仍會成功（核准是決策、不需財務工具），但「真正記帳 / 下單」要由**有該工具的層**（會計層 / 全權限層）或**原本建立審核的 session** 接手。此時回報老闆「審核 #N 已核准，記帳將由會計層執行」，不要假裝自己記了。
 - 詳細的 gate 行為、`resume_params` 一致性驗證、單次消費規則見 **CLAUDE.md HITL 章節**
 
@@ -314,7 +314,7 @@ Phase 1 用文字回覆（不用 Postback 按鈕）：
 
 #### 2. 兩 session 拓樸
 
-- **發起/建審核的 session**：記帳一律直接 `record_transaction`——超門檻時它**在同一 tx 內自建審核並上報簽核人**（決策 #183、勿自行 `create_approval`）。大額 `create_order` 目前仍由 agent 先 `create_approval`（待後續比照 #183 收斂）。
+- **發起/建審核的 session**：記帳一律直接 `record_transaction`——超門檻時它**在同一 tx 內自建審核並上報簽核人**（勿自行 `create_approval`）。大額 `create_order` 目前仍由 agent 先 `create_approval`（待後續收斂）。
 - **執行的 session**：真正 `record_transaction` 的地方**必須有財務工具**——一個 floor 有沒有財務工具**取決於 floor-map 的 `financial_visibility`**：`confidential`（全權限）一定有；設成 `financial_visibility='all'` 的部門層（如專責記帳的會計層）也有；預設的 `general` 層**沒有**（能 `resolve_approval` 但記不了帳）。（註：`create_order` 不在 floor 移除清單、任何層都呼得到，只是超門檻要先帶核准的 `approved_id`、不像 `record_transaction` 受 `financial_visibility` gate。）
 - ⇒ 核准後的記帳要落在「有財務工具」的 session。最穩的是 `confidential` 全權限層（老闆所在、見第 4 點路由）；若部署把會計層設成 `financial_visibility='all'`，該層在審核核准後也能自行執行。
 

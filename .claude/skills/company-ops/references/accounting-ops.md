@@ -15,12 +15,12 @@
 
 1. **一律直接 `record_transaction(...)`（不帶 `approved_id`）**——不要自己預判門檻、**不要自己 `create_approval`**。門檻分流由 record_transaction 內部處理：
    - **門檻內** → 直接記帳、回「帳目 #N」。
-   - **超門檻** → 系統自動用完整 `resume_params` 建審核 + 上報簽核人、回「已建審核 #N」（決策 #183：detail 由系統自建、agent 不手寫，確保核准後 gate 一字不差比對得過）。
+   - **超門檻** → 系統自動用完整 `resume_params` 建審核 + 上報簽核人、回「已建審核 #N」（detail 由系統自建、agent 不手寫，確保核准後 gate 一字不差比對得過）。
 2. **核准後執行**：簽核人核准後（LINE 回「核准 #N」或全權限層 `resolve_approval`），由**全權限層 session** 從 approval 取鎖定的 `resume_params` 呼叫 `record_transaction(approved_id=N, ...)` 完成記帳（見 `line-comms.md` 執行模型）。
 3. 門檻設定：`update_company(approval_threshold=金額)`。
 4. 回報：「已記錄 {類型} NT${金額} [{分類}]」。
 
-**注意** 決策 #183 的重點轉變：**絕不要自己 `create_approval` 來記帳**。舊流程要求「主動先建審核」會讓 agent 手寫不完整的 `resume_params`（少了 gate 要的欄位）而被擋——現在一律交給 `record_transaction` 自建、agent 不碰 detail。
+**注意** 這裡的重點轉變：**絕不要自己 `create_approval` 來記帳**。舊流程要求「主動先建審核」會讓 agent 手寫不完整的 `resume_params`（少了 gate 要的欄位）而被擋——現在一律交給 `record_transaction` 自建、agent 不碰 detail。
 
 > 詳細的 HITL gate 行為（`resume_params` 一字不差驗證、`consumed_at` 單次消費、過期保護、ERROR 判讀）統一寫在 **CLAUDE.md HITL 章節**。本檔只列「記帳場景什麼時候要走 HITL」。
 > 重點：核准後**必須**從 approval 取出原始 `resume_params` 再呼叫 `record_transaction(approved_id=N)`，不要從對話脈絡重新推導金額或事業體，否則會被 gate 擋下。
@@ -96,7 +96,7 @@
 - 「最近的支出」→ `list_transactions(type='expense')`
 - 修帳：`update_transaction(transaction_id=帳目ID, category='正確分類', business_unit='正確事業體')` — 第一參數是 `transaction_id`；修正分類、事業體、狀態等欄位（金額不可改，需刪除重建）
 - 刪帳：`delete_transaction(transaction_id=帳目ID, reason='原因', actor_user_id='')` — 第一參數是 `transaction_id`，必須有原因。
-  - **權限：需 `manager` 以上（#10 已落實）**：floored session 的 `actor_user_id` 由系統取 verified `user_id`（agent 自填無效、非 manager / 未驗證身份擋下），audit log 記真實操作者名（不再 `actor='system'`）；operator（無 `SME_FLOOR`、空 actor）放行＝全權限路徑（設計如此、威脅模型只防 agent 路徑越權）。另有 floor gate 硬牆（財務工具在 floored 非財務層被物理移除）。
+  - **權限：需 `manager` 以上（已落實）**：floored session 的 `actor_user_id` 由系統取 verified `user_id`（agent 自填無效、非 manager / 未驗證身份擋下），audit log 記真實操作者名（不再 `actor='system'`）；operator（無 `SME_FLOOR`、空 actor）放行＝全權限路徑（設計如此、威脅模型只防 agent 路徑越權）。另有 floor gate 硬牆（財務工具在 floored 非財務層被物理移除）。
   - **刪帳會自動上報主管**（escalation `transaction_deleted` 觸發、系統蓋章通知，見 CLAUDE.md〈上報（escalation）機制〉）；屬不可逆動作。
 
 ---
@@ -260,7 +260,7 @@
 record_transaction(type='expense', amount=18500, category='insurance', description='勞保-雇主負擔（{月份} 繳款單）', transaction_date='<繳款日 YYYY-MM-DD>')
 record_transaction(type='expense', amount=9200, category='insurance', description='健保-雇主負擔（{月份} 繳款單）', transaction_date='<繳款日 YYYY-MM-DD>')
 ```
-（超門檻時 `record_transaction` 自建審核，不要自己 `create_approval`——決策 #183，見第一節。）
+（超門檻時 `record_transaction` 自建審核，不要自己 `create_approval`——見第一節。）
 
 ### 重要稅務時程
 
@@ -348,7 +348,7 @@ agent 在啟動 readout / 月結時依上表自行提醒（系統僅 `_date_remi
 ## Do's and Don'ts
 
 ### Do
-- 金額超過 `approval_threshold` 時，一律直接 `record_transaction`、由它自建審核——**不要自己 `create_approval`**（決策 #183）
+- 金額超過 `approval_threshold` 時，一律直接 `record_transaction`、由它自建審核——**不要自己 `create_approval`**
 - 收據看不清楚的欄位直接問，不要猜
 - 金額一律用 NT$ + 千位逗號（如 NT$12,345）
 - 分類完一律告知讓使用者確認
@@ -357,7 +357,7 @@ agent 在啟動 readout / 月結時依上表自行提醒（系統僅 `_date_remi
 
 ### Don't
 - 不要在沒確認金額的情況下記帳
-- 刪帳需 `manager` 以上（#10 已落實：floored 取 verified actor 驗權 + audit 具名；operator 全權限路徑放行；另有 floor gate 硬牆）；agent 不應替 basic 權限者執行刪帳
+- 刪帳需 `manager` 以上（已落實：floored 取 verified actor 驗權 + audit 具名；operator 全權限路徑放行；另有 floor gate 硬牆）；agent 不應替 basic 權限者執行刪帳
 - 不要猜測收據上看不清楚的數字
 - 不要做複式簿記或電子發票（Phase 1 不支援）
 - 不要給確定性的稅務建議
@@ -393,7 +393,7 @@ agent 在啟動 readout / 月結時依上表自行提醒（系統僅 `_date_remi
 ## 十二、注意事項
 
 - 帳務極敏感，每次操作都 log_interaction
-- 刪帳需 `manager` 以上（#10 已落實：floored verified actor 驗權 + audit 具名；operator 放行；另有 floor gate 硬牆，詳見第三節刪帳說明）
+- 刪帳需 `manager` 以上（已落實：floored verified actor 驗權 + audit 具名；operator 放行；另有 floor gate 硬牆，詳見第三節刪帳說明）
 - Phase 1 簡單收支，不做複式簿記
 - 電子發票 Phase 1 不做
 - 稅務建議附加：「詳細請諮詢記帳士」
