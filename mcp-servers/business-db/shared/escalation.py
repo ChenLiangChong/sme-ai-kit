@@ -189,6 +189,7 @@ def enqueue_escalation(
     actor_label: str = "",
     business_unit: str = "",
     channel_id=None,
+    target_user_id: str = "",
 ):
     """Caller-managed-tx：在觸發 service 自己的 with transaction() 內呼叫（接 db、不 commit、
     不可 nested）。寫一筆 pending_escalations + 並排一筆 interaction_log（稽核鏡像、同 tx）。
@@ -205,6 +206,9 @@ def enqueue_escalation(
             操作者自己的員工列、寫入後再反查會找不到 → 退回顯示內部 user_id；非空＝直接用、空＝走內部反查）
         business_unit: 觸發事件所屬事業體
         channel_id: 指定推送 OA（不給則由 BU 解析）
+        target_user_id: 指定收件人 line_user_id（如 deadline 承辦律師、Task E 提醒歸屬）。有效
+            （U+32hex）→ 用它；無效/未給 → 走 resolve_escalation_target 的 boss-ward coalesce
+            （fail-toward-有人收）。收件人只寫 target_line_user_id 欄、絕不污染 channel_id（OA 欄）。
     """
     if not is_escalation_enabled(db, event_type):
         return None
@@ -228,7 +232,12 @@ def enqueue_escalation(
         if erow and erow["name"]:
             actor = erow["name"]
 
-    tgt_uid, resolved_channel, tfloor = resolve_escalation_target(db, business_unit)
+    # 收件人（Task E）：caller 指定的 target_user_id（如 deadline 承辦律師）優先；無效/未給 → boss-ward
+    # coalesce（fail-toward-有人收）。channel + 兜底一律由 resolve 取；承辦律師資訊只進收件人欄、
+    # 絕不污染 channel_id（OA 欄、codex HIGH-2 既有護欄）。
+    fallback_uid, resolved_channel, tfloor = resolve_escalation_target(db, business_unit)
+    _override = (target_user_id or "").strip()
+    tgt_uid = _override if _looks_like_line_user_id(_override) else fallback_uid
     channel_id = channel_id or resolved_channel
 
     # 來源層蓋章（#27）：系統在 enqueue 當下讀 SME_FLOOR 寫死「觸發層」進 row，非靠 claude -p notifier

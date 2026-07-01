@@ -58,6 +58,13 @@ LINE_DATA_TOOLS = {
     "search_line_messages", "list_line_groups", "register_line_group",
 }
 
+# pleading 整合 token 管理（Task D）—— 非全權限層一律移除：bind/unbind 管的是「律師個人 pleading
+# token」＝完整律師身分密鑰，受限層不該綁定/解除/接觸（雙牆第一道；service 另有 is_full_access 第二道）。
+# 無 get 工具（密鑰永不經 MCP 回傳）。
+INTEGRATION_ADMIN_TOOLS = {
+    "bind_pleading_token", "unbind_pleading_token",
+}
+
 # legal-admin（律所）案件/時限工具 —— 含當事人名 / calc_trace / 機密案件。
 # SPEC §54：小所「預設不分層、全所共用一個視圖」→ MVP 不把整支工具從受限層移除
 # （移除整支會連非機密案件都看不到、過度收斂）。機密性走「機密軸」列級過濾：
@@ -118,7 +125,8 @@ def apply_floor_policy(mcp) -> list[str]:
 
     # 非全權限層：不碰 HR/員工 PII/請假 + 上報管理 + 全域控制設定 + 跨 OA LINE 資料
     to_remove: set[str] = (set(HR_TOOLS) | set(ESCALATION_ADMIN_TOOLS)
-                           | set(GLOBAL_CONTROL_TOOLS) | set(LINE_DATA_TOOLS))
+                           | set(GLOBAL_CONTROL_TOOLS) | set(LINE_DATA_TOOLS)
+                           | set(INTEGRATION_ADMIN_TOOLS))
     fv = (cfg.financial_visibility or "none").strip()
     if fv == "all":
         pass  # 會計層：保留全部財務工具（HR 仍移除）

@@ -458,6 +458,32 @@ check("legal(計算輸入蓋章): deadlines 有 compute_has_local_agent/court_re
        "compute_in_transit_override"} <= _dl_cols,
       detail=str(sorted(_dl_cols)))
 
+# 整合對應鍵（migration 020）：matters.pleading_case_id（nullable）+ partial index
+# 解耦：對應鍵只住 sme 側、pleading 零存 sme FK；NULL=未綁定純單機、有值=對應 pleading case_id。
+_m_cols = {r[1] for r in conn.execute("PRAGMA table_info(matters)")}
+check("legal(整合對應): matters 有 pleading_case_id 欄（migration 020）",
+      "pleading_case_id" in _m_cols, detail=str(sorted(_m_cols)))
+_idx_pcid = conn.execute(
+    "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_matters_pleading_case_id'"
+).fetchone()
+check("legal(整合對應): idx_matters_pleading_case_id 是 partial（WHERE pleading_case_id IS NOT NULL）",
+      bool(_idx_pcid) and "pleading_case_id" in (_idx_pcid[0] or "") and "NOT NULL" in (_idx_pcid[0] or ""))
+
+# pleading 整合 token 存放（migration 021、Task D）：employee_pleading_tokens 表 + FK CASCADE（離職清）
+_tk_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+check("legal(整合 token): employee_pleading_tokens 表已建（migration 021）",
+      "employee_pleading_tokens" in _tk_tables, detail=str(sorted(_tk_tables)))
+_tk_fks = conn.execute("PRAGMA foreign_key_list(employee_pleading_tokens)").fetchall()
+check("legal(整合 token): employee_pleading_tokens → employees FK ON DELETE CASCADE（離職自動清 token）",
+      len(_tk_fks) == 1 and _tk_fks[0][2] == "employees" and _tk_fks[0][6] == "CASCADE",
+      detail=f"fks={_tk_fks}")
+_tk_sql = conn.execute(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='employee_pleading_tokens'"
+).fetchone()
+check("legal(整合 token): token NOT NULL + CHECK(token<>'')（密鑰不可空、防 migration 日後改鬆）",
+      bool(_tk_sql) and "NOT NULL" in (_tk_sql[0] or "") and "token <> ''" in (_tk_sql[0] or ""),
+      detail=(_tk_sql[0][:120] if _tk_sql else "None"))
+
 # index 落地（含 partial WHERE status='pending'）
 lindexes = {r[0] for r in conn.execute(
     "SELECT name FROM sqlite_master WHERE type='index'"

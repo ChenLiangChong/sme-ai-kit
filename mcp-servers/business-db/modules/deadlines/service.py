@@ -91,6 +91,7 @@ def create_matter(
     has_local_agent: int,
     confidential: int,
     created_by: str,
+    pleading_case_id: str = "",
 ) -> str:
     if not title or not title.strip():
         return "ERROR: title（案由）不可為空"
@@ -119,6 +120,7 @@ def create_matter(
             confidential=1 if confidential else 0,
             business_unit=None,
             opened_at=_now(),
+            pleading_case_id=pleading_case_id.strip() or None,  # 整合對應鍵（解耦：只住 sme 側、nullable）
         )
         repository.insert_interaction_log(
             db,
@@ -202,11 +204,143 @@ def get_matter(matter_id: int) -> str:
             f"- 主辦律師：{m['lead_attorney'] or '未指派'}\n"
             f"- 當地代理人（§162但書）：{'是' if m['has_local_agent'] else '否'}\n"
             f"- 機密：{'是' if m['confidential'] else '否'}\n"
+            f"- pleading 案件對應：{m['pleading_case_id'] or '未綁定'}\n"
             f"- 建立時間：{m['created_at']}"
             f"{dl_str}"
         )
     finally:
         db.close()
+
+
+def link_matter_pleading(matter_id: int, pleading_case_id: str, linked_by: str = "") -> str:
+    """綁定 / 解除 matter ↔ pleading-manager case 對應鍵（整合對應鍵、只住 sme 側）。
+
+    pleading_case_id 給值＝綁定該 pleading case_id（不透明字串、sme 不解讀內部結構）；
+    空字串＝解除綁定（清成 NULL）——供 pleading 案件被刪後 sme 偵測回寫 404 時清理（graceful），
+    清掉後該 matter 回到純單機（不再回寫）。單向 sme→pleading、pleading 零存 sme FK（解耦鐵則）。
+    """
+    from shared.floor_policy import is_full_access
+
+    with transaction() as db:
+        m = repository.get_matter(db, matter_id)
+        # 機密軸 + 存在性洩漏防護（同 get_matter）：受限層對機密/不存在案件回相同泛化錯誤
+        if not m or (m["confidential"] and not is_full_access()):
+            return f"ERROR: 找不到案件 #{matter_id}"
+        _actor, _err = _writer_or_error(db, linked_by)  # fail-closed：未驗證拒寫（對齊 #10）
+        if _err:
+            return _err
+        new_val = pleading_case_id.strip() or None
+        repository.update_matter_pleading_case_id(db, matter_id, new_val)
+        repository.insert_interaction_log(
+            db,
+            actor=_actor or "system",
+            action="matter_pleading_linked" if new_val else "matter_pleading_unlinked",
+            target_type="matter",
+            target_id=matter_id,
+            detail=new_val or "（解除綁定）",
+            business_unit=None,
+        )
+    if new_val:
+        return f"案件 #{matter_id} 已綁定 pleading 案件：{new_val}"
+    return f"案件 #{matter_id} 已解除 pleading 綁定（回純單機、不再回寫）"
+
+
+# ───────────── pleading 整合 token（Task D；密鑰、雙牆、無讀回）─────────────
+
+def bind_pleading_token(employee_name: str, token: str, bound_by: str = "") -> str:
+    """綁定某律師的 pleading 個人 token（整合回寫用、§127）。**全權限層專屬**（密鑰、雙牆：
+    floor 已物理移除受限層 + 此處 is_full_access 第二道）。token 不回顯、不寫進 interaction_log。
+
+    provisioning 應在 admin host 本機操作、**勿經 LINE 明文貼 token**（否則落 LINE 訊息庫
+    + search_line_messages 撈得到＝洩密、見 pleading-sync.md）。
+    """
+    from shared.floor_policy import is_full_access
+    if not is_full_access():
+        return "ERROR: 綁定 pleading token 為全權限層專屬（密鑰管理、受限層不可操作）"
+    if not employee_name or not employee_name.strip():
+        return "ERROR: 員工姓名不可為空"
+    if not token or not token.strip():
+        return "ERROR: token 不可為空"
+    with transaction() as db:
+        _cnt = repository.count_active_employees_by_name(db, employee_name.strip())
+        if _cnt == 0:
+            return f"ERROR: 找不到在職員工「{employee_name}」（無法綁定）"
+        if _cnt > 1:
+            return (f"ERROR: 有多位同名在職員工「{employee_name}」，無法判定要綁定誰"
+                    "（token=完整律師身分、不可猜；請先處理同名或用唯一識別）")
+        emp_id = repository.find_active_employee_id_by_name(db, employee_name.strip())
+        _actor, _err = _writer_or_error(db, bound_by)
+        if _err:
+            return _err
+        repository.upsert_pleading_token(db, emp_id, token.strip(), _actor or "system")
+        repository.insert_interaction_log(
+            db, actor=_actor or "system", action="pleading_token_bound",
+            target_type="employee", target_id=emp_id,
+            detail="綁定 pleading token（密鑰未記錄）", business_unit=None,
+        )
+    return f"已綁定「{employee_name}」的 pleading token（密鑰未顯示）"
+
+
+def unbind_pleading_token(employee_name: str, unbound_by: str = "") -> str:
+    """解除某律師的 pleading token 綁定（離職/換 token）。**全權限層專屬**（同 bind 雙牆）。
+    離職流程應呼此清除（另：回寫選 token 只取 active 員工、停用員工 token 即使滯留也不會被用）。"""
+    from shared.floor_policy import is_full_access
+    if not is_full_access():
+        return "ERROR: 解除 pleading token 為全權限層專屬（密鑰管理、受限層不可操作）"
+    if not employee_name or not employee_name.strip():
+        return "ERROR: 員工姓名不可為空"
+    with transaction() as db:
+        _cnt = repository.count_active_employees_by_name(db, employee_name.strip())
+        if _cnt == 0:
+            return f"ERROR: 找不到在職員工「{employee_name}」"
+        if _cnt > 1:
+            return (f"ERROR: 有多位同名在職員工「{employee_name}」，無法判定要解除誰"
+                    "（請先處理同名或用唯一識別）")
+        emp_id = repository.find_active_employee_id_by_name(db, employee_name.strip())
+        _actor, _err = _writer_or_error(db, unbound_by)
+        if _err:
+            return _err
+        n = repository.delete_pleading_token(db, emp_id)
+        repository.insert_interaction_log(
+            db, actor=_actor or "system", action="pleading_token_unbound",
+            target_type="employee", target_id=emp_id,
+            detail="解除 pleading token 綁定", business_unit=None,
+        )
+    if n:
+        return f"已解除「{employee_name}」的 pleading token 綁定"
+    return f"「{employee_name}」原本就沒有綁定 pleading token（無動作）"
+
+
+def _select_pleading_token(db, *, actor_name="", assignee_name="", lead_attorney_name="", verify=None):
+    """回寫路徑選「該用哪張 pleading token」（Task D；內部、**絕不**經 MCP 回傳 token）。
+
+    身分（契約 v4 / §127）由 caller 傳入的參數組合決定模式：
+      - 互動觸發：只傳 actor_name（觸發者自己）→ 稽核記他、gate 套他角色；他沒綁→回 ''（不 fallback、
+        免把他做的寫入誤掛別人）。
+      - 自主/背景：傳 assignee_name（該 deadline 當責律師）+ lead_attorney_name → assignee 優先、
+        fallback 案 lead_attorney。
+    僅取 active 員工 token（停用即不可用）。verify（可選 callable token->bool；C 接 pleading whoami 探活）
+    給了且回 False → 視為失效、回 ''（避免拿失效 token 整批 401）。未給＝不探活。
+    回 token 或 ''（'' → 上層 graceful skip、pleading 鏡像暫 stale、引擎/提醒不受影響）。
+    """
+    # 模式由 actor_name 決定（codex HIGH：防 §127 誤掛）：
+    #   互動＝actor_name 非空 → **只**查 actor、查不到立刻回 ''（絕不 fallback 到別人，免把他做的寫入誤掛他人）；
+    #   自主＝actor_name 空 → assignee（當責律師）→ fallback lead_attorney。
+    if actor_name and actor_name.strip():
+        candidates = (actor_name,)
+    else:
+        candidates = (assignee_name, lead_attorney_name)
+    token = None
+    for nm in candidates:
+        if nm and nm.strip():
+            token = repository.get_pleading_token_by_name(db, nm.strip())
+            if token:
+                break
+    if not token:
+        return ""
+    if verify is not None and not verify(token):
+        return ""
+    return token
 
 
 def find_matter_by_party(party_name: str, limit: int) -> str:

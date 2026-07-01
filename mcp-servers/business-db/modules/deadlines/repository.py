@@ -26,20 +26,90 @@ def insert_matter(
     confidential: int,
     business_unit: str | None,
     opened_at: str | None,
+    pleading_case_id: str | None = None,
 ) -> int:
     cursor = db.execute(
         "INSERT INTO matters "
         "(matter_no, title, client_name, practice_area, court, court_case_no, stage, "
-        " status, lead_attorney, has_local_agent, confidential, business_unit, opened_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " status, lead_attorney, has_local_agent, confidential, business_unit, opened_at, "
+        " pleading_case_id) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (matter_no, title, client_name, practice_area, court, court_case_no, stage,
-         status, lead_attorney, has_local_agent, confidential, business_unit, opened_at),
+         status, lead_attorney, has_local_agent, confidential, business_unit, opened_at,
+         pleading_case_id),
     )
     return cursor.lastrowid
 
 
 def get_matter(db: sqlite3.Connection, matter_id: int) -> sqlite3.Row | None:
     return db.execute("SELECT * FROM matters WHERE id = ?", (matter_id,)).fetchone()
+
+
+def update_matter_pleading_case_id(
+    db: sqlite3.Connection, matter_id: int, pleading_case_id: str | None
+) -> int:
+    """綁定 / 解除 matter ↔ pleading case 對應鍵（None = 清空）。回 rowcount。"""
+    cursor = db.execute(
+        "UPDATE matters SET pleading_case_id = ? WHERE id = ?",
+        (pleading_case_id, matter_id),
+    )
+    return cursor.rowcount
+
+
+# ───────────── pleading 整合 token（Task D；密鑰、僅內部讀、無讀回工具）─────────────
+
+def upsert_pleading_token(
+    db: sqlite3.Connection, employee_id: int, token: str, provisioned_by: str | None
+) -> None:
+    """綁定/更新某員工的 pleading token（一律師一 token；PK=employee_id 衝突即覆寫、重置驗證時間）。"""
+    db.execute(
+        "INSERT INTO employee_pleading_tokens (employee_id, token, provisioned_by) "
+        "VALUES (?,?,?) "
+        "ON CONFLICT(employee_id) DO UPDATE SET token=excluded.token, "
+        "provisioned_by=excluded.provisioned_by, "
+        "provisioned_at=datetime('now','localtime'), last_verified_at=NULL",
+        (employee_id, token, provisioned_by),
+    )
+
+
+def delete_pleading_token(db: sqlite3.Connection, employee_id: int) -> int:
+    cursor = db.execute(
+        "DELETE FROM employee_pleading_tokens WHERE employee_id = ?", (employee_id,)
+    )
+    return cursor.rowcount
+
+
+def find_active_employee_id_by_name(db: sqlite3.Connection, name: str) -> int | None:
+    if not name:
+        return None
+    row = db.execute(
+        "SELECT id FROM employees WHERE active=1 AND name=? ORDER BY id LIMIT 1", (name,)
+    ).fetchone()
+    return row["id"] if row else None
+
+
+def count_active_employees_by_name(db: sqlite3.Connection, name: str) -> int:
+    """在職同名員工數（employees.name 無 UNIQUE 約束、可能撞名；用於歧義防呆）。"""
+    if not name:
+        return 0
+    return db.execute(
+        "SELECT COUNT(*) c FROM employees WHERE active=1 AND name=?", (name,)
+    ).fetchone()["c"]
+
+
+def get_pleading_token_by_name(db: sqlite3.Connection, name: str) -> str | None:
+    """取某律師（依姓名、僅 active 員工）綁定的 pleading token。內部用（回寫路徑選 token）、
+    不經任何 MCP 工具回傳。停用員工（active=0）即使 token row 暫留也取不到（防離職滯留 token 被用）。
+    **同名歧義（>1 在職同名）→ None**（codex MED：token=完整律師身分、不猜、§127 安全）。"""
+    if not name or count_active_employees_by_name(db, name) != 1:
+        return None
+    row = db.execute(
+        "SELECT t.token FROM employee_pleading_tokens t "
+        "JOIN employees e ON e.id = t.employee_id "
+        "WHERE e.active=1 AND e.name=? LIMIT 1",
+        (name,),
+    ).fetchone()
+    return row["token"] if row else None
 
 
 def get_matter_by_no(db: sqlite3.Connection, matter_no: str) -> sqlite3.Row | None:

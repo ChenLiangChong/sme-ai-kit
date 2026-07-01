@@ -1138,7 +1138,9 @@ def scan_and_enqueue_due_reminders(today=None) -> dict:
     Returns: dict — scanned / approaching / missed / skipped 計數
     """
     from shared.db import transaction
-    from shared.escalation import enqueue_escalation
+    from shared.escalation import (
+        enqueue_escalation, resolve_escalation_target, _looks_like_line_user_id,
+    )
 
     if today is None:
         today = date.today()
@@ -1190,6 +1192,25 @@ def scan_and_enqueue_due_reminders(today=None) -> dict:
             # 文字、讓老闆/全所看得到「承辦：某律師」；不再當 channel_id 污染 OA 欄）。
             attorney = (d["d_assignee"] or d["lead_attorney"] or "").strip()
             atty_text = f" 承辦：{attorney}" if attorney else ""
+            # 承辦律師收件人（Task E：提醒歸當責律師、非只 boss）：deadline.assignee_line_user_id 優先、
+            # 否則用承辦/lead_attorney 名查 active 員工 line_user_id；查無→'' → enqueue 自動 fallback boss。
+            # 承辦律師收件人（Task E）。正規化（codex MED）：assignee_line_user_id 非合法 LINE id
+            # （髒值/舊值/空）→ 清空、改走名字查；否則髒值會 (a) 遮蔽名字查 (b) 讓升級分支誤判
+            # 「已有承辦」而多送一筆 boss row（同一 boss 收兩筆 deadline_missed）。
+            atty_uid = (d["assignee_line_user_id"] or "").strip()
+            if not _looks_like_line_user_id(atty_uid):
+                atty_uid = ""
+            if not atty_uid:
+                for _nm in (d["d_assignee"], d["lead_attorney"]):
+                    if _nm:
+                        _er = db.execute(
+                            "SELECT line_user_id FROM employees "
+                            "WHERE active=1 AND name=? AND line_user_id IS NOT NULL ORDER BY id LIMIT 1",
+                            (_nm,),
+                        ).fetchone()
+                        if _er and _looks_like_line_user_id((_er["line_user_id"] or "").strip()):
+                            atty_uid = _er["line_user_id"].strip()
+                            break
             bu = d["m_bu"] or ""
             # needs_manual_review 警語（codex HIGH）：未複核時限仍要推（甚至更要推），但 summary 須明示
             # 「未經律師複核、勿逕依此倒數」、detail 帶 flag——不可把未複核日期當乾淨權威倒數呈現，
@@ -1224,10 +1245,36 @@ def scan_and_enqueue_due_reminders(today=None) -> dict:
                     actor_user_id="",
                     actor_label="系統·時限掃描",
                     business_unit=bu,
-                    # 收件人走既有 resolve_escalation_target（SPEC「全所一份」＝boss/全所）；
-                    # channel_id 留 None（由 BU→OA 解析），絕不把承辦律師 user_id 當 channel_id（OA 欄）污染。
+                    target_user_id=atty_uid,  # Task E：承辦先收（無承辦 line→enqueue 自動 fallback boss）
+                    # channel_id 留 None（由 BU→OA 解析）；承辦律師資訊進收件人欄＋summary、絕不污染 channel_id。
                     channel_id=None,
                 )
+                # 升級主管/合夥人監督：承辦存在且≠boss 才另送一筆（去重；boss 未設定則略，承辦那筆已是兜底）。
+                _boss_uid = resolve_escalation_target(db, bu)[0] or ""
+                if atty_uid and _boss_uid and atty_uid != _boss_uid:
+                    enqueue_escalation(
+                        db,
+                        event_type="deadline_missed",
+                        summary=(
+                            f"【逾期·升級】{matter_no} {title} {desc} "
+                            f"內部{internal}（法定{statutory}）已逾期，承辦 {attorney or '未指定'} 已通知、"
+                            f"請主管/合夥人介入回復原狀評估{review_note}"
+                        ),
+                        detail={
+                            "deadline_id": str(d["id"]),
+                            "severity": str(severity),
+                            "statutory_deadline": str(statutory or ""),
+                            "internal_deadline": str(internal),
+                            "assignee": str(attorney),
+                            "needs_manual_review": str(d["needs_manual_review"] or 0),
+                            "kind": "deadline_missed_escalation",
+                        },
+                        actor_user_id="",
+                        actor_label="系統·時限掃描",
+                        business_unit=bu,
+                        target_user_id=_boss_uid,
+                        channel_id=None,
+                    )
                 stats["missed"] += 1
                 continue
 
@@ -1259,8 +1306,8 @@ def scan_and_enqueue_due_reminders(today=None) -> dict:
                         actor_user_id="",
                         actor_label="系統·時限掃描",
                         business_unit=bu,
-                        # 收件人走 resolve_escalation_target（全所一份）；channel_id=None（BU→OA 解析）。
-                        # 承辦律師資訊放 summary 文字、不再當 channel_id 污染 OA 欄（codex HIGH-2）。
+                        target_user_id=atty_uid,  # Task E：承辦收（無承辦 line→fallback boss）
+                        # channel_id=None（BU→OA 解析）；承辦律師進收件人欄＋summary、不污染 channel_id（codex HIGH-2）。
                         channel_id=None,
                     )
                     sent.add(n_int)

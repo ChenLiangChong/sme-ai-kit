@@ -21,6 +21,7 @@ def create_matter(
     has_local_agent: int = 1,
     confidential: int = 0,
     created_by: str = "",
+    pleading_case_id: str = "",
 ) -> str:
     """建立案件（matter）。律所案件主檔，是時限（deadline）的父鍵。
 
@@ -36,6 +37,8 @@ def create_matter(
         has_local_agent: 是否有住法院所在地之代理人（§162但書，律所自辦常為 1=在途歸零）
         confidential: 是否機密案件（1=僅機密/全權限層可見）
         created_by: 建立者
+        pleading_case_id: （選填）對應的 pleading-manager 案件 id（整合用、不透明字串）。空白=未綁定、
+            此案純單機跑；事後可用 link_matter_pleading 綁定/解除。對應鍵只住 sme 側、pleading 零存 sme FK。
     """
     return service.create_matter(
         title=title,
@@ -49,7 +52,53 @@ def create_matter(
         has_local_agent=has_local_agent,
         confidential=confidential,
         created_by=created_by,
+        pleading_case_id=pleading_case_id,
     )
+
+
+@mcp.tool()
+def link_matter_pleading(matter_id: int, pleading_case_id: str = "", linked_by: str = "") -> str:
+    """綁定 / 解除案件（matter）↔ pleading-manager 案件的整合對應鍵。
+
+    legal-admin（AI 引擎側）回寫末日 / 收文到 pleading-manager（案件 UI）時，用此對應鍵定位 pleading 案件。
+    對應鍵只住 sme 側、pleading 零存 sme FK（解耦：兩邊都能單機跑、單向 sme→pleading）。
+
+    Args:
+        matter_id: sme 案件 ID
+        pleading_case_id: 對應的 pleading 案件 id（不透明字串）。**空白＝解除綁定**（清成未綁定）——
+            供 pleading 案件被刪後 sme 偵測回寫 404 時清理，清掉後該案回純單機、不再回寫。
+        linked_by: 操作者
+    """
+    return service.link_matter_pleading(
+        matter_id=matter_id, pleading_case_id=pleading_case_id, linked_by=linked_by
+    )
+
+
+@mcp.tool()
+def bind_pleading_token(employee_name: str, token: str, bound_by: str = "") -> str:
+    """綁定某律師的 pleading-manager 個人 token（整合回寫用、§127：回寫掛真實當責律師）。
+
+    **全權限層專屬**（token＝完整律師身分密鑰、雙牆）。token 不回顯、不寫稽核明細。**無對應的讀回工具**
+    （密鑰永不經 MCP 回傳）。**provisioning 請在 admin host 本機操作、勿經 LINE 明文貼 token**
+    （會落 LINE 訊息庫＝洩密）。離職/換 token 用 unbind_pleading_token。
+
+    Args:
+        employee_name: 在職律師姓名（對應 employees.name）
+        token: 該律師在 pleading 自發的個人 token（/api/token）
+        bound_by: 操作者
+    """
+    return service.bind_pleading_token(employee_name=employee_name, token=token, bound_by=bound_by)
+
+
+@mcp.tool()
+def unbind_pleading_token(employee_name: str, unbound_by: str = "") -> str:
+    """解除某律師的 pleading token 綁定（離職、或 token 失效要重綁前）。**全權限層專屬**。
+
+    Args:
+        employee_name: 律師姓名
+        unbound_by: 操作者
+    """
+    return service.unbind_pleading_token(employee_name=employee_name, unbound_by=unbound_by)
 
 
 @mcp.tool()

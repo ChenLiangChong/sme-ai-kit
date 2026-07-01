@@ -1817,6 +1817,223 @@ finally:
         _osFC.environ["LINE_STATE_DIR"] = _saved_ls_pr
 
 
+# === Wave1 整合對應鍵：matters.pleading_case_id round-trip（create / get / link / unlink）===
+# legal-admin ↔ pleading-manager 對應鍵只住 sme 側、nullable（契約 contract_sme_pleading_integration v2）。
+import re as _reINT  # noqa: E402
+_rINT = _svcSN.create_matter(
+    "整合對應測試案", "2026-int-001", "", "civil", "", "", "", "陳律師", 0, 0, "操作者",
+    "PLEAD-CASE-77")
+_mINT = _reINT.search(r"#(\d+)", _rINT)
+_mid_int = int(_mINT.group(1)) if _mINT else 0
+_assert("Wave1 整合: create_matter 帶 pleading_case_id 成功建立", _mid_int > 0, detail=_rINT[:80])
+_rGet = _svcSN.get_matter(_mid_int)
+_assert("Wave1 整合: get_matter 顯示已綁定的 pleading 案件對應",
+        "PLEAD-CASE-77" in _rGet and "pleading 案件對應" in _rGet, detail=_rGet[:120])
+_rLink = _svcSN.link_matter_pleading(_mid_int, "PLEAD-CASE-99", "操作者")
+_assert("Wave1 整合: link_matter_pleading 重新綁定成功",
+        "已綁定" in _rLink and "PLEAD-CASE-99" in _rLink, detail=_rLink[:80])
+_assert("Wave1 整合: 重新綁定後 get_matter 反映新對應",
+        "PLEAD-CASE-99" in _svcSN.get_matter(_mid_int))
+_rUnlink = _svcSN.link_matter_pleading(_mid_int, "", "操作者")  # 空=解除（pleading 案件被刪、sme 偵測 404 清理）
+_assert("Wave1 整合: link_matter_pleading 空字串=解除綁定（case-deleted graceful 清理）",
+        "解除" in _rUnlink, detail=_rUnlink[:80])
+_assert("Wave1 整合: 解除後 get_matter 顯示未綁定", "未綁定" in _svcSN.get_matter(_mid_int))
+_rBadLink = _svcSN.link_matter_pleading(999999, "PLEAD-X", "操作者")
+_assert("Wave1 整合: link 不存在案件 → 乾淨 ERROR（不崩）",
+        "ERROR" in _rBadLink and "找不到" in _rBadLink, detail=_rBadLink[:80])
+_rPlain = _svcSN.create_matter("未綁定案", "2026-int-002", "", "", "", "", "", "", 0, 0, "操作者")
+_mPlain = _reINT.search(r"#(\d+)", _rPlain)
+_mid_plain = int(_mPlain.group(1)) if _mPlain else 0
+_assert("Wave1 整合: 不帶 pleading_case_id 建案 → 預設未綁定（純單機、解耦）",
+        _mid_plain > 0 and "未綁定" in _svcSN.get_matter(_mid_plain))
+
+
+# === Task E：提醒 per-承辦 routing（target_line_user_id=承辦律師、非只 boss、boss 兜底/升級）===
+from shared.deadlines import scan_and_enqueue_due_reminders as _scanE  # noqa: E402
+from shared.escalation import resolve_escalation_target as _resolveE  # noqa: E402
+_ATTY = "U" + "a" * 32   # 承辦律師 line_user_id（U+32hex、過 _looks_like_line_user_id）
+# 保證有 boss（resolve step1 查 role='boss' active 員工）；OR IGNORE 避免 line_user_id UNIQUE 衝突
+db.execute("INSERT OR IGNORE INTO employees (name, role, permissions, active, line_user_id) "
+           "VALUES ('E所長','boss','admin',1,?)", ("U" + "b" * 32,))
+db.commit()
+_BOSS = _resolveE(db, "")[0]   # 動態取「實際 resolve 出的 boss」當期望值（穩健、不寫死 coalesce 結果）
+_assert("Task E setup: 有 boss 兜底且≠承辦", bool(_BOSS) and _BOSS != _ATTY, detail=str(_BOSS))
+_todayE = _dtA.date(2026, 6, 15)
+_yestE = (_todayE - _dtA.timedelta(days=1)).isoformat()
+_COLS_E = ("matter_id, type, description, period_type, severity, trigger_event, service_type, "
+           "service_base_date, statutory_days, statutory_basis, internal_deadline, statutory_deadline, "
+           "status, escalation_lead_days, reminders_sent, needs_manual_review, assignee, assignee_line_user_id")
+def _mk_matter_E(no, title, lead=""):
+    return db.execute(
+        "INSERT INTO matters (matter_no, title, status, has_local_agent, confidential, lead_attorney) "
+        "VALUES (?,?, 'open',1,0,?)", (no, title, lead or None)).lastrowid
+def _mk_dl_E(mid, desc, internal, lead_days, atty_name, atty_uid):
+    db.execute(
+        f"INSERT INTO deadlines ({_COLS_E}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (mid, "appeal_civil", desc, "peremptory", "red", "判決送達", "normal", "2026-05-01", 20,
+         "民訴§440", internal, internal, "pending", lead_days, "[]", 0, atty_name or None, atty_uid or None))
+    db.commit()
+
+# E1：approaching + 有承辦 line → 收件人=承辦（非 boss）
+_mk_dl_E(_mk_matter_E("2026-E1-001", "E承辦approaching", "E律師"), "E承辦上訴",
+         _todayE.isoformat(), "[0]", "E律師", _ATTY)
+_scanE(today=_todayE.isoformat())
+_rE1 = db.execute("SELECT target_line_user_id t FROM pending_escalations WHERE event_type='deadline_approaching' "
+                  "AND summary LIKE '%E承辦approaching%' ORDER BY id DESC LIMIT 1").fetchone()
+_assert("Task E: approaching 有承辦 line → 收件人=承辦律師（非 boss）",
+        _rE1 and _rE1["t"] == _ATTY, detail=str(dict(_rE1)) if _rE1 else "None")
+
+# E2：approaching + 無承辦 line → fallback boss（不靜默丟）
+_mk_dl_E(_mk_matter_E("2026-E2-001", "E無承辦approaching"), "E無承辦上訴",
+         _todayE.isoformat(), "[0]", "", "")
+_scanE(today=_todayE.isoformat())
+_rE2 = db.execute("SELECT target_line_user_id t FROM pending_escalations WHERE event_type='deadline_approaching' "
+                  "AND summary LIKE '%E無承辦approaching%' ORDER BY id DESC LIMIT 1").fetchone()
+_assert("Task E: approaching 無承辦 line → fallback boss（不靜默丟）",
+        _rE2 and _rE2["t"] == _BOSS, detail=str(dict(_rE2)) if _rE2 else "None")
+
+# E3：missed + 有承辦 → 承辦收主通知 + boss 收升級監督（dual-send、去重）
+_mk_dl_E(_mk_matter_E("2026-E3-001", "E承辦missed", "E律師"), "E承辦逾期",
+         _yestE, "[7,3,1,0]", "E律師", _ATTY)
+_scanE(today=_todayE.isoformat())
+_rE3a = db.execute("SELECT target_line_user_id t FROM pending_escalations WHERE event_type='deadline_missed' "
+                   "AND summary LIKE '%E承辦missed%' AND summary NOT LIKE '%升級%' ORDER BY id DESC LIMIT 1").fetchone()
+_rE3b = db.execute("SELECT target_line_user_id t FROM pending_escalations WHERE event_type='deadline_missed' "
+                   "AND summary LIKE '%E承辦missed%' AND summary LIKE '%升級%' ORDER BY id DESC LIMIT 1").fetchone()
+_assert("Task E: missed 有承辦 → 承辦收主通知", _rE3a and _rE3a["t"] == _ATTY,
+        detail=str(dict(_rE3a)) if _rE3a else "None")
+_assert("Task E: missed 有承辦 → boss 另收升級監督（dual-send、≠承辦）",
+        _rE3b and _rE3b["t"] == _BOSS and _rE3b["t"] != _ATTY, detail=str(dict(_rE3b)) if _rE3b else "None")
+
+# E4：missed + 無承辦 → 只 boss 一筆、無升級重複行
+_mk_dl_E(_mk_matter_E("2026-E4-001", "E無承辦missed"), "E無承辦逾期", _yestE, "[7,3,1,0]", "", "")
+_scanE(today=_todayE.isoformat())
+_cE4 = db.execute("SELECT COUNT(*) c FROM pending_escalations WHERE event_type='deadline_missed' "
+                  "AND summary LIKE '%E無承辦missed%'").fetchone()["c"]
+_eE4 = db.execute("SELECT COUNT(*) c FROM pending_escalations WHERE event_type='deadline_missed' "
+                  "AND summary LIKE '%E無承辦missed%' AND summary LIKE '%升級%'").fetchone()["c"]
+_assert("Task E: missed 無承辦 → 僅 boss 一筆（無 dual-send 重複）", _cE4 == 1 and _eE4 == 0,
+        detail=f"total={_cE4} esc={_eE4}")
+
+
+# === Task D：每律師 pleading token 安全存放/選取（密鑰、雙牆、無讀回、active-only、whoami）===
+_TOKD = "tok-D-" + "x" * 8
+db.execute("INSERT OR IGNORE INTO employees (name, role, permissions, active, line_user_id) "
+           "VALUES ('D律師','lawyer','basic',1,?)", ("U" + "d" * 32,))
+db.execute("INSERT OR IGNORE INTO employees (name, role, active, line_user_id) "
+           "VALUES ('D主辦','lawyer',1,?)", ("U" + "e" * 32,))
+db.commit()
+# D1：全權限層 bind 成功、回傳/稽核不洩 token（no-echo）
+_rbindD = _svcSN.bind_pleading_token("D律師", _TOKD, "操作者")
+_assert("Task D: bind_pleading_token 成功", "已綁定" in _rbindD and "D律師" in _rbindD, detail=_rbindD[:80])
+_assert("Task D: bind 回傳不洩 token（no-echo）", _TOKD not in _rbindD, detail=_rbindD[:80])
+_logD = db.execute("SELECT detail FROM interaction_log WHERE action='pleading_token_bound' "
+                   "ORDER BY id DESC LIMIT 1").fetchone()
+_assert("Task D: interaction_log 不記 token 明文", _logD and _TOKD not in (_logD["detail"] or ""),
+        detail=str(dict(_logD)) if _logD else "None")
+# D2：select 互動（actor_name）取得該律師 token
+_assert("Task D: _select 互動(actor_name) 取得綁定 token",
+        _svcSN._select_pleading_token(db, actor_name="D律師") == _TOKD)
+# D3：select 自主 assignee→fallback lead_attorney；assignee 有 token 則優先
+_svcSN.bind_pleading_token("D主辦", "tok-主辦", "操作者")
+_assert("Task D: _select 自主 assignee 無 token → fallback lead_attorney",
+        _svcSN._select_pleading_token(db, assignee_name="D無此人", lead_attorney_name="D主辦") == "tok-主辦")
+_assert("Task D: _select assignee 有 token 優先（不 fallback）",
+        _svcSN._select_pleading_token(db, assignee_name="D律師", lead_attorney_name="D主辦") == _TOKD)
+# D4：whoami verify 失敗→失效回 ''；成功→回 token
+_assert("Task D: _select verify=False（whoami 探活失敗）→ '' graceful skip",
+        _svcSN._select_pleading_token(db, actor_name="D律師", verify=lambda t: False) == "")
+_assert("Task D: _select verify=True → 回 token",
+        _svcSN._select_pleading_token(db, actor_name="D律師", verify=lambda t: True) == _TOKD)
+# D5：active-only（停用律師 token 不可用、防離職滯留）
+db.execute("UPDATE employees SET active=0 WHERE name='D律師'"); db.commit()
+_assert("Task D: 停用員工(active=0) token 不被選取",
+        _svcSN._select_pleading_token(db, actor_name="D律師") == "")
+db.execute("UPDATE employees SET active=1 WHERE name='D律師'"); db.commit()
+# D6：unbind 清除 → select ''
+_runbD = _svcSN.unbind_pleading_token("D律師", "操作者")
+_assert("Task D: unbind 解除綁定", "已解除" in _runbD, detail=_runbD[:60])
+_assert("Task D: unbind 後 _select 回 ''", _svcSN._select_pleading_token(db, actor_name="D律師") == "")
+# D7：完全無此員工 → select ''
+_assert("Task D: 無此人 → _select 回 ''", _svcSN._select_pleading_token(db, actor_name="完全沒這人") == "")
+# D8：受限層 bind 被擋（service is_full_access 第二道）+ 原 token 未被竄改
+import os as _osD  # noqa: E402
+_savefloorD = _osD.environ.get("SME_FLOOR")
+_osD.environ["SME_FLOOR"] = "general"
+try:
+    _rdenD = _svcSN.bind_pleading_token("D主辦", "tok-惡意", "受限層員工")
+    _assert("Task D: 受限層 bind 被擋（全權限專屬、雙牆第二道）",
+            "ERROR" in _rdenD and "全權限" in _rdenD, detail=_rdenD[:80])
+finally:
+    if _savefloorD is None:
+        _osD.environ.pop("SME_FLOOR", None)
+    else:
+        _osD.environ["SME_FLOOR"] = _savefloorD
+_assert("Task D: 受限層 bind 被擋後原 token 未被竄改",
+        _svcSN._select_pleading_token(db, actor_name="D主辦") == "tok-主辦")
+# D9：第一道牆——apply_floor_policy 在受限層物理移除 bind/unbind_pleading_token（密鑰雙牆）
+from shared.floor_policy import apply_floor_policy as _afp, INTEGRATION_ADMIN_TOOLS as _IAT  # noqa: E402
+class _FakeMcpD:
+    def __init__(self): self.removed = []
+    def remove_tool(self, name): self.removed.append(name)
+_savefloorD9 = _osD.environ.get("SME_FLOOR")
+_osD.environ["SME_FLOOR"] = "general"
+try:
+    _fmD = _FakeMcpD()
+    _afp(_fmD)
+    _assert("Task D: 第一道牆 apply_floor_policy 受限層移除 bind/unbind_pleading_token",
+            set(_IAT) <= set(_fmD.removed), detail=str([x for x in _fmD.removed if "pleading" in x]))
+finally:
+    if _savefloorD9 is None:
+        _osD.environ.pop("SME_FLOOR", None)
+    else:
+        _osD.environ["SME_FLOOR"] = _savefloorD9
+
+
+# === codex follow-up 回歸測（HIGH/MED/LOW fix 的敏感失敗路徑）===
+# CF1：_select 互動(actor) 無 token + 傳 lead → 禁止 fallback（codex HIGH、§127）
+db.execute("INSERT OR IGNORE INTO employees (name, role, active, line_user_id) "
+           "VALUES ('CF無token律師','lawyer',1,?)", ("U" + "f" * 32,))
+db.commit()
+_assert("codex-HIGH fix: 互動 actor 無 token + 傳 lead_attorney → 不 fallback、回 ''",
+        _svcSN._select_pleading_token(db, actor_name="CF無token律師", lead_attorney_name="D主辦") == "")
+_assert("codex-HIGH fix: 對照組——自主(無 actor) assignee 無 token → 仍 fallback lead",
+        _svcSN._select_pleading_token(db, assignee_name="CF無token律師", lead_attorney_name="D主辦") == "tok-主辦")
+# CF2：同名歧義 → bind 報錯、_select 回 ''（codex MED；token=身分不可猜）
+db.execute("INSERT INTO employees (name, role, active, line_user_id) VALUES ('CF雙胞','lawyer',1,?)", ("U" + "1" * 32,))
+db.execute("INSERT INTO employees (name, role, active, line_user_id) VALUES ('CF雙胞','lawyer',1,?)", ("U" + "2" * 32,))
+db.commit()
+_rAmb = _svcSN.bind_pleading_token("CF雙胞", "tok-雙胞", "操作者")
+_assert("codex-MED fix: 同名在職員工 bind 被拒（不綁錯人）", "ERROR" in _rAmb and "多位同名" in _rAmb, detail=_rAmb[:80])
+_assert("codex-MED fix: 同名 _select 回 ''（不猜身分）", _svcSN._select_pleading_token(db, actor_name="CF雙胞") == "")
+# CF3：malformed assignee_line_user_id 的 missed → 只 boss 一筆、無誤升級重複（codex MED dedup）
+_mkCF = db.execute("INSERT INTO matters (matter_no,title,status,has_local_agent,confidential) "
+                   "VALUES ('2026-CF-001','CF髒值missed','open',1,0)").lastrowid
+db.execute(f"INSERT INTO deadlines ({_COLS_E}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+           (_mkCF, "appeal_civil", "CF髒值逾期", "peremptory", "red", "判決送達", "normal", "2026-05-01", 20,
+            "民訴§440", _yestE, _yestE, "pending", "[7,3,1,0]", "[]", 0, "髒值律師", "NOT-A-VALID-UID"))
+db.commit()
+_scanE(today=_todayE.isoformat())
+_cCF = db.execute("SELECT COUNT(*) c FROM pending_escalations WHERE event_type='deadline_missed' "
+                  "AND summary LIKE '%CF髒值missed%'").fetchone()["c"]
+_assert("codex-MED fix: 髒值 assignee_line_user_id missed → 只 boss 一筆（無誤升級重複）", _cCF == 1, detail=f"rows={_cCF}")
+# CF4：link_matter_pleading 對機密案在受限層回泛化 not-found（oracle、codex LOW）
+_midCFc = int(_reINT.search(r"#(\d+)", _svcSN.create_matter("CF機密案","2026-CF-002","","","","","","",0,1,"操作者")).group(1))
+_saveflCF = _osD.environ.get("SME_FLOOR")
+_osD.environ["SME_FLOOR"] = "general"
+try:
+    _rOra = _svcSN.link_matter_pleading(_midCFc, "PLEAD-X", "agent自填")
+    # oracle：機密案回應＝「同一個 id 不存在」會回的字串（byte 相同、訊息只含呼叫者自傳的 id，
+    # 不洩『該 id 存在但機密』這一位元）。故比對「同 id 的 not-found 字串」、非跨不同 id。
+    _assert("codex-LOW fix: 受限層 link 機密案 → 與『同 id 不存在』回相同 not-found（不洩存在）",
+            _rOra == f"ERROR: 找不到案件 #{_midCFc}", detail=_rOra[:60])
+finally:
+    if _saveflCF is None:
+        _osD.environ.pop("SME_FLOOR", None)
+    else:
+        _osD.environ["SME_FLOOR"] = _saveflCF
+
+
 db.close()
 
 
