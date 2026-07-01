@@ -79,7 +79,7 @@ create_deadline(
   service_type="normal",
   stated_period_days=20,           # 判決書教示天數（安全網、有就帶）
   document_date="2026-05-28",      # 文書作成日（裁判日；法版檢核用，刑事/舊案一定要帶）
-  buffer_days=3,                   # 內部緩衝（老闆的「19天」概念 = 20−1；可設更保守）
+  buffer_days=3,                   # 內部緩衝（法定 − N 個工作日當內部死線）；省略或 -1 → 自動讀事務所預設緩衝偏好（見下方註）
   has_local_agent=-1,              # -1=沿用案件設定
   created_by="<操作者>",
   confirm_intake_id=<步驟2的 intake_id>,  # 帶回步驟2暫存 id → 同 tx 關閉待確認跟催 backlog
@@ -90,6 +90,7 @@ create_deadline(
 - **type 不在種子表**（罕見特別期間）→ **必須**手動帶 `statutory_days` + `statutory_basis` + `period_type`，否則引擎擋下（反捏造：缺法條依據不給算）。**法條依據要查證、不要編**，查不到就請律師給。
 - **無當地代理人又要算在途** → 帶 `court_region` + `party_region`（如 `court_region="taipei"`, `party_region="kinmen"`）查在途表；查不到引擎標複核。
 - 回傳含 `internal_deadline`（盯這個）/ `statutory_deadline`（底線）/ `calc_trace`（逐步軌跡）。**回報給人時兩個日期都講、叫他盯內部期限。**
+- **事務所預設緩衝**：導入時把事務所慣用的內部緩衝存成設定一次 —— `store_fact(category='settings', title='deadline_buffer_days', content='3')`（例：法定前 3 個工作日）。之後 `create_deadline` **未明確帶 `buffer_days`（或帶 -1）時自動套用**此偏好；未設 → 預設 1 個工作日。單筆要用不同緩衝就明確帶 `buffer_days=<N>`（優先於預設）。這樣律師「內部一律提前 N 天」的要求不必每筆手動帶、也不會漏。
 
 入庫成功後 → 進 [calendar-sync.md](calendar-sync.md) 寫行事曆（去識別化、寫前先 `screen_calendar_text` 自檢）+ `mark_deadline_calendared` 回填 event_id。
 

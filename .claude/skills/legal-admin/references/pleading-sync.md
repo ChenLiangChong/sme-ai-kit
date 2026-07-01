@@ -24,11 +24,11 @@
 
 ## 末日回寫（#1）
 
-確認入庫（`create_deadline` 含 `confirm_intake_id`）或 `amend_deadline` 重算後、若整合已配置：
+確認入庫（`create_deadline` 含 `confirm_intake_id`）、`amend_deadline` 重算、或**狀態 / 覆核變更**（`mark_deadline_filed` / `mark_deadline_reviewed`）後、若整合已配置：
 
 1. 呼 pleading `upsert_deadline(case_id=<pleading_case_id>, external_system="sme", external_ref=<sme deadline id>, source="sme_engine", statutory_deadline, internal_deadline, status, type, period_type, severity, period_unit, period_value, statutory_basis, statutory_basis_version, trigger_event, service_base_date, statutory_days, needs_manual_review, calc_trace, computed_by, reviewed_by, reviewed_at)`（欄位定義見 KB `pleading_wave1_tool_signatures`；冪等 by external_ref，同 id 再呼 = update）。
 2. 取回傳的 pleading 列 id，呼 `mark_deadline_calendared(deadline_id=<sme deadline id>, calendar_event_id=<pleading 列 id>, calendar_provider='pleading')` 存回對位（pleading 視為一個行事曆 provider，沿用既有去重/更新機制）。
-3. deadline 狀態變動（`mark_deadline_filed` 已遞交 / `amend` 改期 / 取消）→ 同 `external_ref` 再 upsert 帶新 `status` 即同步。
+3. **狀態 / 覆核變動也同步（F-STATUS-SYNC）**：`mark_deadline_filed`（pending→已遞交）、`mark_deadline_reviewed`（律師覆核、清 `needs_manual_review` + 寫 `reviewed_by`/`reviewed_at`）、`amend_deadline`（改期重算）在 commit 後同 `external_ref` 再 upsert 帶新 `status` / 覆核欄即同步——否則 pleading 端狀態會 stale（遞交了仍顯示 pending、覆核了仍顯示需覆核）。
 
 ## 收文回寫（#2）
 
@@ -45,22 +45,29 @@
 
 合售時末日同時在 legal-admin（escalation + LINE、全所一份）與 pleading（#1 自有提醒）。約定：**`source='sme_engine'` 的列由 pleading 抑制自身提醒、改由 legal-admin 報**（legal-admin 提醒模型較完整）；pleading 純單機時才用自己的提醒。此抑制在 pleading 側落地（你這邊不需動作、知道即可）。
 
-## 接線（C：薄 pleading REST client；真 e2e 待整合環境）
+## 接線（C：薄 pleading REST client；已實作、真 e2e 待整合環境）
 
 **per-call token 路線（已拍板）**：背景引擎程式化多律師回寫天生需 per-call 身分，故 sme 引擎走
-**pleading REST API 直連、per-request 帶該案承辦律師 token**（Cookie pm_session / Bearer）；MCP adapter
-留給互動式 LLM（一 session 一律師）的鏡子。鐵律校準為「**REST＝唯一契約面、MCP＝其 LLM 鏡子**」。
-（否決「auth-token 當工具參數」——會落 LLM tool-call transcript＝洩密。）
+**pleading REST API 直連、per-request 帶該案承辦律師 token**。auth 分層別搞混：**REST 直連＝per-request
+`Cookie: pm_session=<token>`**（Task C 走這條）；**Bearer 只是 MCP adapter（:8210）那條的傳輸層**、與
+REST 直連無關。MCP adapter 留給互動式 LLM（一 session 一律師）的鏡子。鐵律校準為「**REST＝唯一契約面、
+MCP＝其 LLM 鏡子**」。（否決「auth-token 當工具參數」——會落 LLM tool-call transcript＝洩密。）
 
 guardrails（守住 6 解耦鐵則）：REST 視為**穩定 versioned 契約面**（不碰 pleading 內部）；sme REST client
 與互動路徑一樣**薄＋去識別化**（同 payload／external_ref 冪等／不帶當事人名）。
 
-- **C＝sme 側「薄 pleading REST client」**：依 Task D 選出的該律師 token、per-request 呼 pleading REST
-  端點（對應 upsert_deadline / upsert_correspondence / get_*）；whoami 探活也走 REST。
-- token 選取＝Task D（已 ready、不變：互動=觸發者、自主=該案 deadline.assignee→lead_attorney；僅 active；
-  whoami 探活）。
-- **真 e2e（實呼 pleading live REST）待整合環境**（pleading 部署 + 律師自發 token）；client 碼可先 mock 單測。
-- **inert**：未配置 pleading REST（無端點/無 token）→ 整段回寫略過、legal-admin 純單機照跑。
+- **C＝sme 側「薄 pleading REST client」（已實作）**：`modules/deadlines/pleading_client.py`（傳輸、
+  stdlib urllib、Cookie 身分、401/404/連線失敗→具名例外）+ `pleading_writeback.py`（編排：inert-by-default、
+  §127 選 token、去識別化 payload、graceful degrade、存回 pleading row id）+ service.py 6 接線點
+  （create_deadline / amend_deadline / **mark_deadline_filed / mark_deadline_reviewed（F-STATUS-SYNC）** /
+  stage_deadline_intake / resolve_deadline_intake void）。依 Task D
+  選出的該律師 token per-request 呼 upsert_deadline / upsert_correspondence / get_*；whoami 探活也走 REST。
+- token 選取＝Task D（互動=觸發者、自主=該案 deadline.assignee→lead_attorney；僅 active；whoami 探活）；
+  邏輯單一真相在 `pleading_writeback.select_pleading_token`（service.py re-export 為 `_select_pleading_token`）。
+- **真 e2e（實呼 pleading live REST）待整合環境**（pleading 部署 + 律師自發 token）；client/編排已 41 條
+  mock 單測（`tests/test_pleading_integration.py`、不需 exe）。
+- **inert**：未配置 pleading REST（無 `PLEADING_API_BASE` / 未綁定 / 無 token）→ 整段回寫略過、不報錯不提醒、
+  legal-admin 純單機照跑。
 
 ## 失敗情境判讀（不是壞、是解耦在保護你）
 

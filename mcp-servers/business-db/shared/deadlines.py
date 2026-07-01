@@ -224,6 +224,32 @@ def procedural_calendar_type(type_code):
     return PROCEDURAL_CALENDAR_PERIODS.get(type_code)
 
 
+# ── 非種子 type 的可讀標籤（去識別化 title 用；F-P2-2）──
+# 已知但無固定法定天數、故不進上面四張種子表的程序類文書（答辯/準備書狀等）：期間多為 court_set/directory、
+# 由律師讀法院文書填天數，種子表不登記；但仍是**已知文書類型**，給可讀中文標籤，讓回寫 pleading 的
+# 去識別化 title 不致顯示成生代碼「法定期限（answer）」。type 是代碼（非自由文字 description）＝零當事人姓名。
+_GENERIC_TYPE_LABELS = {
+    "answer": "答辯狀提出期間",
+    "brief": "準備書狀提出期間",
+}
+
+
+def type_label(type_code):
+    """回某 deadline `type` 的可讀中文標籤，查無回 None。跨四張種子表（label 欄）+ 已知非種子程序類：
+    STATUTORY_PERIODS（固定日數）/ COURT_SET_PERIODS（裁定期間）/ LIMITATION_PERIODS（消滅時效）/
+    PROCEDURAL_CALENDAR_PERIODS（程序月期間）→ 皆有 label；再 fallback `_GENERIC_TYPE_LABELS`。
+    供 pleading 回寫的去識別化 title 用（結構性、由 type 代碼推得、零姓名——**絕不**用自由文字 description
+    當 title，律師可能在其中寫當事人名）。"""
+    if not type_code:
+        return None
+    t = type_code.strip()
+    for table in (STATUTORY_PERIODS, COURT_SET_PERIODS, LIMITATION_PERIODS, PROCEDURAL_CALENDAR_PERIODS):
+        seed = table.get(t)
+        if seed and seed.get("label"):
+            return seed["label"]
+    return _GENERIC_TYPE_LABELS.get(t)
+
+
 # ── 期間「日數」修法沿革（法版檢核：反捏造安全網）──
 # STATUTORY_PERIODS 編的是「現行法」日數。若**文書作成日**（判決/裁定日，非送達日）早於某法條
 # 「期間日數修正施行日」，舊文書可能適用修正前日數（如刑訴§349 上訴 2020-01-15 前 10 日、後 20 日）。

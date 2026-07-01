@@ -14,6 +14,7 @@ collect_ignore = [
     "test_smoke_all.py",
     "test_migration_safety.py",
     "test_deadline_engine.py",
+    "test_pleading_integration.py",
     "test_office_calendar_import.py",
     "test_health_intake.py",
     "test_audit_accounting.py",

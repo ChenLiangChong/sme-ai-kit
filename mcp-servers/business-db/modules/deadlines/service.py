@@ -20,6 +20,7 @@ from shared.deadlines import (
     procedural_calendar_type,
 )
 
+from . import pleading_writeback as _pleading_writeback
 from . import repository
 
 _MATTER_STATUS_VALID = ("open", "on_hold", "closed", "archived")
@@ -311,36 +312,9 @@ def unbind_pleading_token(employee_name: str, unbound_by: str = "") -> str:
     return f"「{employee_name}」原本就沒有綁定 pleading token（無動作）"
 
 
-def _select_pleading_token(db, *, actor_name="", assignee_name="", lead_attorney_name="", verify=None):
-    """回寫路徑選「該用哪張 pleading token」（Task D；內部、**絕不**經 MCP 回傳 token）。
-
-    身分（契約 v4 / §127）由 caller 傳入的參數組合決定模式：
-      - 互動觸發：只傳 actor_name（觸發者自己）→ 稽核記他、gate 套他角色；他沒綁→回 ''（不 fallback、
-        免把他做的寫入誤掛別人）。
-      - 自主/背景：傳 assignee_name（該 deadline 當責律師）+ lead_attorney_name → assignee 優先、
-        fallback 案 lead_attorney。
-    僅取 active 員工 token（停用即不可用）。verify（可選 callable token->bool；C 接 pleading whoami 探活）
-    給了且回 False → 視為失效、回 ''（避免拿失效 token 整批 401）。未給＝不探活。
-    回 token 或 ''（'' → 上層 graceful skip、pleading 鏡像暫 stale、引擎/提醒不受影響）。
-    """
-    # 模式由 actor_name 決定（codex HIGH：防 §127 誤掛）：
-    #   互動＝actor_name 非空 → **只**查 actor、查不到立刻回 ''（絕不 fallback 到別人，免把他做的寫入誤掛他人）；
-    #   自主＝actor_name 空 → assignee（當責律師）→ fallback lead_attorney。
-    if actor_name and actor_name.strip():
-        candidates = (actor_name,)
-    else:
-        candidates = (assignee_name, lead_attorney_name)
-    token = None
-    for nm in candidates:
-        if nm and nm.strip():
-            token = repository.get_pleading_token_by_name(db, nm.strip())
-            if token:
-                break
-    if not token:
-        return ""
-    if verify is not None and not verify(token):
-        return ""
-    return token
+# _select_pleading_token 已抽到 pleading_writeback（§127 單一真相、供 writeback 編排與此處共用）；
+# 此 re-export 保留既有呼叫點與測試（service._select_pleading_token）。回寫編排見 pleading_writeback.py。
+_select_pleading_token = _pleading_writeback.select_pleading_token
 
 
 def find_matter_by_party(party_name: str, limit: int) -> str:
@@ -369,6 +343,34 @@ def find_matter_by_party(party_name: str, limit: int) -> str:
 
 
 # ───────────────────────── deadlines ─────────────────────────
+
+# firm 內部緩衝偏好（F-P0-4）：法定期限往前抓幾個「工作日」當內部死線（盯這個、留 buffer 給備稿/送印/覆核）。
+# 存 business_rules category='settings' title='deadline_buffer_days'（onboarding 由 store_fact 種、見
+# knowledge-capture）。create_deadline 未明確帶 buffer_days（<0）時讀此偏好；未設 / 非法值 → 預設 1。
+# 原行為硬預設 1、不讀 firm 偏好 → 律師明確要求「法定前 3 天」被忽略、每筆需手動帶 buffer_days（易漏）。
+_DEFAULT_BUFFER_DAYS = 1
+
+
+def _firm_buffer_days(db, fallback: int = _DEFAULT_BUFFER_DAYS) -> int:
+    """讀 firm 預設內部緩衝（工作日數）；未設 / 非數字 / 負值 → fallback。用 caller 的同一 db 連線讀
+    （create_deadline 的 with 區塊內）、不另開連線。
+    同 (category,title,business_unit) 的 active 唯一性由 DB unique index `idx_rules_unique_active` 保證
+    （單一事務所 business_unit=NULL → ≤1 筆 active、讀取本就確定性；codex post-run MED 擔心的「兩次
+    store_fact 同 key 讀到舊值」場景實際被該 index 擋下、無法發生）。`ORDER BY id DESC LIMIT 1` 為防禦性
+    明示「取最新 active」——僅在跨 business_unit（settings 罕見）才可能多筆、此時仍確定取最新、不非確定性。"""
+    row = db.execute(
+        "SELECT content FROM business_rules WHERE category='settings' "
+        "AND title='deadline_buffer_days' AND superseded_by IS NULL "
+        "ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if not row or row["content"] is None:
+        return fallback
+    try:
+        v = int(str(row["content"]).strip())
+    except (ValueError, TypeError):
+        return fallback
+    return v if v >= 0 else fallback
+
 
 def create_deadline(
     matter_id: int,
@@ -672,7 +674,7 @@ def create_deadline(
             court_region=court_region or "",
             party_region=party_region or "",
             in_transit_days_override=_transit_override_in,
-            buffer_days=buffer_days if buffer_days >= 0 else 1,
+            buffer_days=buffer_days if buffer_days >= 0 else _firm_buffer_days(db),
             stated_period_days=(stated_period_days if stated_period_days else None),
             document_date=document_date or "",
             period_unit=period_unit,
@@ -809,6 +811,17 @@ def create_deadline(
             "§529Ⅳ/§533。另注意特例§529Ⅲ：基於夫妻剩餘財產差額分配請求權之假扣押，應於宣告改用分別財產制"
             "『裁定確定之日』起10日內起訴——起算點為『裁定確定』非送達、亦走本 court_set 路徑由律師讀裁定手填10日）"
         )
+    # ── pleading 回寫（Task C / M2；整合未配置=inert、失敗不炸引擎、已建時限不受影響）──
+    # actor：互動觸發者用 verified 寫入者（§127 用他的 token、稽核記他）；system/空 → 自主模式
+    # （回寫層 fallback 該案 assignee→lead）。回寫在 with db: 已 commit 之後、fresh 連線做。
+    _wb_actor = _actor if (_actor and _actor != "system") else ""
+    _pl = _pleading_writeback.writeback_deadline(deadline_id, actor_name=_wb_actor)
+    # 確認入庫（confirm_intake_id）：把先前 staged 的收文補上 linked_deadline_ref（收文先入、deadline 後生）
+    if confirm_intake_id and _pl.get("status") == "ok":
+        _pleading_writeback.writeback_correspondence(
+            confirm_intake_id, actor_name=_wb_actor, linked_deadline_ref=deadline_id
+        )
+    _pl_note = _pleading_writeback.note_for(_pl)
     # 期間人話（反捏造：年/月不顯示成日）
     _ph = _period_phrase(period_unit, period_value, result["statutory_days"])
     return (
@@ -820,6 +833,7 @@ def create_deadline(
         + review
         + sibling_note
         + intake_note
+        + _pl_note
     )
 
 
@@ -1032,7 +1046,14 @@ def mark_deadline_filed(deadline_id: int, filed_by: str) -> str:
             detail=f"{d['description']} 已遞交",
             business_unit=None,
         )
-    return f"時限 #{deadline_id}（{d['description']}）已標記為已遞交，cron 不再提醒。"
+    # ── pleading 回寫（Task C / F-STATUS-SYNC）：狀態變更（pending→filed）也同步 pleading 鏡像，否則
+    # pleading 端律師看到的 deadline 永久 stale（已遞交仍顯示 pending）。payload 本就含 status；冪等 by
+    # external_ref、整合未配置=inert、失敗不炸引擎。在 with 區塊 commit 後、fresh 連線讀得到 filed 狀態。──
+    _wb_actor = _actor if (_actor and _actor != "system") else ""
+    _pl_note = _pleading_writeback.note_for(
+        _pleading_writeback.writeback_deadline(deadline_id, actor_name=_wb_actor)
+    )
+    return f"時限 #{deadline_id}（{d['description']}）已標記為已遞交，cron 不再提醒。" + _pl_note
 
 
 def mark_deadline_reviewed(deadline_id: int, reviewed_by: str, note: str) -> str:
@@ -1073,9 +1094,17 @@ def mark_deadline_reviewed(deadline_id: int, reviewed_by: str, note: str) -> str
             detail=(note or f"{d['description']} 計算軌跡已覆核確認"),
             business_unit=None,
         )
+    # ── pleading 回寫（Task C / F-STATUS-SYNC）：覆核清除 needs_manual_review + 寫 reviewed_by/at 也同步
+    # pleading，否則律師在 sme 覆核後、pleading 端仍顯示「需覆核」。payload 本就含 needs_manual_review/
+    # reviewed_by/reviewed_at；冪等、整合未配置=inert、失敗不炸。在 with 區塊 commit 後、fresh 連線讀得到。──
+    _wb_actor = _actor if (_actor and _actor != "system") else ""
+    _pl_note = _pleading_writeback.note_for(
+        _pleading_writeback.writeback_deadline(deadline_id, actor_name=_wb_actor)
+    )
     _cleared = "、已解除『需人工複核』旗標（轉為權威倒數）" if _was_review else "（本筆原即無需複核旗標）"
     return (
         f"時限 #{deadline_id}（{d['description']}）已由 {_actor or '系統'} 覆核留痕{_cleared}。"
+        + _pl_note
     )
 
 
@@ -1348,6 +1377,12 @@ def amend_deadline(
             channel_id=None,
         )
 
+    # ── pleading 回寫（Task C / M2）：amend 重算 → 同 external_ref 再 upsert 帶新值（冪等 merge、
+    # pleading 只動有給的欄）；成功重新存回 pleading row id。整合未配置=inert。──
+    _wb_actor = _actor if (_actor and _actor != "system") else ""
+    _pl_note = _pleading_writeback.note_for(
+        _pleading_writeback.writeback_deadline(deadline_id, actor_name=_wb_actor)
+    )
     _rev_note = "、原覆核已作廢（需重新覆核）" if _was_reviewed else ""
     return (
         f"時限 #{deadline_id}（{d['description']}）已重算異動（{_actor or '系統'}）{_rev_note}。\n"
@@ -1355,6 +1390,7 @@ def amend_deadline(
         f"- 法定期限：{before.get('statutory_deadline')} → {after['statutory_deadline']}\n"
         f"- 內部期限：{before.get('internal_deadline')} → {after['internal_deadline']}\n"
         f"- 原因：{reason.strip()}（已留稽核軌跡 deadline_audit、並通報主持律師）"
+        + _pl_note
     )
 
 
@@ -1632,12 +1668,18 @@ def stage_deadline_intake(
             detail=extracted_summary.strip(),
             business_unit=None,
         )
+    # ── pleading 收文回寫（Task C / M2；未建案 / 未綁定 / 未配置 → 靜默略過）──
+    _wb_actor = _actor_stage if (_actor_stage and _actor_stage != "system") else ""
+    _pl_note = _pleading_writeback.note_for(
+        _pleading_writeback.writeback_correspondence(intake_id, actor_name=_wb_actor)
+    )
     return (
         f"待確認暫存 #{intake_id} 已建立（尚未入庫、未計算任何期限）。\n"
         f"- 摘要：{extracted_summary.strip()}\n"
         f"請人確認後呼叫 create_deadline(..., confirm_intake_id={intake_id}) 入庫並算雙日期，"
         f"或 resolve_deadline_intake({intake_id}, action='discarded') 標示不算。\n"
         f"（逾時未確認 scan_unconfirmed_intake.py 會主動跟催、不會靜默漏掉）"
+        + _pl_note
     )
 
 
@@ -1680,8 +1722,16 @@ def resolve_deadline_intake(intake_id: int, action: str, note: str, resolved_by:
             detail=(note or intake["extracted_summary"] or ""),
             business_unit=None,
         )
+    # ── pleading 回寫（Task C / M2）：discarded=整合撤回（status='void'、update 非 delete）；
+    # confirmed 走 create_deadline(confirm_intake_id) 那條、此處不重複回寫。──
+    _pl_note = ""
+    if act == "discarded":
+        _wb_actor = _actor if (_actor and _actor != "system") else ""
+        _pl_note = _pleading_writeback.note_for(
+            _pleading_writeback.writeback_correspondence(intake_id, actor_name=_wb_actor, void=True)
+        )
     zh = {"discarded": "已標示不算（捨棄）", "confirmed": "已標示確認（另行入庫）"}[act]
-    return f"待確認暫存 #{intake_id} {zh}，scan_unconfirmed_intake 不再跟催。"
+    return f"待確認暫存 #{intake_id} {zh}，scan_unconfirmed_intake 不再跟催。" + _pl_note
 
 
 def list_pending_intakes(limit: int) -> str:
