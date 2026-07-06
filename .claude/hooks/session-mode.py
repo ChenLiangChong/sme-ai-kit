@@ -6,7 +6,9 @@
 2. `SME_FLOOR` 有值（floored / confidential 產品 runtime）→ ops
 3. 都沒有（repo root 互動 session）→ dev（本 repo 同時是開發 repo；dogfood 營運 session 請帶 SME_SESSION_MODE=ops）
 
-用法：session-mode.py <session-start|prompt-submit>
+用法：session-mode.py <session-start|prompt-submit> [dev|ops]
+- 第二參數＝顯式模式覆寫（優先序最高；給部署環境在 hook command 直接寫死用、
+  不依賴 SME_SESSION_MODE 環境變數是否傳進 hook 進程——Windows e2e 實測的可攜性課題）
 - ops：注入原本的營運指令（文字與 2026-07-07 之前的 settings.json 完全一致、營運行為零改變）
 - dev + session-start：注入幾行開發紀律；dev + prompt-submit：靜默（不注入）
 
@@ -21,6 +23,9 @@ import sys
 
 
 def resolve_mode() -> str:
+    argv_mode = (sys.argv[2] if len(sys.argv) > 2 else "").strip().lower()
+    if argv_mode in ("dev", "ops"):
+        return argv_mode
     explicit = os.environ.get("SME_SESSION_MODE", "").strip().lower()
     if explicit in ("dev", "ops"):
         return explicit
