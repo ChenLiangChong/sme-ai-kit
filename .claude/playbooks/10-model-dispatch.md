@@ -90,3 +90,4 @@ codex exec --dangerously-bypass-approvals-and-sandbox -m gpt-5.4 \
 ## 教訓登記簿（本檔自身的）
 
 - 2026-07-07｜hook / CLI 腳本要 print 中文+emoji 必須先 `sys.stdout.reconfigure(encoding="utf-8")`，否則 Windows 主控台預設 cp950 直接 UnicodeEncodeError；且 settings.json 的 hook command 用 `python3`/`$CLAUDE_PROJECT_DIR` 是 bash 慣例、Windows Desktop 部署要另配（Windows 無 python3、$VAR 不展開）｜證據：Windows e2e P0 前自檢實測（session-mode.py cp950 炸、已修）
+- 2026-07-07｜sme→pleading 兩道去識別化防線疊跑後，「pleading 落庫值乾淨」不再能當「sme gate 有作用」的證據——驗 sme 側要看送出端（mock wire payload / interaction_log 的 gate 命中留痕）；歸因線索＝pleading audit_log action='mask' 有列＝pleading 遮的、無列＝sme gate 源頭 strip｜證據：pleading 第二道（已知名單遮罩）完工待重打包上線
