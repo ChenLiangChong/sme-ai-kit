@@ -83,6 +83,9 @@ def emit(event_name: str, text: str) -> None:
 
 
 def main() -> None:
+    # Windows 主控台預設 cp950 會炸在 ⚠/emoji（e2e 實測 UnicodeEncodeError）——強制 UTF-8 輸出
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     event = sys.argv[1] if len(sys.argv) > 1 else ""
     mode = resolve_mode()
     if event == "session-start":

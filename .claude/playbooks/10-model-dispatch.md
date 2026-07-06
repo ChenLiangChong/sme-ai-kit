@@ -89,4 +89,4 @@ codex exec --dangerously-bypass-approvals-and-sandbox -m gpt-5.4 \
 
 ## 教訓登記簿（本檔自身的）
 
-（尚無。格式與升正文規則見 `40-maintenance.md` §3、§4。）
+- 2026-07-07｜hook / CLI 腳本要 print 中文+emoji 必須先 `sys.stdout.reconfigure(encoding="utf-8")`，否則 Windows 主控台預設 cp950 直接 UnicodeEncodeError；且 settings.json 的 hook command 用 `python3`/`$CLAUDE_PROJECT_DIR` 是 bash 慣例、Windows Desktop 部署要另配（Windows 無 python3、$VAR 不展開）｜證據：Windows e2e P0 前自檢實測（session-mode.py cp950 炸、已修）
