@@ -38,8 +38,7 @@
 ## 三、未完成項目交接（立制 session 沒做完 / 刻意不做的）
 
 - **legal-admin CLAUDE.md 的決策編號清理**：機制段還留著 #166/#173/#27/#182 等指向 dogfood DB 的編號，客戶部署看不懂。master 已做過同樣清理（commit `58c23c1`）可當範本。低風險、機械性，適合派 sonnet + read-back。
-- **hooks ops 文字的律所化**：`session-mode.py` 的 ops 文字沿用 SME 用語（「老闆原話」「庫存異動」「收支金額」），與律所 branch 不搭、且其開機清單（low_stock_alerts / check_overdue）與 CLAUDE.md〈啟動流程〉律所守則（待確認到期日 / 時限 / 掃描器健康）是兩份不同清單。**刻意逐字保留**（本次改動守「營運行為零改變」）；要改 = 營運行為變更，先問老闆。
-- **`inject-line-routing.py` 的 SME 路由文字**：這支 UserPromptSubmit hook 對含 LINE 訊息的 prompt 注入「陌生人依意圖路由通知負責人」「對外行銷先 create_approval」等 SME 流程，與本 branch CLAUDE.md「不做對外行銷、不做陌生人意圖分層路由」直接矛盾。同屬營運行為變更，要改先問老闆。
+- ~~hooks ops 文字的律所化~~ / ~~inject-line-routing.py 的 SME 路由文字~~：**已完成（2026-07-07，老闆核准「全改」）**——session-mode.py 的 ops 開機清單改對齊 ops-dashboard.md（掃描器哨兵 / 待確認到期日 / 即將到期時限）、寫入檢查改律所領域（時限走收件抽取、絕不心算）；inject-line-routing.py 改所內名冊二分路由 + 判決書收件抽取、刪陌生人行銷路由。SME 原文在 git 歷史（9beffcd 之前）。
 - **playbooks 是否複製到 master**：這套制度是通用的，但兩線永不 merge——要過去只能 copy。等老闆裁示。
 - **Windows 實機部署階段**（老闆已預告）：目標 = Claude Desktop code tab + 自包含 sme 專案資料夾（含自己的 CLAUDE.md）。部署時記得：`.mcp.json` per-project 重生成、`SME_DB_PATH` 指自己、hooks/settings 隨資料夾走。
 - **pleading 側**：`PLEADING_DB_PATH` 進 pleading production repo 的 commit 仍 HOLD 等老闆點頭（那是另一個 repo、另一位負責，不是這邊的事，但別誤以為漏做）。

@@ -16,7 +16,7 @@
 
 **修法（本次已修）**：
 - 新增 `.claude/hooks/session-mode.py` 三態分流：`SME_FLOOR` 有值 → ops；`SME_SESSION_MODE` 顯式覆寫（`dev`/`ops`）；repo root 無 floor → 預設 **dev**。
-- dev 模式：SessionStart 只注入幾行開發紀律（指向本目錄）、UserPromptSubmit 靜默（另一支 `inject-line-routing.py` hook 是條件式、只在 prompt 含 LINE channel 訊息時才輸出，dev 日常同樣無聲）。ops 模式：原文照舊、行為零變。
+- dev 模式：SessionStart 只注入幾行開發紀律（指向本目錄）、UserPromptSubmit 靜默（另一支 `inject-line-routing.py` hook 是條件式、只在 prompt 含 LINE channel 訊息時才輸出，dev 日常同樣無聲）。ops 模式：最初逐字保留 SME 原文（守「營運行為零改變」）、2026-07-07 經老闆核准「全改」後全律所化（開機清單對齊 ops-dashboard.md、寫入檢查對齊律所領域）。
 - `CLAUDE.md` 開頭新增〈Session 模式（先判別、再往下讀）〉短段。
 - **判準**：你在 repo root 改程式/文件/測試 = dev；你在回 LINE 訊息、跑所務 readout、被 `start-line.sh` 啟動 = ops。dev session 不跑營運啟動、不寫營運 DB（驗證產品行為預設用本 worktree 的 dev DB `data/business.db`、`.mcp.json` 已指；跨 repo e2e 才用 `/mnt/d/pm-scratch/sme_sandbox.db`）。
 

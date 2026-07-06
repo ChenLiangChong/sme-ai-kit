@@ -52,11 +52,11 @@
 守則：
 - **LINE 環境未就緒** → 載入 `setup.md` 引導設定（LINE token / ngrok），不要硬跑啟動
 - **人員數 = 0** → 視為全新系統，自動載入 `knowledge-capture.md` 的導入訪談流程引導所長完成初始設定
-- 啟動 readout 至少要含：待處理任務 / 待審核 / **待簽請假** / **待確認到期日** / **即將到期法定時限** / **逾期時限** / **時限掃描器健康（#H1 哨兵）**
+- 啟動 readout 至少要含：待處理任務 / 待審核 / **待簽請假** / **待確認到期日** / **即將到期法定時限** / **逾期時限** / **時限掃描器健康（掃描器哨兵）**
 - 即將到期 / 逾期時限只「讀取」legal-admin 算好的法定+內部雙日期與法條呈現、**絕不在開機時自行重算法定天數**
 - 數值為 0 也要顯示（讓所長知道系統有在跑、不是漏報）
 - **掃描失聯 / watchdog 失聯列在 readout 最前**（時限停止倒數沒人知＝漏期根因）；全權限層開機額外檢查 `list_pending_escalations` 待投遞 / 失敗（見〈上報（escalation）機制〉）
-- **多人所 floored 受限層**：readout 依 floor 可見度收斂（#166 開機自動讀取已堵）、非該層可見的區塊以「本層不可見」呈現、不是當缺資料或顯示 0（個人律所不設 floor、此分支 inert）
+- **多人所 floored 受限層**：readout 依 floor 可見度收斂（開機自動讀取已堵）、非該層可見的區塊以「本層不可見」呈現、不是當缺資料或顯示 0（個人律所不設 floor、此分支 inert）
 
 ## 單一律所（多事業體軸退化）
 
@@ -81,12 +81,12 @@ LINE / CLI 每個 session 可帶 `SME_FLOOR` 環境變數標示「部門安全�
 
 **`floor-map.json` = 能力設定層（keystone）**：每層設 `financial_visibility` / `role` / `escalation_target` / `department`，`apply_floor_policy` 據此決定工具去留：
 - 非全權限層**一律移除** HR 工具（員工 PII / 請假 / 員工管理）+ 上報管理工具（`list_pending_escalations` / `mark_escalation_sent`，使部門層讀不到也標不了自己被上報的事）
-- 財務工具去留看 `financial_visibility`：`all` = 全保留（會計層）、`none`（預設）= 移除全部財務工具、`own_bu` = 目前 **fail-closed**（連讀也砍、要靠未完成的 #11 才安全）
+- 財務工具去留看 `financial_visibility`：`all` = 全保留（會計層）、`none`（預設）= 移除全部財務工具、`own_bu` = 目前 **fail-closed**（連讀也砍、要靠未完成的列級過濾才安全）
 - **無 floor-map 條目 = 安全預設 `none`**（完全等同未分層前）
 
 **已收斂 vs 仍有缺口（回報時不可誤述）**：
-- **開機自動讀取已堵（#166）**：`get_context_summary` / `low_stock_alerts` 在非全權限層走 `is_full_access()` 早退安全子集，避免「開機 hook 自動跑就洩漏」
-- **on-demand 讀取仍 fail-open（#11 未做、本輪不處理）**：`list_orders` / `get_order` / `list_tasks` / `check_stock` / `find_customer` 仍照 agent 傳入的 `business_unit`、非全權限層可省略 BU → 撈到全 BU。**文件與回覆絕不可宣稱「部門層只看得到自己 BU 的資料」**——列級過濾尚未落地
+- **開機自動讀取已堵**：`get_context_summary` / `low_stock_alerts` 在非全權限層走 `is_full_access()` 早退安全子集，避免「開機 hook 自動跑就洩漏」
+- **on-demand 讀取仍 fail-open（列級過濾未落地、本輪不處理）**：`list_orders` / `get_order` / `list_tasks` / `check_stock` / `find_customer` 仍照 agent 傳入的 `business_unit`、非全權限層可省略 BU → 撈到全 BU。**文件與回覆絕不可宣稱「部門層只看得到自己 BU 的資料」**——列級過濾尚未落地
 
 > 哪些層名屬全權限、各層看什麼，**隨 onboarding 的 floor-map 客製而變**：引用機制名稱即可、不要在 references 寫死層清單。診斷本層能力用 `floor_status` / `floor_config_status`。
 
@@ -95,18 +95,18 @@ LINE / CLI 每個 session 可帶 `SME_FLOOR` 環境變數標示「部門安全�
 - **floored session（有 `SME_FLOOR`）**：操作者 `actor` 一律由系統取 line-channel 每則訊息驗簽後寫入 `active-request` 的 verified `user_id`、**忽略 agent 傳入值**（防冒名、防傳空字串走系統全通）。查不到當前 LINE 脈絡 → 回 `__unverified__` sentinel、後續權限檢查擋下。
 - **operator / setup（無 `SME_FLOOR`）**：才採用傳入的 `actor` 值。
 - verified 結果存在 `~/.claude/channels/line/active-request-<floor>.json`，被 sandbox `denyRead` 擋住、agent 偽造不了；只有非 sandbox 的 MCP 進程讀得到；逾 10 分鐘視為過期。
-- **不可逆動作具名 `actor` + 權限關卡（#10 已落實）**：`update_employee` 需 `admin`、`delete_transaction` 需 `manager`，且 audit log 記 verified 操作者名（不再 `actor='system'`）。floored 員工由系統取 verified `user_id` 驗權（非該等級 / 未驗證身份擋下、agent 自填無效）；operator（無 `SME_FLOOR`、空 actor）放行＝全權限路徑（威脅模型只防「員工透過 agent 越權」、operator 是受信任的開發 / 所長層）。references 給範例時別寫「agent 自己填 actor 名」（floored 層的 actor 由系統認、非 agent 控制）。
+- **不可逆動作具名 `actor` + 權限關卡（已落實）**：`update_employee` 需 `admin`、`delete_transaction` 需 `manager`，且 audit log 記 verified 操作者名（不再 `actor='system'`）。floored 員工由系統取 verified `user_id` 驗權（非該等級 / 未驗證身份擋下、agent 自填無效）；operator（無 `SME_FLOOR`、空 actor）放行＝全權限路徑（威脅模型只防「員工透過 agent 越權」、operator 是受信任的開發 / 所長層）。references 給範例時別寫「agent 自己填 actor 名」（floored 層的 actor 由系統認、非 agent 控制）。
 
 ## 上報（escalation）機制
 
 部門層做了越權或高風險動作時，系統**主動通報**對應負責人（通常是所長）。**上報只通知、不擋動作。**（個人律所不設 floor 時無「部門層」、此情境多由 legal-admin 的時限 / 審核觸發。）
 
-- **硬接線、agent 跳不過（#162 / #173）**：觸發的 service 在「真正執行那支 tool 的**同一個 transaction 內**」無條件 `enqueue_escalation` 寫一筆 `pending_escalations`（與業務寫入同一原子 commit）。agent 看不到也略不掉、不是 agent 主動通報。
-- **6 個預設啟用的觸發（#173 / #178，settings `escalation_triggers` 可覆寫）**：`approval_pending`（**審核一建立就通知簽核人**、不等執行）、`transaction_recorded_over_threshold`（記帳超門檻）、`order_cancelled_shipped`（已出貨單被取消）、`transaction_deleted`（刪帳）、`employee_permissions_changed`（員工權限變動）、`qc_failed`（品檢未過）。`cross_bu_access` 預設**關**（高頻無 dedup 會洗版）。
+- **硬接線、agent 跳不過**：觸發的 service 在「真正執行那支 tool 的**同一個 transaction 內**」無條件 `enqueue_escalation` 寫一筆 `pending_escalations`（與業務寫入同一原子 commit）。agent 看不到也略不掉、不是 agent 主動通報。
+- **6 個預設啟用的觸發（settings `escalation_triggers` 可覆寫）**：`approval_pending`（**審核一建立就通知簽核人**、不等執行）、`transaction_recorded_over_threshold`（記帳超門檻）、`order_cancelled_shipped`（已出貨單被取消）、`transaction_deleted`（刪帳）、`employee_permissions_changed`（員工權限變動）、`qc_failed`（品檢未過）。`cross_bu_access` 預設**關**（高頻無 dedup 會洗版）。
   - **律所部署相關性**：`approval_pending`（到期日確認 / 對法院遞交）與 `employee_permissions_changed` 為主要相關觸發；legal-admin 另加時限相關觸發（如 `deadline_amended`）。`transaction_recorded_over_threshold` / `transaction_deleted` / `order_cancelled_shipped` / `qc_failed` 因律所不啟用記帳 / 訂單 / 品檢而 **inert（永不觸發）**、保留為升級路。
-- **身份 / 收件人 / 來源層在「建立當下」蓋章、投遞器不重算（#27）**：`actor`、`target_line_user_id`、`source_floor` 都在 enqueue 當下（service in-tx、active-request 還在）解析寫死；`source_floor` 由系統讀 `SME_FLOOR` 寫入、**非靠 LLM 措辭**。給主管的訊息「來源層 + 操作者」由 `(source_floor, actor)` 確定性推導、**永不匿名**（verified 員工名 / 未驗證身份 / 系統操作三類分明）。收件人 coalesce：`floor-map.escalation_target` 直接 user_id → `role=boss` → `permissions=admin` → `company.boss_line_id` → 仍寫 pending（fail-toward-有人收、不靜默丟）。
-- **投遞 = 三層、笨投遞器照 row 推**：**保證層（主）** OS cron `flush_escalations.py`（純讀 row → push → UPDATE status、不重算身份）；**品質層** `claude -p` single-shot notifier（走訂閱、env 去 `ANTHROPIC_API_KEY`、全權限才看得到 escalation、窄工具白名單、防遞迴 `SME_NOTIFIER=1`）；**即時層（best-effort）** in-session push 經 line-channel owner IPC 注入正在跑的全權限 session、commit 後即時自醒——channel notification 的 `meta` **必為 `Record<string,string>`**（int / None 會被 CC 靜默丟棄整筆通知 = #182 根因）。
-- **投遞租約防雙送（#27）**：cron 與 notifier 併發時送前先原子 claim（`claimed_at` CAS、claim 與 send 分 tx），只有搶到的那路可送 + 落 log；TTL 後未完成的 row 可被 reclaim。常數值勿寫死（test 有 cross-file guard 綁死）。
+- **身份 / 收件人 / 來源層在「建立當下」蓋章、投遞器不重算**：`actor`、`target_line_user_id`、`source_floor` 都在 enqueue 當下（service in-tx、active-request 還在）解析寫死；`source_floor` 由系統讀 `SME_FLOOR` 寫入、**非靠 LLM 措辭**。給主管的訊息「來源層 + 操作者」由 `(source_floor, actor)` 確定性推導、**永不匿名**（verified 員工名 / 未驗證身份 / 系統操作三類分明）。收件人 coalesce：`floor-map.escalation_target` 直接 user_id → `role=boss` → `permissions=admin` → `company.boss_line_id` → 仍寫 pending（fail-toward-有人收、不靜默丟）。
+- **投遞 = 三層、笨投遞器照 row 推**：**保證層（主）** OS cron `flush_escalations.py`（純讀 row → push → UPDATE status、不重算身份）；**品質層** `claude -p` single-shot notifier（走訂閱、env 去 `ANTHROPIC_API_KEY`、全權限才看得到 escalation、窄工具白名單、防遞迴 `SME_NOTIFIER=1`）；**即時層（best-effort）** in-session push 經 line-channel owner IPC 注入正在跑的全權限 session、commit 後即時自醒——channel notification 的 `meta` **必為 `Record<string,string>`**（int / None 會被 CC 靜默丟棄整筆通知，此為根因）。
+- **投遞租約防雙送**：cron 與 notifier 併發時送前先原子 claim（`claimed_at` CAS、claim 與 send 分 tx），只有搶到的那路可送 + 落 log；TTL 後未完成的 row 可被 reclaim。常數值勿寫死（test 有 cross-file guard 綁死）。
 - **送出有稽核留底**：實際送出文字落 `interaction_log`（`action='escalation_sent'`）。
 - **異常監看**：`list_pending_escalations` 有 `failed` / 逾期未送達 → 提醒全權限層，否則上報靜默失敗無人知。
 
@@ -153,7 +153,7 @@ agent 寫 fact / log decision 前先 `query_knowledge(主題)` 找候選相關�
 - 請假申請（若假別 `requires_approval=true`，由 `request_leave` 自動建 approval）
 - 批次修改人員 / 當事人資料等跨多步驟組合操作（手動 `create_approval`，走下面 B 類）
 
-> 記帳 / 訂單超門檻自建 approval（`record_transaction` #183 / `create_order` #26）為 **inert**：律所不啟用記帳 / 訂單。gate 演算法本身（下方）為**領域無關契約、原樣保留**，供請假簽核與升級路使用。
+> 記帳 / 訂單超門檻自建 approval（`record_transaction` / `create_order`）為 **inert**：律所不啟用記帳 / 訂單。gate 演算法本身（下方）為**領域無關契約、原樣保留**，供請假簽核與升級路使用。
 
 ### 審核請求的 detail 格式
 
@@ -242,7 +242,7 @@ CLI session 建立 `create_approval` 後：
 > 案件查詢 / 收件算時限 / 諮詢預約 / 行事曆 / 隱私部署 → 載入 `legal-admin` 技能包對應 reference（見上方 legal-admin 段）。
 > `quality_checklist.md` 是 skill 包自身的品質檢核清單（dev / 維護者用、非 agent runtime 載入）、不列入此表。
 
-> **本 branch 為律師事務所所內專用**：不含對外社群 / 行銷技能（social-media 技能包不適用、不在此啟用；律師倫理限制廣告招攬）。對外溝通僅限行事曆 / 委任人行政通知的去識別化內容。
+> **本 branch 為律師事務所所內專用**：不含對外社群 / 行銷技能（social-media 技能包與行銷類 agents 已自本 branch 移除；律師倫理限制廣告招攬）。對外溝通僅限行事曆 / 委任人行政通知的去識別化內容。
 
 ### 使用方式
 - 不需要記模組名稱

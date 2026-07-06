@@ -7,7 +7,8 @@
 3. 都沒有（repo root 互動 session）→ dev（本 repo 是開發 repo；正式部署有自己的專案資料夾與 settings）
 
 用法：session-mode.py <session-start|prompt-submit>
-- ops：注入原本的營運指令（文字與 2026-07-06 之前的 settings.json 完全一致、營運行為零改變）
+- ops：注入律所版營運指令（2026-07-07 全律所化：開機清單對齊 ops-dashboard.md、
+  寫入檢查對齊律所領域；最初的 SME 原文保存在 git 歷史 9beffcd 之前的 settings.json）
 - dev + session-start：注入幾行開發紀律；dev + prompt-submit：靜默（不注入）
 
 自測（不用開 session）：
@@ -29,17 +30,21 @@ def resolve_mode() -> str:
     return "dev"
 
 
-# 注意：以下兩段 ops 文字沿用改版前 settings.json 的 SME 用語與開機清單，與本 branch
-# CLAUDE.md〈啟動流程〉的律所守則不同——這是已知債、刻意逐字保留（守「營運行為零改變」），
-# 詳見 .claude/playbooks/90-letter.md §三。別當 bug 修；要改 = 營運行為變更、先問老闆。
+# 律所版 ops 文字（2026-07-07 全律所化，老闆核准「全改」）：
+# 開機清單對齊 CLAUDE.md〈啟動流程〉與 ops-dashboard.md 步驟 3-7 的真實工具；
+# 寫入檢查對齊律所領域（時限走收件抽取、絕不心算——反捏造一級鐵則）。
 OPS_SESSION_START = (
-    "SESSION START / COMPACT 恢復：請立即跑啟動流程。\n"
+    "SESSION START / COMPACT 恢復：請立即跑啟動流程（完整步驟見 ops-dashboard.md、CLAUDE.md〈啟動流程〉為主控）。\n"
     "1. mcp__business-db__get_context_summary(scope=full) — 若回傳含「上次 Session 交接 #N」：\n"
     "   • 24h 內 → 按 handoff 下一步繼續、不要重新規劃\n"
     "   • 標 ⚠️ 過時 → 顯示給使用者並問「這個交接還有效嗎？」確認後再動\n"
     "   • 接手完成後務必跑 mcp__business-db__resolve_handoff(handoff_id, note) 標記，否則下次又會撈到\n"
-    "2. mcp__business-db__low_stock_alerts、mcp__business-db__check_overdue、"
-    "mcp__business-db__list_pending_leave_requests 補充狀態（請假表為空時自然回 empty、不影響流程）\n"
+    "2. 掃描器 heartbeat 哨兵列 readout 最前（看 get_context_summary 的哨兵狀態；"
+    "失聯=時限恐停止倒數、執業過失高風險）；再補：\n"
+    "   • mcp__business-db__list_pending_intakes — 待確認到期日（等律師一鍵確認、不端權威日期）\n"
+    "   • mcp__business-db__list_upcoming_deadlines(within_days=7) — 即將到期/逾期法定時限"
+    "（只搬引擎算好的日期與 statutory_basis、絕不自行心算天數）\n"
+    "   • mcp__business-db__list_pending_leave_requests — 待簽請假（空表自然回 empty、不影響流程）\n"
     "3. 再回答使用者的問題"
 )
 
@@ -47,15 +52,16 @@ OPS_PROMPT_SUBMIT = (
     "⚠️ DB 寫入檢查（每則訊息必過一次）：\n"
     "• 寫前必查：query_knowledge(關鍵字) / get_rule(id) 找同主題；命中 → 跟使用者討論 → "
     "補充走 update_rule、不要 silently 再開新規則\n"
-    "• 規則/SOP/政策/限制 → mcp__business-db__store_fact (必帶 source_quote=老闆原話；"
+    "• 所務規則/SOP/收發文慣例 → mcp__business-db__store_fact (必帶 source_quote=所長/律師原話；"
     "可選 related_rule_ids 關聯既有規則)\n"
-    "• 設定值（顏色/字體/URL/文案）→ mcp__business-db__store_fact (category='settings', title=key)；"
+    "• 設定值（行事曆代號/範本路徑/文案）→ mcp__business-db__store_fact (category='settings', title=key)；"
     "查用 get_setting(key)\n"
-    "• 交辦/承諾/截止日/「明天」「下週」「記得做」→ mcp__business-db__create_task\n"
+    "• 交辦/承諾/「明天」「下週」「記得做」→ mcp__business-db__create_task\n"
     "• 為什麼這樣做的決策 → mcp__business-db__log_decision (附 reason；可選 supersedes_rule_ids / related_rule_ids)\n"
-    "• 客戶聯絡/偏好/特殊條件 → mcp__business-db__update_customer 或 set_customer_entity_terms\n"
-    "• 庫存異動 → mcp__business-db__update_stock\n"
-    "• 收支金額 → mcp__business-db__record_transaction\n"
+    "• 判決書/裁定/開庭通知的送達日與期限 → 一律走 legal-admin 收件抽取"
+    "（stage_deadline_intake → HITL 一鍵確認 → create_deadline 確定性計算），"
+    "絕不心算天數、絕不直接 store_fact 存期限日期\n"
+    "• 當事人/委任人聯絡方式與特殊注意事項 → mcp__business-db__update_customer\n"
     "回「好的我會記住」「我知道了」不算寫入。必須真的呼叫對應 tool。"
     "不確定要不要存就主動問使用者，不要私下省略。"
 )

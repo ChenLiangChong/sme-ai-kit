@@ -32,7 +32,7 @@ register_employee(name='○○○', role='manager', department='訴訟組', perm
 - **escalation 主收件人**：問「漏掉就出事、要第一個被叫醒的人是誰？」（時限快到 / 逾期、審核待簽）→ `update_company(boss_line_id=主持律師 verified LINE user_id)`，fail-toward-有人收（見 CLAUDE.md〈上報（escalation）機制〉）。
 - **部門安全層（floor）判斷**：問「有沒有資料不能讓所內所有人都看到？」（受僱律師只看自己案、助理不看 HR / 機密見解）。
   - **個人所 / 全員互信小所 → 不分**（不設 `SME_FLOOR`、全權限單人；`confidential` 與 floor gate 保留 inert 升級路）＝**預設**。
-  - 要分 → 用「誰看不到什麼」描述、配 `data/floor-map.json`（見 setup.md 多人版段）。**誠實邊界**：floor 擋得住工具去留 / 財務 / HR / 機密知識過濾，但**案件資料的列級過濾（#11）尚未落地**——**不可**向所長宣稱「設了 floor 該層律師只查得到自己案件」。
+  - 要分 → 用「誰看不到什麼」描述、配 `data/floor-map.json`（見 setup.md 多人版段）。**誠實邊界**：floor 擋得住工具去留 / 財務 / HR / 機密知識過濾，但**案件資料的列級過濾尚未落地**——**不可**向所長宣稱「設了 floor 該層律師只查得到自己案件」。
 
 ### Step 3：執業領域
 

@@ -162,7 +162,7 @@ LINE-runtime 可以「分層」啟動：不同部門的 session 套不同的可�
 
 起層前的前置條件（腳本會檢查、缺就 fail）：該層的資料夾 `data/<層>/` 要存在、該層 settings `.claude/line-runtime-<層>.json` 要存在。**這兩個都要對齊 floor-map（見 Step 2）裡的層名。**
 
-`start-line.sh` 已在 repo（`base` 自動推導腳本所在的 repo root、不寫死絕對路徑 → 換機器 / 換資料夾 / 上 NAS 都免改）。各層 sandbox settings 用 **`.claude/line-runtime.example.json`** 當範本：每層複製一份成 `.claude/line-runtime-<層>.json`，把 `__REPO__` 換成 repo 絕對路徑、`<層>` 換成層名、`denyRead` 裡的 `<其他層N>` 補齊「除本層外所有層」的資料夾（漏列＝該層牆破洞）。**這個逐層手抄 + denyRead 交叉表正是 #13 manifest 生成器要自動化的；生成器上線前先照範本手建，上線後從 `floor-map.json` 自動產出（見 `docs/deployment/floor-nas.md`）。**
+`start-line.sh` 已在 repo（`base` 自動推導腳本所在的 repo root、不寫死絕對路徑 → 換機器 / 換資料夾 / 上 NAS 都免改）。各層 sandbox settings 用 **`.claude/line-runtime.example.json`** 當範本：每層複製一份成 `.claude/line-runtime-<層>.json`，把 `__REPO__` 換成 repo 絕對路徑、`<層>` 換成層名、`denyRead` 裡的 `<其他層N>` 補齊「除本層外所有層」的資料夾（漏列＝該層牆破洞）。**這個逐層手抄 + denyRead 交叉表正是 manifest 生成器要自動化的；生成器上線前先照範本手建，上線後從 `floor-map.json` 自動產出（見 `docs/deployment/floor-nas.md`）。**
 
 > **系統依賴：Linux 需裝 `bubblewrap`（`bwrap`）**——它是 Claude Code 在 Linux 的 sandbox 後端，floored 層 settings 設了 `sandbox.enabled` + `failIfUnavailable:true`，**缺 `bwrap` 受限層 session 會 fail-closed 起不來**。`install.sh` 會自動裝（`apt install bubblewrap`）；若 floored 啟動失敗先 `command -v bwrap` 檢查。macOS 用內建 `sandbox-exec`、不需此套件。`start-line.sh` 本身是 expect 腳本，另需 `expect`（install.sh 也會裝）。
 
@@ -181,10 +181,10 @@ cp mcp-servers/business-db/floor-map.example.json data/floor-map.json
 
 | 欄位 | 作用 |
 |------|------|
-| `financial_visibility` | `none`（看不到財務、預設）/ `all`（看全部財務）/ `own_bu`（待 #11；目前 fail-closed 等同 none）。決定這層的 MCP 進程**有沒有財務工具** |
+| `financial_visibility` | `none`（看不到財務、預設）/ `all`（看全部財務）/ `own_bu`（待列級過濾落地；目前 fail-closed 等同 none）。決定這層的 MCP 進程**有沒有財務工具** |
 | `role` | `boss` / `manager` / `staff`，給上報與 HITL 判斷用 |
 | `escalation_target` | 上報給誰：填 LINE user_id＝系統特判直送；其餘值（如 `'boss'`）走 `role=boss` → `admin` → `company.boss_line_id` 的 coalesce。（**目前未實作「填 floor 名」當收件人**）|
-| `business_units` | 此層可碰哪些事業體（待 #11 BU-scoping 才真正生效；**個人律所為單一所、此欄留空 inert**）|
+| `business_units` | 此層可碰哪些事業體（待 BU-scoping 列級過濾落地才真正生效；**個人律所為單一所、此欄留空 inert**）|
 | `department` | 人看的部門標籤 |
 
 無 `data/floor-map.json` 時系統走安全預設（全權限層看全部、其餘 `financial_visibility=none` / `role=staff` / 上報 `boss`），等同未啟用分層、向後相容——**個人律所就是這個狀態**。`floor-map.json` 屬機密設定、應在各受限層 settings 的 `denyRead` 內（範例 settings 已含）。
@@ -193,7 +193,7 @@ cp mcp-servers/business-db/floor-map.example.json data/floor-map.json
 
 ### Step 3：必須常駐一個全權限 session
 
-分層部署時（多人版），**必須常駐一個 `SME_FLOOR=confidential` 的 session**（`./start-line.sh confidential`）。注意：bare `./start-line.sh`（`SME_FLOOR` 空）雖然工具上也是全權限，但所長 / admin 的 LINE 訊息被 line-channel **硬路由到 `confidential` 層**（`server.ts` 的 `BOSS_TARGET_FLOOR='confidential'`、待 #13 改由 floor-map 推導）——只有 `confidential` session 收得到、才接得住核准閉環。理由：
+分層部署時（多人版），**必須常駐一個 `SME_FLOOR=confidential` 的 session**（`./start-line.sh confidential`）。注意：bare `./start-line.sh`（`SME_FLOOR` 空）雖然工具上也是全權限，但所長 / admin 的 LINE 訊息被 line-channel **硬路由到 `confidential` 層**（`server.ts` 的 `BOSS_TARGET_FLOOR='confidential'`、待改由 floor-map 推導）——只有 `confidential` session 收得到、才接得住核准閉環。理由：
 
 - 所長 / admin 的 LINE 訊息（含「核准 #N」）會被路由進全權限 session；沒有這層，所長的核准訊息**無處落地**、in-session push 的「核准 → 執行 → 回覆」閉環會斷。
 - 各受限層的上報（escalation）需要一個收件端來通知所長並完成核准。受限層 session 自己**不該、也未必能**撈到所長 user_id 去 reply；通知與簽核一律走上報機制、由全權限層處理。

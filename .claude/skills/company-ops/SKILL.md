@@ -33,7 +33,7 @@ description: "律師事務所所內營運 AI 助理（business-db MCP 驅動，�
 - **通知 / 簽核走上報**：要通知所長 / 簽核人時，floored 層不一定撈得到對方 `user_id`、也不一定 push 得到——一律走上報（escalation）機制或由全權限層處理，不要自己撈 `role=boss` 去 reply（見 CLAUDE.md〈上報（escalation）機制〉、line-comms〈執行模型〉）。
 - **HITL gate**：請假簽核（`approve_leave`）走 gate（resume_params 比對 + consumed_at 單次消費）；到期日確認 / 對法院遞交的 HITL 由 legal-admin 走 approval。不要 agent 手寫繞過（見 CLAUDE.md〈HITL 審核〉）。
 - **知識有機密軸**：`store_fact` 預設員工可見、`log_decision` 預設機密；非全權限層 `query_knowledge` 會過濾掉機密規則（見 CLAUDE.md〈機密軸（confidential）〉）。導入訪談碰到收費/HR/策略類答案要明確 `confidential=True`。
-- **actor 身份**：floored session 的 actor 由系統取 line-channel 驗過的 `user_id`、**agent 自填的值會被忽略**；不可逆人事動作具名 actor + 權限關卡已落實（#10）：`update_employee` 需 admin、audit 記 verified 操作者名，operator（無 floor）為全權限路徑（見 CLAUDE.md〈actor 身份信任〉）。
+- **actor 身份**：floored session 的 actor 由系統取 line-channel 驗過的 `user_id`、**agent 自填的值會被忽略**；不可逆人事動作具名 actor + 權限關卡已落實：`update_employee` 需 admin、audit 記 verified 操作者名，operator（無 floor）為全權限路徑（見 CLAUDE.md〈actor 身份信任〉）。
 
 ## 常用工作流
 

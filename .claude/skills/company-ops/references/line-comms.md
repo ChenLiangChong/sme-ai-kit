@@ -239,7 +239,7 @@ Phase 1 用文字回覆（不用 Postback 按鈕）：
 - Claude 解析 → `resolve_approval(approval_id=123, decision='approved', decided_by='主持律師')`
 - **接續執行真正的 action**：從 approval.detail 取出 `resume_action` 與 `resume_params`，呼叫對應 tool（gate-backed：`approve_leave`；或 manual_ prefix 走人工多步驟），完成後 approval 才會被 consume（HITL gate 強制）
 - **裸「核准」沒帶編號**：不要猜、不要隨便撈一筆 pending approval 套上去。先 `get_context_summary` / 查 waiting approvals：剛好一筆 → 回報「您是要核准 #N（內容…）嗎？」確認後再核；多筆 → 列出來問哪一筆；零筆 → 告知沒有待核項目。
-- **簽核身份驗證（#24）**：`resolve_approval` 在非全權限層會驗操作者（須 verified manager 以上、且本人 LINE 操作）。被回「無權簽核」**不是系統錯誤**——是該操作者權限不足或非本人，照實回報、不要繞。（個人律所全權限單人不觸發此驗證。）
+- **簽核身份驗證**：`resolve_approval` 在非全權限層會驗操作者（須 verified manager 以上、且本人 LINE 操作）。被回「無權簽核」**不是系統錯誤**——是該操作者權限不足或非本人，照實回報、不要繞。（個人律所全權限單人不觸發此驗證。）
 - **執行接續可能要換層（分層部署才相關）**：若你這層沒有該 `resume_action` 的工具，`resolve_approval` 仍會成功（核准是決策、不需執行工具），但「真正執行」要由**有該工具的層**或**原本建立審核的 session** 接手。此時回報「審核 #N 已核准，將由 {對應層} 執行」，不要假裝自己執行了。
 - 詳細的 gate 行為、`resume_params` 一致性驗證、單次消費規則見 **CLAUDE.md HITL 章節**
 

@@ -34,7 +34,7 @@
 - **全權限層（`SME_FLOOR=''` 或 `confidential`）**：跑完整 readout（即上方步驟 1-10），並負責步驟 9 的 `list_pending_escalations()` 上報投遞檢查。
 - **非全權限層也砍 HR 工具**：`list_pending_leave_requests` / `lookup_employee` 等員工 / 請假工具被 `apply_floor_policy` 物理移除——dashboard 的「待簽請假」區塊在這些層以「本層不可見」呈現、非當缺資料。
 - **非全權限層共通**：`list_pending_escalations` / `mark_escalation_sent` 也已被移除——受限層**不負責**檢查或投遞上報，上報投遞由全權限層 + cron 保證層處理（見 CLAUDE.md〈上報（escalation）機制〉）；本層 readout 不放上報投遞檢查。
-- **#166 開機自動讀取早退**：`get_context_summary` 在非全權限層走 `is_full_access()` 早退安全子集，避免「開機 hook 自動跑就洩漏」（見 CLAUDE.md〈已收斂 vs 仍有缺口〉）。
+- **開機自動讀取早退**：`get_context_summary` 在非全權限層走 `is_full_access()` 早退安全子集，避免「開機 hook 自動跑就洩漏」（見 CLAUDE.md〈已收斂 vs 仍有缺口〉）。
 - 不確定本層有哪些工具 / 可見度 → 用 `floor_status` / `floor_config_status` 診斷，不要硬猜。
 
 ---
@@ -68,7 +68,7 @@
 
 ## 三、掃描器 heartbeat 與靜默失敗哨兵（律所專屬、列最前）
 
-時限倒數是**時間驅動**的（cron `scan_deadlines.py` 每日跑、人沒開 Claude 也在倒數）。哨兵的存在是補「漏不掉」的盲區——核心機制見 legal-admin SKILL〈靜默失敗哨兵（#H1/#H2）〉與 privacy-deploy，本段只講 dashboard 怎麼呈現：
+時限倒數是**時間驅動**的（cron `scan_deadlines.py` 每日跑、人沒開 Claude 也在倒數）。哨兵的存在是補「漏不掉」的盲區——核心機制見 legal-admin SKILL〈靜默失敗哨兵〉與 privacy-deploy，本段只講 dashboard 怎麼呈現：
 
 | 哨兵 / 健康項 | 偵測來源 | dashboard 呈現（失聯列最前） |
 |------|---------|------|
@@ -148,7 +148,7 @@ Dashboard 不只報數字。先分清楚**哪些是系統自動產出、哪些�
 
 | 異常 | 偵測邏輯 | 建議動作 |
 |------|---------|---------|
-| 上報投遞異常 | readout 主動跑 `list_pending_escalations()`、看有無 `failed` / 逾期未送達（claim 租約超時、見 CLAUDE.md〈上報（escalation）機制〉#27） | 「有 X 筆內部上報未送達 / 查無收件人，請確認」——否則上報靜默失敗無人知。多人版的受限層此工具已被移除、不在此層檢查 |
+| 上報投遞異常 | readout 主動跑 `list_pending_escalations()`、看有無 `failed` / 逾期未送達（claim 租約超時、見 CLAUDE.md〈上報（escalation）機制〉） | 「有 X 筆內部上報未送達 / 查無收件人，請確認」——否則上報靜默失敗無人知。多人版的受限層此工具已被移除、不在此層檢查 |
 
 > escalation 的「觸發」本身是系統硬接線自動的（時限命中提醒節點 / 逾期 `deadline_missed`、approval_pending、員工權限變動等會在 in-tx 自動 `enqueue_escalation`，見 CLAUDE.md〈上報（escalation）機制〉與 legal-admin daily-digest）；上表只是檢查**投遞結果**、不是 dashboard 自己去偵測該不該上報。
 

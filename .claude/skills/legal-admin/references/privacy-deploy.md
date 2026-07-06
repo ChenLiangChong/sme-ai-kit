@@ -27,7 +27,7 @@
   ```
   整年逐日匯入、idempotent 可重跑、來源記在 `source` 欄。**務必與人事行政總處官方對賬**（反捏造：填錯假日＝算錯期限）。未載入年度的時限引擎會標 `needs_manual_review`（末日順延算不準）——這是保護、但別讓律師天天踩，每年初記得補次年度。
 - [ ] **種 boss 收件人**：每日提醒/逾期上報的收件人走 `resolve_escalation_target`（coalesce 到 boss/全所）。確認有一個可達的收件身份（`company.boss_line_id` 或 floor-map `escalation_target`），否則 enqueue 會留 pending 沒人收。
-- [ ] **cron 設定（`install.sh` 已自動裝四支、缺一支都留靜默失敗破口）**：`install.sh` §8 用 `add_cron` 冪等裝 `flush_escalations`（每 2 分）+ `scan_deadlines`（每日 07:00）+ `scan_heartbeat`（#H1、每 2h）+ `scan_unconfirmed_intake`（#H2、每 4h），分鐘數已錯開、重跑不重複。cron 在 host 跑、不受 LINE-runtime sandbox 管（讀得到 DB）。**部署只需確認 cron daemon 有在跑**（`install.sh` 會 `pgrep` 檢查、沒跑會 err）：
+- [ ] **cron 設定（`install.sh` 已自動裝四支、缺一支都留靜默失敗破口）**：`install.sh` §8 用 `add_cron` 冪等裝 `flush_escalations`（每 2 分）+ `scan_deadlines`（每日 07:00）+ `scan_heartbeat`（每 2h）+ `scan_unconfirmed_intake`（每 4h），分鐘數已錯開、重跑不重複。cron 在 host 跑、不受 LINE-runtime sandbox 管（讀得到 DB）。**部署只需確認 cron daemon 有在跑**（`install.sh` 會 `pgrep` 檢查、沒跑會 err）：
   ```
   # 確認已裝（4 行 SME-AI-Kit 標記）：
   crontab -l | grep SME-AI-Kit

@@ -44,7 +44,7 @@ description: "律師事務所內部 LINE 法務行政秘書（business-db MCP �
 
 - **個人律所通常不設 floor**：機密層 / floor 是「對內防員工越權」的機制，個人律所只有一個律師、看全部、沒有對內隱藏對象 → 部署不設 `SME_FLOOR`（全權限單人）。`confidential` 欄 + floor gate **保留為 inert**（全權限下永遠可見、不過濾、零成本）、待增助理或多人版再啟用（見 CLAUDE.md〈部門安全層（floor）〉、SPEC〈floor / 機密層〉）。**別把「機密層（對內）」跟「隱私（對外）」搞混**——對外隱私照樣全部適用（見 privacy-deploy）。
 - **時限提醒走上報三層**：cron `scan_deadlines.py` 每日掃 pending 時限 → 命中提醒節點 / 逾期即 `enqueue_escalation`、接既有三層投遞（cron 保證層 + claude -p 品質層 + in-session 即時層），**全所一份**（見 CLAUDE.md〈上報（escalation）機制〉、daily-digest）。提醒只通知、不擋動作。
-- **靜默失敗哨兵（#H1/#H2，補「漏不掉」）**：兩支極小 cron 盯既有設計的兩個盲區——`scan_heartbeat.py`（watchdog：每次落自身 heartbeat 自證活著 + 偵測 `scan_deadlines.py` 失聯 > 門檻 → `scan_stalled` 上報，時間驅動、人沒開 Claude 也跑）、`scan_unconfirmed_intake.py`（跟催久未確認入庫的 `stage_deadline_intake` 暫存）。全權限開機 readout（`get_context_summary`）會把「掃描失聯 / 待確認 backlog」列在最前。部署見 privacy-deploy。
+- **靜默失敗哨兵（補「漏不掉」）**：兩支極小 cron 盯既有設計的兩個盲區——`scan_heartbeat.py`（watchdog：每次落自身 heartbeat 自證活著 + 偵測 `scan_deadlines.py` 失聯 > 門檻 → `scan_stalled` 上報，時間驅動、人沒開 Claude 也跑）、`scan_unconfirmed_intake.py`（跟催久未確認入庫的 `stage_deadline_intake` 暫存）。全權限開機 readout（`get_context_summary`）會把「掃描失聯 / 待確認 backlog」列在最前。部署見 privacy-deploy。
 - **HITL 審核**：「對法院遞交」「到期日確認」可走 `create_approval`；gate 行為（`resume_params` 鎖定 / `consumed_at` 單次 / 過期）見 CLAUDE.md〈HITL gate 行為〉。
 - **沿用橫向基建**：`tasks`（待辦）、`knowledge`（法律見解/SOP，機密軸）、`attachments`（存檔）、`line`、`approvals`——這些用 company-ops 對應模組，不重造。
 
@@ -54,7 +54,7 @@ description: "律師事務所內部 LINE 法務行政秘書（business-db MCP �
 - **時限**：`create_deadline`（確定性算雙日期；確認入庫帶 `confirm_intake_id` 關閉待確認跟催）、`get_deadline`（含 calc_trace 逐步覆核）、`list_deadlines`、`list_upcoming_deadlines`（每日彙整/查詢，按內部期限升冪）、`mark_deadline_filed`（已遞交、cron 停提醒）、`mark_deadline_calendared`（回填行事曆 event_id）
   - 常用 `type`：上訴/抗告 `appeal_*`/`abjection_*`、訴願 `petition_appeal`、限期補正 `correction`、**保全命起訴 `provisional_litigation`**、**行政訴訟撤銷訴訟 `admin_revocation`**、消滅時效 `statute_125`/`126`/`127`/`197_2y`/`197_10y`（見 deadline-intake.md）
 - **時限信任/稽核**：`mark_deadline_reviewed`（律師逐筆具名覆核 calc_trace、解除需複核旗標、不可一鍵過）、`amend_deadline`（改送達日/天數→確定性重算+before/after 留痕+通報+作廢原覆核；絕不手動改日期）、`get_deadline_audit`（查異動歷程）、`screen_calendar_text`（寫行事曆前去識別化自檢、advisory、附「不保證不外流」）、`privacy_audit`（事後掃 interaction_log 有無當事人名外漏）
-- **待確認跟催（#H2）**：`stage_deadline_intake`（抽出後、推回 LINE 請人確認的「當下」暫存成可掃描 backlog，只存事實不算天數）、`list_pending_intakes`（查還沒確認入庫的）、`resolve_deadline_intake`（不入庫就收掉：捨棄/已另行入庫）。補「人忘了回確認 → 時限沒入庫 → 隱形漏掉」的盲區、由 cron `scan_unconfirmed_intake.py` 跟催。
+- **待確認跟催**：`stage_deadline_intake`（抽出後、推回 LINE 請人確認的「當下」暫存成可掃描 backlog，只存事實不算天數）、`list_pending_intakes`（查還沒確認入庫的）、`resolve_deadline_intake`（不入庫就收掉：捨棄/已另行入庫）。補「人忘了回確認 → 時限沒入庫 → 隱形漏掉」的盲區、由 cron `scan_unconfirmed_intake.py` 跟催。
 
 ## 回覆語氣
 

@@ -119,7 +119,7 @@ set_leave_balance(
 2. 確認人員 ID（從 LINE meta 或 `lookup_employee`）
 3. 呼叫 `request_leave(...)`
 4. 系統自動建 leave_request + approval、回傳 approval ID
-5. **通知所長不是本 session 自己去撈所長 user_id 推播**：approval 一建立、系統就在同一 tx 內 enqueue 上報、確定性蓋章「來源層 + 申請人」通知簽核人（觸發 `approval_pending`，見 CLAUDE.md〈上報（escalation）機制〉、決策 #178 / #23）。AI 在當前對話據實回報「請假申請 #N 待簽 / 對應簽核 #M」即可，不用、也不該自己挑簽核人 reply。日後若分層、floored 部門層未必撈得到所長、也未必 push 得到——簽核通知統一走 escalation、由 line-channel 路由到對的人（執行模型細節交叉引用 line-comms 第六節）。
+5. **通知所長不是本 session 自己去撈所長 user_id 推播**：approval 一建立、系統就在同一 tx 內 enqueue 上報、確定性蓋章「來源層 + 申請人」通知簽核人（觸發 `approval_pending`，見 CLAUDE.md〈上報（escalation）機制〉）。AI 在當前對話據實回報「請假申請 #N 待簽 / 對應簽核 #M」即可，不用、也不該自己挑簽核人 reply。日後若分層、floored 部門層未必撈得到所長、也未必 push 得到——簽核通知統一走 escalation、由 line-channel 路由到對的人（執行模型細節交叉引用 line-comms 第六節）。
 
 ### 完整呼叫範例
 
@@ -341,7 +341,7 @@ approval 的 `resume_params.days=1`、但呼叫 `approve_leave` 傳了不一樣�
 
 **處理：** 比照 line-comms 第六節「執行接續可能要換層」。`resolve_approval` 可能仍能做（核准本身是決策），但「真正扣餘額」要由**有 HR 工具的層 / 全權限層 / 原本建審核的 session** 接手。回報所長「請假 #N 已核准、扣假將由 HR 層執行」、不要假裝自己扣了。**不要繞 sqlite 自己改 `leave_requests.status` / `leave_balances`。**
 
-### I. `resolve_approval 回「無權簽核」`（#24 簽核身份驗證；floor 升級路）
+### I. `resolve_approval 回「無權簽核」`（簽核身份驗證；floor 升級路）
 
 單一律師事務所為全權限單人運作、**不會**遇到本情境。以下保留給日後擴編、分層後：非全權限層 `resolve_approval` 會驗操作者（須 verified manager 以上、且本人 LINE 操作；actor 由系統取 line-channel 驗過的身份、不信任 agent 自填，見 CLAUDE.md〈actor 身份信任〉）。
 
