@@ -309,14 +309,52 @@ def get_deadline(deadline_id: int) -> str:
 
 
 @mcp.tool()
-def mark_deadline_filed(deadline_id: int, filed_by: str = "") -> str:
+def mark_deadline_filed(deadline_id: int, filed_by: str = "", confirm_unreviewed: bool = False) -> str:
     """標記時限已遞交（書狀已送出）→ 狀態轉 filed，cron 不再提醒。
+
+    該筆仍標「需人工複核」時不會直接標記（漏期防線）：先覆核（mark_deadline_reviewed）、
+    或確定已遞交才帶 confirm_unreviewed=True 二次確認（留「遞交時尚未覆核」稽核痕）。
 
     Args:
         deadline_id: 時限 ID
         filed_by: 遞交者
+        confirm_unreviewed: 該筆尚未覆核仍要標遞交的顯式二次確認
     """
-    return service.mark_deadline_filed(deadline_id=deadline_id, filed_by=filed_by)
+    return service.mark_deadline_filed(
+        deadline_id=deadline_id, filed_by=filed_by, confirm_unreviewed=confirm_unreviewed
+    )
+
+
+@mcp.tool()
+def unmark_deadline_filed(deadline_id: int, reason: str, unfiled_by: str = "") -> str:
+    """撤銷誤標的「已遞交」→ filed 轉回 pending、恢復 cron 倒數（具名+稽核、同步 pleading 鏡像）。
+
+    Args:
+        deadline_id: 時限 ID
+        reason: 為何撤銷（寫進稽核、必填）
+        unfiled_by: 撤銷者
+    """
+    return service.unmark_deadline_filed(deadline_id=deadline_id, reason=reason, unfiled_by=unfiled_by)
+
+
+@mcp.tool()
+def redact_deadline_field(
+    deadline_id: int, find_text: str, reason: str, redacted_by: str = "", replace_with: str = "當事人"
+) -> str:
+    """自由文字欄 PII 補救：把 find_text 從 trigger_event/statutory_basis/calc_trace 替換為泛稱、
+    並以乾淨值重觸發 pleading 鏡像覆蓋（具名+稽核）。當事人名用預設「當事人」、法院名傳 replace_with="法院"。
+
+    Args:
+        deadline_id: 時限 ID
+        find_text: 要移除的字串（至少 2 字）
+        reason: 為何補救（寫進稽核、必填；勿把當事人名寫進 reason）
+        redacted_by: 操作者
+        replace_with: 替換用泛稱（預設「當事人」）
+    """
+    return service.redact_deadline_field(
+        deadline_id=deadline_id, find_text=find_text, reason=reason,
+        redacted_by=redacted_by, replace_with=replace_with,
+    )
 
 
 @mcp.tool()

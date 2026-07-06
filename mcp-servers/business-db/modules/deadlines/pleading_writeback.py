@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from shared.db import _now, get_db
 from shared.deadlines import type_label
+from shared.privacy import deidentify_for_export, extract_opposing_names, extract_party_names
 
 from . import repository
 from .pleading_client import (
@@ -112,12 +113,74 @@ def _safe_title(d: dict) -> str:
     label = type_label(t)
     if label:
         return label
-    return f"法定期限（{t}）" if t else "法定期限提醒"
+    # 未知 type＝operator 自由字串、可能含 PII（codex R1 HIGH）：fallback **不再帶原代碼**、
+    # 一律固定安全字串（與 _safe_type 的 "custom" 正規化一致）。原代碼留在 sme 側自有紀錄。
+    return "自訂期限"
 
 
-def _deadline_payload(d: dict) -> dict:
+# ── 回寫邊界去識別化 gate（F-P2-WIN-2）──────────────────────────────────────
+# 原則：payload 內**所有字串欄 default in-scope**、以「豁免清單」明列例外——新增欄位天生受檢、
+# 不做逐欄打地鼠。豁免＝結構化代碼/日期/整合鍵（無自由文字空間）＋律師名欄（assignee/reviewed_by
+# ＝§127 具名當責、刻意保留、律師非去識別化對象）。實證：trigger_event（沅泰物流）、statutory_basis
+# （臺灣臺中地方法院）、calc_trace（逐字內嵌 statutory_basis）三個 verbatim 載體都在 Windows e2e 漏過。
+# 豁免欄的前提＝「值已被鎖成安全」（codex R1 HIGH）：
+# - type：outbound 前經 _safe_type 正規化（未知代碼→"custom"、絕不 verbatim 外送 operator 自由字串）
+# - assignee / reviewed_by：outbound 前經 _employee_or_none 驗證（非在職員工名→不外送）
+# - 其餘＝日期/枚舉/整合鍵（無自由文字空間）。doc_type 是 operator 可控字串→**不豁免**、照 gate 掃。
+_GATE_EXEMPT = frozenset({
+    "external_system", "external_ref", "source", "computed_by",
+    "assignee", "reviewed_by",
+    "type", "period_type", "status", "severity", "period_unit", "direction",
+    "statutory_deadline", "internal_deadline", "service_base_date", "document_date",
+    "reviewed_at", "linked_deadline_ref",
+})
+
+
+def _safe_type(t) -> str:
+    """outbound type 正規化：已知代碼（四張種子表＋泛型 map）原樣送；未知＝operator 自由字串、
+    可能含 PII → 一律改送 "custom"（sme 側自有 type 原值不動、只鎖邊界）。"""
+    t = (t or "").strip()
+    return t if (t and type_label(t) is not None) else "custom"
+
+
+def _employee_or_none(db, name):
+    """assignee / reviewed_by 豁免的前提驗證：值必須是在職員工名（§127 具名當責＝真實律師），
+    否則（operator 誤填/塞了當事人名）不外送（None、client 端 _prune_none 略過）。"""
+    nm = (name or "").strip()
+    if not nm:
+        return None
+    row = db.execute(
+        "SELECT 1 FROM employees WHERE name=? AND active=1 LIMIT 1", (nm,)
+    ).fetchone()
+    return nm if row else None
+
+
+def _matter_pii_tokens(m: dict) -> tuple:
+    """從 matter 收集「已知該去識別化的 token」：(當事人/對造名, 法院名)。誠實邊界＝只擋已知寫法。"""
+    party = extract_party_names(m.get("client_name")) + extract_opposing_names(m.get("title"))
+    court = [c for c in [(m.get("court") or "").strip()] if len(c) >= 2]
+    return party, court
+
+
+def _gate_payload(payload: dict, m: dict) -> tuple:
+    """對 payload 所有非豁免字串欄過去識別化 gate（組完之後、送出之前——calc_trace 這類「內嵌其他欄
+    原文」的欄位必須在組裝完成後整段掃、掃單一來源欄擋不住）。回 (payload, 命中token總數)。"""
+    party, court = _matter_pii_tokens(m)
+    total = 0
+    for k, v in list(payload.items()):
+        if k in _GATE_EXEMPT or not isinstance(v, str):
+            continue
+        clean, n = deidentify_for_export(v, party, court)
+        if n:
+            payload[k] = clean
+            total += n
+    return payload, total
+
+
+def _deadline_payload(d: dict, m: dict) -> tuple:
     """sme deadline row → DeadlineIn。external_ref=sme deadline id（不透明）；source/computed_by 標
-    sme 引擎自動回寫（不偽裝律師手填）；title=type 推得的去識別化法定標籤（**非**自由文字 description）。"""
+    sme 引擎自動回寫（不偽裝律師手填）；title=type 推得的去識別化法定標籤（**非**自由文字 description）；
+    全 payload 過邊界 gate（見 _gate_payload）。回 (payload, gate命中數)。"""
     payload = {
         "external_system": "sme",
         "external_ref": str(d["id"]),
@@ -127,10 +190,11 @@ def _deadline_payload(d: dict) -> dict:
     }
     for f in _DEADLINE_FIELDS:
         payload[f] = d.get(f)
-    return payload
+    payload["type"] = _safe_type(d.get("type"))  # 未知代碼→"custom"、不 verbatim 外送
+    return _gate_payload(payload, m)
 
 
-def _correspondence_payload(it: dict, *, linked_deadline_ref=None, void: bool = False) -> dict:
+def _correspondence_payload(it: dict, m: dict, *, linked_deadline_ref=None, void: bool = False) -> tuple:
     """sme intake row → CorrespondenceIn。**去識別化（結構性）**：只送結構化非識別欄（doc_type / 日期 /
     教示天數 / 方向 / refs）。**絕不送**：issuer(來文機關)、subject(完整主旨)、以及自由文字 `extracted_summary`
     ——OCR/摘要天生可能含當事人名 / 來文機關 / 完整主旨（codex Task C R1 HIGH）；人類可讀主旨留律師在
@@ -150,11 +214,24 @@ def _correspondence_payload(it: dict, *, linked_deadline_ref=None, void: bool = 
     if void:
         # 整合撤回（intake discarded / 錯誤回寫）→ status='void'（update 非 delete、pleading 排除 active+提醒）
         payload["status"] = "void"
-    return payload
+    return _gate_payload(payload, m)
 
 
 def _extract_id(view):
     return view.get("id") if isinstance(view, dict) else None
+
+
+def _log(db, action: str, target_type: str, target_id: int, detail: str) -> None:
+    """回寫層留痕（即記即 commit；失敗吞掉——留痕失敗不可反過來擋回寫/業務）。
+    detail **只記數量/狀態、絕不寫被 strip 的名字**（同 screen_calendar_text：自檢不可反而把 PII 漏進 log）。"""
+    try:
+        repository.insert_interaction_log(
+            db, actor="system", action=action,
+            target_type=target_type, target_id=target_id, detail=detail, business_unit=None,
+        )
+        db.commit()
+    except Exception:
+        pass
 
 
 def _dispatch(build_call):
@@ -203,8 +280,20 @@ def writeback_deadline(deadline_id: int, *, actor_name: str = "") -> dict:
                 lead_attorney_name=(m.get("lead_attorney") or ""),
             )
             if not token:
+                # 半配置可觀測性（F-P2-WIN-1(b)）：API_BASE 已配、案件已綁、卻選不到 token＝整合「配了
+                # 一半」——純未配置維持 inert 靜默，但這種組合要留一行 log 供排查（否則鏡像 stale 無人知）。
+                _log(db, "pleading_writeback_skipped", "deadline", deadline_id,
+                     "pleading 回寫略過：整合已配置、案件已綁定，但選不到律師 token（未綁定或已停用？）")
                 return _result("skipped", "選不到律師 token")
-            view = PleadingClient(token).upsert_deadline(pcid, _deadline_payload(d))
+            # assignee/reviewed_by 豁免前提＝在職員工名（codex R1 HIGH）：非員工字串不外送
+            d["assignee"] = _employee_or_none(db, d.get("assignee"))
+            d["reviewed_by"] = _employee_or_none(db, d.get("reviewed_by"))
+            payload, _gate_hits = _deadline_payload(d, m)
+            if _gate_hits:
+                # 去識別化 gate 命中（只記數量、不記名字）：strip 已發生＝結構防線運作的證據
+                _log(db, "pleading_writeback_deidentified", "deadline", deadline_id,
+                     f"回寫去識別化 gate：strip {_gate_hits} 個已知當事人/法院 token（payload 已泛稱化後送出）")
+            view = PleadingClient(token).upsert_deadline(pcid, payload)
             pid = _extract_id(view)
             if pid is not None:
                 # 存回對位（pleading 視為一個 calendar provider；沿用既有 mark_calendared 去重/更新機制）
@@ -246,10 +335,16 @@ def writeback_correspondence(
                 db, actor_name=actor_name, lead_attorney_name=(m.get("lead_attorney") or "")
             )
             if not token:
+                _log(db, "pleading_writeback_skipped", "intake", intake_id,
+                     "pleading 回寫略過：整合已配置、案件已綁定，但選不到律師 token（未綁定或已停用？）")
                 return _result("skipped", "選不到律師 token")
-            view = PleadingClient(token).upsert_correspondence(
-                pcid, _correspondence_payload(it, linked_deadline_ref=linked_deadline_ref, void=void)
+            payload, _gate_hits = _correspondence_payload(
+                it, m, linked_deadline_ref=linked_deadline_ref, void=void
             )
+            if _gate_hits:
+                _log(db, "pleading_writeback_deidentified", "intake", intake_id,
+                     f"回寫去識別化 gate：strip {_gate_hits} 個已知當事人/法院 token（payload 已泛稱化後送出）")
+            view = PleadingClient(token).upsert_correspondence(pcid, payload)
             return _result("ok", "correspondence", pleading_id=_extract_id(view))
         finally:
             db.close()

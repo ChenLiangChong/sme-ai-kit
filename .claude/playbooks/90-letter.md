@@ -37,10 +37,63 @@
 
 ## 三、未完成項目交接（立制 session 沒做完 / 刻意不做的）
 
+- **F-P2-WIN-1 產品層修正（2026-07-07 Windows e2e、marketing ledger 同步）**：①
+  onboarding 導入訪談（knowledge-capture）沒有引導律師綁 pleading 整合 token
+  （`bind_pleading_token`）→ vault 無憑證、回寫靜默跳過——導入流程該加一步「若有裝
+  pleading，現在綁 token」。② `pleading_writeback` 在「`PLEADING_API_BASE` 已配置
+  但該律師無 token」時連 `interaction_log` 都不記＝靜默失敗（純未配置的 inert 靜默是
+  對的、但「配了一半」該留一行 log 供排查）。兩條都是 post-run 修正、勿在 e2e 中途改碼。
+- **F-P2-WIN-2 產品層修正（🔴 去識別化邊界、碼證確認）**：`pleading_writeback` 的
+  `_DEADLINE_FIELDS` 把 `trigger_event`（自由文字）verbatim 送進 pleading——`title` 有
+  結構性去識別化（`type_label`）、`trigger_event` 沒有，operator 在裡面寫對造名（「沅泰
+  物流」）就直通洩漏。修法：回寫邊界對 `trigger_event` 過 `screen_calendar_text` 同款
+  當事人名 gate（比對 matter 欄位、命中→以 type 衍生的泛稱替換、同 `_safe_title` 哲學）；
+  `calc_trace` **已證實**逐字內嵌 statutory_basis 等自由文字（案C 法院名第二藏身處、
+  案A/B 乾淨純屬運氣）——gate 欄位定案清單＝`trigger_event`＋`statutory_basis`＋
+  `calc_trace`＋新欄 default in-scope。誠實邊界同 #6c：只擋得住已知當事人名／法院名、
+  不宣稱擋任意 PII。post-run 修。
+  縱深第二道（pleading 側、pleading_coder1 提、需兩側同步版本）：pleading API 對
+  source=sme_engine 寫入把 `trigger_event` 收斂成受控字彙＋結構欄＝「去識別化靠紀律」
+  變「schema 上不可能」。（原疑慮「audit/版本史留含 PII 舊 payload」經停機審證實不存在。）
+- **F-P3-WIN-1 產品層修正（mark_filed 對 needs_review 無警示＋無 un-file 路徑）**：
+  碼證＝`mark_deadline_filed` 只查存在/機密軸/status=pending/actor，**不看
+  `needs_manual_review`**；文件明寫「覆核≠遞交、兩事件分明」＝gate 從未被設計或宣稱
+  （非 regression、非文件捏造，是 e2e 挖出的真設計課題）。風險：教示不符未覆核的
+  時限被標 filed → 提醒靜默熄燈。修法候選：(a) filed 時該筆仍 needs_review → 工具
+  輸出大聲警語＋interaction_log 記「遞交時尚未覆核」（**全擋 vs 警示由老闆定**——
+  全擋會擋住「真的已遞交」的事實登記、我傾向警示+留痕）；(b) **un-file 修正路徑**
+  （具名+audit+上報主持律師），與 redact 同族＝「不可逆狀態轉換缺修正路」。
+- **部署完整性（Windows e2e 案C 順帶暴露）**：正式部署的 `.mcp.json` 該不該掛
+  `taiwan-legal-db`（法條查證 MCP、PyPI 可裝）？e2e 部署沒掛、產品誠實回「無法自動查證
+  法條」走 court_set+覆核＝行為正確，但接了可讓答辯期等非種子型別自動附法源。裝法：
+  pip 進部署 venv + `.mcp.json.win-template` 加 entry。由老闆決定要不要進標準部署包。
+- **F-P2-WIN-2 擴大（statutory_basis 含法院名）**：court_set 的 `statutory_basis` 寫了
+  「臺灣臺中地方法院」並 verbatim 回寫——去識別化契約列法院名 in-scope。修法（marketing
+  設計裁示）：**所有回寫自由文字欄過同一道 gate、新欄 default in-scope**（trigger_event／
+  statutory_basis／未來新增欄），不做逐欄打地鼠；當事人名→泛稱、法院名→「法院裁定」。
+  **加做補救路徑**（e2e 實測 operator 無法事後清 PII：amend 刻意只收計算輸入、
+  statutory_basis 工具不可改、無 delete＝稽核永存設計）：出一支具名+audit 的
+  `redact_deadline_field`（或 amend 加受控參數）改寫自由欄→冪等重回寫覆蓋 pleading 列；
+  pleading 版本史殘留舊 payload 歸停機審裁定。本輪測試資料 #2/#4（marketing 最終裁示、
+  取代先前「留展品」版）：由 pleading 的**律師編輯路徑**（PUT /api/deadlines/{id}、合法
+  產品路徑）清兩列的 trigger_event/statutory_basis；**凍結規則＝邊界修好前 sme 側
+  deadline #2/#4 不得再觸發任何回寫**（六個 hook 點任一都會把 sme 原文全量覆寫回去＝
+  PII 復發；「時效中斷」情境若要跑要先上 bridge 問）。finding 維持 🔴 OPEN（邊界 gap＋
+  sme 工具層無逃生門都是實錄）。停機審（雙人獨立 immutable 讀）已結案：**清洗前 PII
+  payload 快照在 pleading audit_log 不存在**（audit summary 不內嵌欄位 payload）＝
+  歷史殘留議題 moot、無需清。
+- **F-P2-WIN-3（🟡 title fallback 吐生代碼）**：`_GENERIC_TYPE_LABELS` 只有
+  `answer`/`brief`，operator 用了 `answer_civil` → fallback「法定期限（answer_civil）」
+  ＝零 PII 但使用者可見醜代碼。**性質＝coverage 非 regression**（round-1 修的是
+  `answer`、`answer_civil` 是新代碼）。修法候選：擴 map + `create_deadline` 對
+  unmapped type 回警示建議已標籤代碼（引導收斂字彙、勿讓自由 type 字串增生）；
+  marketing 設計裁示：**枚舉全量 type 做映射＋「缺 label 即測試紅」的 fallback 測試**、
+  不要一個 type 一個 type 補。
+
 - **legal-admin CLAUDE.md 的決策編號清理**：機制段還留著 #166/#173/#27/#182 等指向 dogfood DB 的編號，客戶部署看不懂。master 已做過同樣清理（commit `58c23c1`）可當範本。低風險、機械性，適合派 sonnet + read-back。
 - ~~hooks ops 文字的律所化~~ / ~~inject-line-routing.py 的 SME 路由文字~~：**已完成（2026-07-07，老闆核准「全改」）**——session-mode.py 的 ops 開機清單改對齊 ops-dashboard.md（掃描器哨兵 / 待確認到期日 / 即將到期時限）、寫入檢查改律所領域（時限走收件抽取、絕不心算）；inject-line-routing.py 改所內名冊二分路由 + 判決書收件抽取、刪陌生人行銷路由。SME 原文在 git 歷史（9beffcd 之前）。
-- **playbooks 是否複製到 master**：這套制度是通用的，但兩線永不 merge——要過去只能 copy。等老闆裁示。
-- **Windows 實機部署階段**（老闆已預告）：目標 = Claude Desktop code tab + 自包含 sme 專案資料夾（含自己的 CLAUDE.md）。部署時記得：`.mcp.json` per-project 重生成、`SME_DB_PATH` 指自己、hooks/settings 隨資料夾走。
+- ~~playbooks 是否複製到 master~~：**已完成（2026-07-07 老闆「通用的切過去補一個」）**——master `6289034` 通用版（pytest 入口、dev DB 紀律反轉、去律所專屬項）。兩線此後各自演化、同步只能 cherry-pick。
+- ~~Windows 實機部署階段~~：**已執行（2026-07-07 Windows e2e）**——`D:\gitDir\sme-pleading-e2e\` 攤平部署（產品 CLAUDE.md 在根、settings env 設 SME_SESSION_MODE=ops、.mcp.json 指 e2e DB）；P0–P6 全跑完、findings 見上方。留給正式客戶部署的教訓：hooks 指令要 Windows 原生寫法（py -3.12 + 絕對路徑 + argv 顯式模式）、曆表匯入與 watchdog cron 要進安裝清單、老闆 LINE id 要在 onboarding 設。
 - **pleading 側**：`PLEADING_DB_PATH` 進 pleading production repo 的 commit 仍 HOLD 等老闆點頭（那是另一個 repo、另一位負責，不是這邊的事，但別誤以為漏做）。
 - **本 worktree `.mcp.json` 的 pleading token**：`PLEADING_SESSION_TOKEN` 留空等老闆從 GUI 產生後以環境變數帶入;祕密永遠不進 git / bridge / KB。
 

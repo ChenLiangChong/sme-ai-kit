@@ -98,6 +98,9 @@ create_deadline(
 
 - **`[需人工複核]` 的時限 → 律師看 `get_deadline` 的 `calc_trace` 確認無誤後 `mark_deadline_reviewed(deadline_id, reviewed_by="<律師>", note="<確認了什麼>")`**：解除複核旗標、轉成權威倒數（scan 不再標「未複核·非權威」）。逐筆具名、不可一鍵過；覆核（確認計算）≠ 遞交（`mark_deadline_filed`，書狀已送出）。
 - **送達日填錯 / 裁定天數讀錯 → `amend_deadline(deadline_id, reason="<為何改>", amended_by="<律師>", service_base_date=/statutory_days=/...)`**：引擎確定性重算雙日期、寫 `deadline_audit`（before/after 留痕）、自動通報主持律師、並**作廢原覆核**（改過要重新覆核）。只對未遞交（pending）時限有效。**絕不手動改日期、一律走 amend 重算**（反捏造）。查歷程用 `get_deadline_audit(deadline_id)`。
+- **標遞交碰到「⚠️ 未標記遞交：仍標示需人工複核」→ 這是漏期防線、不是系統錯誤**：未覆核的時限被標 filed 會讓提醒靜默熄滅。正路＝律師先覆核再標；書狀確實已遞交、要先停提醒 → `mark_deadline_filed(deadline_id, filed_by, confirm_unreviewed=True)` 二次確認（留「遞交時尚未覆核」稽核痕、覆核義務不消失）。
+- **誤標「已遞交」→ `unmark_deadline_filed(deadline_id, reason="<為何誤標>", unfiled_by="<操作者>")`**：filed 轉回 pending、恢復 cron 倒數、同步 pleading 鏡像（具名+稽核）。
+- **當事人名/法院名誤入自由欄（trigger_event 等）→ `redact_deadline_field(deadline_id, find_text="<要移除的字串>", reason=...)`**：三個自由欄全數替換為泛稱（法院名傳 `replace_with="法院"`）並重觸發 pleading 鏡像覆蓋。注意：回寫邊界本就有去識別化 gate（已知當事人/法院名自動泛稱化），本工具是「sme 側自有紀錄也要改」時的補救。
 
 ## 開庭通知（期日、不是期間）
 

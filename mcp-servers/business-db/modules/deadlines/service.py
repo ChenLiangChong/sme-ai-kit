@@ -822,6 +822,15 @@ def create_deadline(
             confirm_intake_id, actor_name=_wb_actor, linked_deadline_ref=deadline_id
         )
     _pl_note = _pleading_writeback.note_for(_pl)
+    # F-P2-WIN-3：type 無中文標籤 → pleading 端 title 將退化成泛稱「法定期限（生代碼）」。不擋建立
+    # （fallback 零 PII、安全），但明示提醒引導收斂 type 字彙、勿讓自由代碼增生。
+    from shared.deadlines import type_label as _type_label
+    _label_note = ""
+    if type and _type_label(type) is None:
+        _label_note = (
+            f"\n（提示：type「{type}」無中文標籤——pleading 回寫時將正規化為 custom／「自訂期限」"
+            "（未知代碼不外送、防 PII 混入）；若屬常見期限請改用已標籤代碼、或回報維護者擴充 label 映射）"
+        )
     # 期間人話（反捏造：年/月不顯示成日）
     _ph = _period_phrase(period_unit, period_value, result["statutory_days"])
     return (
@@ -833,6 +842,7 @@ def create_deadline(
         + review
         + sibling_note
         + intake_note
+        + _label_note
         + _pl_note
     )
 
@@ -1011,7 +1021,7 @@ def get_deadline(deadline_id: int) -> str:
         db.close()
 
 
-def mark_deadline_filed(deadline_id: int, filed_by: str) -> str:
+def mark_deadline_filed(deadline_id: int, filed_by: str, confirm_unreviewed: bool = False) -> str:
     from shared.floor_policy import is_full_access
 
     with transaction() as db:
@@ -1028,6 +1038,19 @@ def mark_deadline_filed(deadline_id: int, filed_by: str) -> str:
         if d["status"] != "pending":
             cur_st = _DEADLINE_STATUS_ZH.get(d["status"], d["status"])
             return f"ERROR: 時限 #{deadline_id} 目前狀態為「{cur_st}」、非待處理，無法標記遞交"
+        # F-P3-WIN-1 filed gate（警示＋hard-confirm、不全擋——老闆定案）：needs_manual_review 未解除
+        # 的時限被標 filed ＝ 提醒靜默熄滅、教示不符等未確認風險被埋掉（漏期核心賣點的反例）。
+        # 不全擋的理由：遞交是真實世界事件、事實登記不該被擋死；但必須顯式二次確認＋留稽核痕。
+        _unreviewed = bool(d["needs_manual_review"])
+        if _unreviewed and not confirm_unreviewed:
+            return (
+                f"⚠️ 未標記遞交：時限 #{deadline_id} 仍標示「需人工複核」（計算未經律師確認）。\n"
+                "未覆核就標 filed 會讓提醒靜默熄滅＝漏期風險。請二選一：\n"
+                f"1) 律師先覆核：get_deadline({deadline_id}) 看 calc_trace 確認 → "
+                f"mark_deadline_reviewed({deadline_id}, reviewed_by=\"<律師>\")，再標遞交；\n"
+                f"2) 書狀確實已遞交、需先停提醒：帶 confirm_unreviewed=True 重呼"
+                "（將留「遞交時尚未覆核」稽核痕，覆核義務不因此消失）。"
+            )
         # actor 具名 + 防偽造（codex HIGH / 對齊 #10）：floored session 取 line-channel verified 員工名、
         # 忽略 agent 自填的 filed_by；operator（律所無 floor）用傳入值。標遞交會關掉 cron 倒數、且遞交人
         # 寫進 deadlines.filed_by 與 interaction_log，不可盲信任意字串。
@@ -1043,7 +1066,8 @@ def mark_deadline_filed(deadline_id: int, filed_by: str) -> str:
             action="deadline_filed",
             target_type="deadline",
             target_id=deadline_id,
-            detail=f"{d['description']} 已遞交",
+            detail=f"{d['description']} 已遞交"
+            + ("（⚠️ 遞交時尚未覆核、經 confirm_unreviewed 二次確認）" if _unreviewed else ""),
             business_unit=None,
         )
     # ── pleading 回寫（Task C / F-STATUS-SYNC）：狀態變更（pending→filed）也同步 pleading 鏡像，否則
@@ -1053,7 +1077,123 @@ def mark_deadline_filed(deadline_id: int, filed_by: str) -> str:
     _pl_note = _pleading_writeback.note_for(
         _pleading_writeback.writeback_deadline(deadline_id, actor_name=_wb_actor)
     )
-    return f"時限 #{deadline_id}（{d['description']}）已標記為已遞交，cron 不再提醒。" + _pl_note
+    _unrev_note = (
+        "\n⚠️ 本筆遞交時仍未覆核——請儘速由律師覆核 calc_trace 確認遞交未逾真實期限"
+        f"（mark_deadline_reviewed({deadline_id})）；誤標可用 unmark_deadline_filed 撤銷。"
+        if _unreviewed else ""
+    )
+    return f"時限 #{deadline_id}（{d['description']}）已標記為已遞交，cron 不再提醒。" + _unrev_note + _pl_note
+
+
+def unmark_deadline_filed(deadline_id: int, reason: str, unfiled_by: str) -> str:
+    """撤銷誤標的「已遞交」（F-P3-WIN-1 逃生門）：filed→pending、清 filed_by/filed_at、恢復 cron 倒數。
+
+    不可逆狀態轉換的修正路徑：具名（actor fail-closed）+ 稽核（interaction_log 記 reason）+
+    重觸發 pleading 回寫（鏡像同步回 pending）。不動 needs_manual_review / reviewed_*（覆核是
+    另一個生命週期事件）；要改日期/計算輸入走 amend_deadline。
+    """
+    from shared.floor_policy import is_full_access
+
+    if not reason or not reason.strip():
+        return "ERROR: 撤銷已遞交必須附 reason（為何誤標／為何撤銷，寫進稽核）"
+    with transaction() as db:
+        d = repository.get_deadline(db, deadline_id)
+        if not d:
+            return f"ERROR: 找不到時限 #{deadline_id}"
+        # 機密軸 + 存在性洩漏防護（同 mark_filed gate 風格）
+        m = repository.get_matter(db, d["matter_id"])
+        if m and m["confidential"] and not is_full_access():
+            return f"ERROR: 找不到時限 #{deadline_id}"
+        if d["status"] != "filed":
+            cur_st = _DEADLINE_STATUS_ZH.get(d["status"], d["status"])
+            return f"ERROR: 時限 #{deadline_id} 目前狀態為「{cur_st}」、非已遞交，無可撤銷"
+        _actor, _err = _writer_or_error(db, unfiled_by)
+        if _err:
+            return _err
+        rows = repository.unmark_filed(db, deadline_id)
+        if rows == 0:
+            return f"ERROR: 時限 #{deadline_id} 撤銷失敗（狀態已變動）"
+        repository.insert_interaction_log(
+            db,
+            actor=_actor or "system",
+            action="deadline_unfiled",
+            target_type="deadline",
+            target_id=deadline_id,
+            detail=f"{d['description']} 撤銷「已遞交」（filed→pending、恢復倒數）：{reason.strip()}",
+            business_unit=None,
+        )
+    # pleading 鏡像同步回 pending（F-STATUS-SYNC 同款：commit 後、fresh 連線、冪等、失敗不炸）
+    _wb_actor = _actor if (_actor and _actor != "system") else ""
+    _pl_note = _pleading_writeback.note_for(
+        _pleading_writeback.writeback_deadline(deadline_id, actor_name=_wb_actor)
+    )
+    return (
+        f"時限 #{deadline_id}（{d['description']}）已撤銷「已遞交」、恢復待處理與 cron 倒數。"
+        + _pl_note
+    )
+
+
+def redact_deadline_field(
+    deadline_id: int, find_text: str, reason: str, redacted_by: str, replace_with: str = "當事人"
+) -> str:
+    """自由文字欄 PII 事後補救（F-P2-WIN-2 逃生門）：在 trigger_event / statutory_basis / calc_trace
+    三個自由欄把 find_text 全數替換為 replace_with（當事人名用預設「當事人」、法院名請傳
+    replace_with="法院"），具名+稽核，然後重觸發 pleading 回寫用乾淨值覆蓋鏡像（冪等 upsert）。
+
+    邊界：只動自由文字欄；日期/狀態/計算輸入不在此改（走 amend_deadline）。calc_trace 被替換時
+    計算「軌跡」的六步結構保留、只換字串——稽核記「哪些欄、各替換幾次」，不把 find_text 本身寫進
+    log（自檢不可反而把 PII 漏進紀錄；reason 由呼叫者自述、同樣別把名字寫進去）。
+    """
+    from shared.floor_policy import is_full_access
+
+    if not find_text or len(find_text.strip()) < 2:
+        return "ERROR: find_text 需至少 2 個字（單字替換誤傷面太大）"
+    if not reason or not reason.strip():
+        return "ERROR: 補救替換必須附 reason（寫進稽核；請勿把當事人名寫進 reason）"
+    find_text = find_text.strip()
+    with transaction() as db:
+        d = repository.get_deadline(db, deadline_id)
+        if not d:
+            return f"ERROR: 找不到時限 #{deadline_id}"
+        m = repository.get_matter(db, d["matter_id"])
+        if m and m["confidential"] and not is_full_access():
+            return f"ERROR: 找不到時限 #{deadline_id}"
+        _actor, _err = _writer_or_error(db, redacted_by)
+        if _err:
+            return _err
+        d = dict(d)
+        # 命中偵測（讀取時快照、供回報用）；實際替換走 SQL 端 replace()＝對當前值原子操作、
+        # 無「讀舊值→盲寫」lost-update race（codex R1 MED）
+        counts = []
+        for f in ("trigger_event", "statutory_basis", "calc_trace"):
+            v = d.get(f)
+            if v and find_text in v:
+                counts.append(f"{f}×{v.count(find_text)}")
+        if not counts:
+            return (
+                f"未命中：時限 #{deadline_id} 的三個自由欄（trigger_event/statutory_basis/calc_trace）"
+                "都不含該字串、未做任何變更"
+            )
+        rows = repository.redact_free_text(db, deadline_id, find_text, replace_with)
+        if rows == 0:
+            return f"ERROR: 時限 #{deadline_id} 補救替換失敗"
+        repository.insert_interaction_log(
+            db,
+            actor=_actor or "system",
+            action="deadline_redacted",
+            target_type="deadline",
+            target_id=deadline_id,
+            detail=f"自由文字欄補救替換（{ '、'.join(counts) }）：{reason.strip()}",
+            business_unit=None,
+        )
+    _wb_actor = _actor if (_actor and _actor != "system") else ""
+    _pl_note = _pleading_writeback.note_for(
+        _pleading_writeback.writeback_deadline(deadline_id, actor_name=_wb_actor)
+    )
+    return (
+        f"時限 #{deadline_id} 補救替換完成（{ '、'.join(counts) }），已以乾淨值重觸發 pleading 鏡像覆蓋。"
+        + _pl_note
+    )
 
 
 def mark_deadline_reviewed(deadline_id: int, reviewed_by: str, note: str) -> str:

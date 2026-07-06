@@ -270,6 +270,32 @@ def update_deadline_fields(db: sqlite3.Connection, deadline_id: int, fields: dic
     return cur.rowcount
 
 
+def unmark_filed(db: sqlite3.Connection, deadline_id: int) -> int:
+    """撤銷誤標的已遞交（F-P3-WIN-1 逃生門）：filed→pending、清 filed 欄。只對 status='filed' 生效。"""
+    cur = db.execute(
+        "UPDATE deadlines SET status='pending', filed_at=NULL, filed_by=NULL "
+        "WHERE id=? AND status='filed'",
+        (deadline_id,),
+    )
+    return cur.rowcount
+
+
+def redact_free_text(db: sqlite3.Connection, deadline_id: int, find_text: str, replace_with: str) -> int:
+    """自由文字欄補救（redact 用）：SQL 端 replace()＝對**當前值**原子替換、無「讀舊值→盲寫」的
+    lost-update race（codex R1 MED：併發 amend 的新內容不會被舊快照覆蓋）。三個自由欄一次處理、
+    NULL 保持 NULL、**不限狀態**（PII 補救不因已遞交/取消而不可清；與 update_deadline_fields 的
+    pending-only amend 語意刻意分開）。回 rowcount。"""
+    cur = db.execute(
+        "UPDATE deadlines SET "
+        "trigger_event   = CASE WHEN trigger_event   IS NULL THEN NULL ELSE replace(trigger_event, ?, ?) END, "
+        "statutory_basis = CASE WHEN statutory_basis IS NULL THEN NULL ELSE replace(statutory_basis, ?, ?) END, "
+        "calc_trace      = CASE WHEN calc_trace      IS NULL THEN NULL ELSE replace(calc_trace, ?, ?) END "
+        "WHERE id=?",
+        (find_text, replace_with, find_text, replace_with, find_text, replace_with, deadline_id),
+    )
+    return cur.rowcount
+
+
 def insert_deadline_audit(db: sqlite3.Connection, fields: dict) -> int:
     """寫一筆時限異動稽核（before/after 快照 + changed_fields + amended_by + reason）。"""
     cols = list(fields.keys())

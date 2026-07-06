@@ -46,3 +46,56 @@ def scan_text_for_names(text, names) -> list:
         if n and n not in hits and n in s:
             hits.append(n)
     return hits
+
+
+# ───────────────── 匯出邊界去識別化（F-P2-WIN-2、pleading 回寫 gate 用）─────────────────
+
+# 對造名：matter.title 慣用寫法「…（對造：盛康建設）」「(對造:沅泰物流)」。只抽「對造」明示標記後
+# 的 token（title 其餘部分是案由通案描述、整段納入會大量誤報——與 extract_party_names 同取捨）。
+_OPPOSING_RE = re.compile(r"對造[方]?\s*[:：]\s*([^)）(（,，、;；\s]{2,64})")
+
+# 法院名（泛用 pattern）：臺灣臺中地方法院 / 臺中地院 / 高等法院臺中分院 / 臺中高分院 / 智慧財產及商業法院…
+# 誠實邊界：涵蓋常見寫法、不是完備法院清單；未涵蓋寫法仍會漏。單獨「法院」二字（如「法院裁定」）不命中。
+_COURT_GENERIC_RE = re.compile(
+    r"(?:[臺台]灣)?[一-鿿]{1,4}(?:地方|高等|最高)法院(?:[一-鿿]{1,4}分院)?"
+    r"|[一-鿿]{2}地院"
+    r"|[一-鿿]{2}高分院"
+    r"|智慧財產及商業法院"
+)
+
+
+def extract_opposing_names(title) -> list:
+    """從 matter.title（案由）抽「對造：XXX」明示標記的對造名 token（去重、保序）。"""
+    if not title or not str(title).strip():
+        return []
+    seen = []
+    for tok in _OPPOSING_RE.findall(str(title)):
+        tok = tok.strip()
+        if len(tok) >= 2 and tok not in seen:
+            seen.append(tok)
+    return seen
+
+
+def deidentify_for_export(text, party_tokens, court_tokens) -> tuple:
+    """把「要送出我方邊界的自由文字」去識別化：已知當事人/對造名→「當事人」、已知法院名＋泛用法院
+    pattern→「法院」。回 (清理後文字, 命中token數)。
+
+    誠實邊界（同 screen_calendar_text）：只擋「已知」當事人名（matter 欄位可得）與常見法院寫法；
+    當事人名以未涵蓋寫法出現仍會漏——**絕不可宣稱「保證不外流」**。純字串取代、無 NLP；
+    寧可多擋（誤報＝文字變泛稱、無害）、不可漏報靜默放行。
+    """
+    if not text:
+        return text, 0
+    s = str(text)
+    n_hits = 0
+    for tok in sorted({t for t in (party_tokens or []) if t and len(t) >= 2}, key=len, reverse=True):
+        if tok in s:
+            s = s.replace(tok, "當事人")
+            n_hits += 1
+    for tok in sorted({t for t in (court_tokens or []) if t and len(t) >= 2}, key=len, reverse=True):
+        if tok in s:
+            s = s.replace(tok, "法院")
+            n_hits += 1
+    s, n_generic = _COURT_GENERIC_RE.subn("法院", s)
+    n_hits += n_generic
+    return s, n_hits

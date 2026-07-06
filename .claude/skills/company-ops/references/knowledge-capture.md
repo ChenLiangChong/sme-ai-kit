@@ -59,6 +59,7 @@ register_employee(name='○○○', role='manager', department='訴訟組', perm
 ### Step 7：行事曆整合 + 隱私部署
 
 - **行事曆（核心外部依賴）**：問「事務所實際用什麼行事曆？」（Google Calendar / 其他 / 紙本）。Google → 接**該所自己的** Google 帳號（OAuth / service account）；沒有 → 退「系統內建 + 選配同步」。寫入走可插拔行事曆 MCP，**去識別化**（只放案件代號 + 期限類型 + 日期、不放當事人名 / 案由）。
+- **pleading-manager 整合（有裝才問）**：問「所內有沒有裝 LawChat／pleading 案件管理系統？」有 → **導入當下就替每位承辦律師綁整合 token**：律師在 pleading GUI 側欄「產生 API 權杖」→ `bind_pleading_token(employee_name="<律師>", token="<權杖>")`（token 是密鑰、只進工具參數，不落 log / 不回傳）。**漏綁的症狀**＝時限建立正常、但 pleading 鏡像永遠空（回寫因無 token 靜默略過、interaction_log 會留 `pleading_writeback_skipped` 供排查）。沒裝 → 跳過、整合天生 inert。
 - **隱私（律師保密義務、一級約束）**：①**訓練關閉（必做）**：Claude 訂閱設定關「Help improve Claude」。②**本地優先**：案件帳本只存所內機器 / NAS。③**最小化送 Claude**：完整文件只在抽送達日那次送。詳見 legal-admin `privacy-deploy.md`。
 
 ### Step 8：部署驗收（上線前必過、漏一項＝賣點失效）

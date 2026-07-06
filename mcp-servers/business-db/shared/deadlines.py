@@ -230,7 +230,9 @@ def procedural_calendar_type(type_code):
 # 去識別化 title 不致顯示成生代碼「法定期限（answer）」。type 是代碼（非自由文字 description）＝零當事人姓名。
 _GENERIC_TYPE_LABELS = {
     "answer": "答辯狀提出期間",
+    "answer_civil": "答辯狀提出期間（民事）",
     "brief": "準備書狀提出期間",
+    "custom": "自訂期限",
 }
 
 

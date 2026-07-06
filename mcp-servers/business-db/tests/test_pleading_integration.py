@@ -573,6 +573,264 @@ _db.execute("DELETE FROM business_rules WHERE category='settings' AND title='dea
 _db.commit()
 
 
+# ───────────────────────── H：回寫邊界去識別化 gate（F-P2-WIN-2）─────────────────────────
+
+# gate 測試專用案：client_name + title 對造標記 + court 都有已知 PII token
+_db.execute(
+    "INSERT INTO matters (title, client_name, court, status, lead_attorney, pleading_case_id, "
+    "has_local_agent, confidential) VALUES "
+    "('G案請求返還借款（對造：測試對造商行）','測試甲','臺灣測試地方法院','open','C主辦','PLD-200',0,0)"
+)
+_MID_G = _db.execute("SELECT id FROM matters WHERE pleading_case_id='PLD-200'").fetchone()["id"]
+
+
+def _mk_deadline_pii(matter_id=_MID_G, assignee="C承辦", needs_review=0, status="pending",
+                     trigger_event="車禍侵權·知悉加害人為測試對造商行（委任人測試甲、另涉臺中地院）",
+                     statutory_basis="臺灣測試地方法院命提出答辯狀通知（送達後20日內）",
+                     calc_trace='["依據 臺灣測試地方法院命提出答辯狀通知 起算", "20日 依曆計算"]'):
+    _db.execute(
+        "INSERT INTO deadlines (matter_id, type, description, period_type, severity, trigger_event, "
+        "service_type, service_base_date, statutory_days, statutory_basis, statutory_basis_version, "
+        "statutory_deadline, internal_deadline, status, assignee, period_unit, period_value, "
+        "needs_manual_review, calc_trace) VALUES (?, 'answer_civil','答辯狀期限','court_set','red',?,"
+        "'normal','2026-07-02',20,?,?,'2026-07-22','2026-07-17',?,?,'day',NULL,?,?)",
+        (matter_id, trigger_event, statutory_basis, "法院通知 現行", status, assignee, needs_review, calc_trace),
+    )
+    _db.commit()
+    return _db.execute("SELECT MAX(id) m FROM deadlines").fetchone()["m"]
+
+
+_did_g = _mk_deadline_pii()
+with _configured(), _patch_urlopen(status=200, body={"id": 501}):
+    _r = wb.writeback_deadline(_did_g)
+_assert("H1 gate 後回寫成功", _r["status"] == "ok", str(_r))
+_pl_body = _cap["body"]
+_joined = json.dumps(_pl_body, ensure_ascii=False)
+_assert("H2 已知當事人名被 strip", "測試甲" not in _joined, _joined[:200])
+_assert("H3 對造名（title 對造標記抽取）被 strip", "測試對造商行" not in _joined, _joined[:200])
+_assert("H4 已知法院名被 strip（含 statutory_basis）", "臺灣測試地方法院" not in _joined, _joined[:200])
+_assert("H5 泛用法院 pattern 被 strip（臺中地院、非 matter 欄位）", "臺中地院" not in _joined, _joined[:200])
+_assert("H6 calc_trace 內嵌原文一併被 strip", "測試" not in (_pl_body.get("calc_trace") or ""),
+        str(_pl_body.get("calc_trace")))
+_assert("H7 泛稱替換落地", "當事人" in _pl_body["trigger_event"] and "法院" in _pl_body["statutory_basis"],
+        str(_pl_body.get("trigger_event")))
+_assert("H8 豁免欄不動（assignee=§127 具名）", _pl_body["assignee"] == "C承辦", str(_pl_body.get("assignee")))
+_assert("H9 title 仍為 type 標籤（answer_civil 已入 map）",
+        _pl_body["title"] == "答辯狀提出期間（民事）", str(_pl_body.get("title")))
+_row = _db.execute(
+    "SELECT COUNT(*) c FROM interaction_log WHERE action='pleading_writeback_deidentified' AND target_id=?",
+    (_did_g,),
+).fetchone()
+_assert("H10 gate 命中留 interaction_log（只記數量）", _row["c"] >= 1, str(_row["c"]))
+_log_detail = _db.execute(
+    "SELECT detail FROM interaction_log WHERE action='pleading_writeback_deidentified' AND target_id=? "
+    "ORDER BY id DESC LIMIT 1", (_did_g,),
+).fetchone()["detail"]
+_assert("H11 log 不含被 strip 的名字", "測試甲" not in _log_detail and "測試對造商行" not in _log_detail, _log_detail)
+# sme 側原值不動（律所自有庫、只在邊界剝）
+_sme_te = _db.execute("SELECT trigger_event FROM deadlines WHERE id=?", (_did_g,)).fetchone()["trigger_event"]
+_assert("H12 sme 側原值保留（只剝邊界）", "測試對造商行" in _sme_te, _sme_te)
+
+# 乾淨 payload → gate 零命中、不留 deidentified log
+_did_clean = _mk_deadline_pii(trigger_event="一審民事判決送達", statutory_basis="民訴§440",
+                              calc_trace='["§440 20日", "依曆計算"]')
+with _configured(), _patch_urlopen(status=200, body={"id": 502}):
+    _r = wb.writeback_deadline(_did_clean)
+_row = _db.execute(
+    "SELECT COUNT(*) c FROM interaction_log WHERE action='pleading_writeback_deidentified' AND target_id=?",
+    (_did_clean,),
+).fetchone()
+_assert("H13 乾淨 payload 零命中不留 log", _r["status"] == "ok" and _row["c"] == 0, f"{_r} c={_row['c']}")
+
+
+# ───────────────────────── I：filed gate（F-P3-WIN-1）＋ un-file ─────────────────────────
+
+_did_nr = _mk_deadline_pii(needs_review=1, trigger_event="法院命提出答辯狀通知送達",
+                           statutory_basis="法院通知（20日）", calc_trace='["court_set 20日"]')
+_out = svc.mark_deadline_filed(_did_nr, "測試者")
+_st = _db.execute("SELECT status FROM deadlines WHERE id=?", (_did_nr,)).fetchone()["status"]
+_assert("I1 needs_review 未覆核 → 不標記+警示", "未標記遞交" in _out and _st == "pending", _out[:80])
+_out = svc.mark_deadline_filed(_did_nr, "測試者", confirm_unreviewed=True)
+_row = _db.execute("SELECT status, filed_by FROM deadlines WHERE id=?", (_did_nr,)).fetchone()
+_assert("I2 confirm_unreviewed=True → 標記成功", _row["status"] == "filed" and "已標記為已遞交" in _out, _out[:80])
+_assert("I3 輸出帶未覆核警語", "遞交時仍未覆核" in _out, _out[:200])
+_log = _db.execute(
+    "SELECT detail FROM interaction_log WHERE action='deadline_filed' AND target_id=? ORDER BY id DESC LIMIT 1",
+    (_did_nr,),
+).fetchone()["detail"]
+_assert("I4 稽核記「遞交時尚未覆核」", "遞交時尚未覆核" in _log, _log)
+# 已覆核（needs_review=0）的正常路徑不受 gate 影響
+_did_ok = _mk_deadline_pii(needs_review=0, trigger_event="一審判決送達", statutory_basis="民訴§440",
+                           calc_trace='["§440"]')
+_out = svc.mark_deadline_filed(_did_ok, "測試者")
+_assert("I5 已覆核筆正常標記（gate 不誤傷）", "已標記為已遞交" in _out and "未覆核" not in _out, _out[:120])
+# un-file
+_out = svc.unmark_deadline_filed(_did_nr, reason="P3 探針誤標、實際未遞交", unfiled_by="測試者")
+_row = _db.execute("SELECT status, filed_by, filed_at FROM deadlines WHERE id=?", (_did_nr,)).fetchone()
+_assert("I6 un-file → pending+清 filed 欄", _row["status"] == "pending" and _row["filed_by"] is None
+        and _row["filed_at"] is None, str(dict(_row)))
+_log = _db.execute(
+    "SELECT COUNT(*) c FROM interaction_log WHERE action='deadline_unfiled' AND target_id=?", (_did_nr,),
+).fetchone()
+_assert("I7 un-file 具名稽核留痕", _log["c"] == 1, str(_log["c"]))
+_out = svc.unmark_deadline_filed(_did_nr, reason="再撤一次", unfiled_by="測試者")
+_assert("I8 非 filed 不可撤", _out.startswith("ERROR") and "非已遞交" in _out, _out)
+_out = svc.unmark_deadline_filed(_did_ok, reason="  ", unfiled_by="測試者")
+_assert("I9 無 reason 拒絕", _out.startswith("ERROR") and "reason" in _out, _out)
+
+
+# ───────────────────────── J：redact_deadline_field（PII 事後補救）─────────────────────────
+
+_did_r = _mk_deadline_pii(needs_review=0)
+_out = svc.redact_deadline_field(_did_r, find_text="測試對造商行", reason="e2e 補救演練", redacted_by="測試者")
+_row = dict(_db.execute(
+    "SELECT trigger_event, statutory_basis, calc_trace FROM deadlines WHERE id=?", (_did_r,),
+).fetchone())
+_assert("J1 redact 替換 trigger_event", "測試對造商行" not in _row["trigger_event"]
+        and "當事人" in _row["trigger_event"], _row["trigger_event"])
+_assert("J2 redact 回報命中欄位", "trigger_event×1" in _out, _out[:120])
+_out2 = svc.redact_deadline_field(_did_r, find_text="臺灣測試地方法院", reason="法院名補救",
+                                  redacted_by="測試者", replace_with="法院")
+_row = dict(_db.execute(
+    "SELECT statutory_basis, calc_trace FROM deadlines WHERE id=?", (_did_r,),
+).fetchone())
+_assert("J3 redact 法院名（statutory_basis+calc_trace 一次清）",
+        "臺灣測試地方法院" not in _row["statutory_basis"] and "臺灣測試地方法院" not in _row["calc_trace"],
+        str(_row))
+_log = _db.execute(
+    "SELECT detail FROM interaction_log WHERE action='deadline_redacted' AND target_id=? ORDER BY id LIMIT 1",
+    (_did_r,),
+).fetchone()["detail"]
+_assert("J4 redact 稽核不含 find_text 本身", "測試對造商行" not in _log, _log)
+_out = svc.redact_deadline_field(_did_r, find_text="不存在字串", reason="x", redacted_by="測試者")
+_assert("J5 未命中明講不動", "未命中" in _out, _out[:80])
+_out = svc.redact_deadline_field(_did_r, find_text="甲", reason="x", redacted_by="測試者")
+_assert("J6 單字 find_text 拒絕", _out.startswith("ERROR"), _out[:80])
+# redact 不限狀態（PII 補救不因已遞交而不可清）
+_did_rf = _mk_deadline_pii(needs_review=0, status="filed")
+_out = svc.redact_deadline_field(_did_rf, find_text="測試甲", reason="filed 筆補救", redacted_by="測試者")
+_row = _db.execute("SELECT trigger_event FROM deadlines WHERE id=?", (_did_rf,)).fetchone()
+_assert("J7 redact 對 filed 筆也生效", "測試甲" not in _row["trigger_event"], _row["trigger_event"])
+
+
+# ───────────────────────── K：半配置可觀測性（F-P2-WIN-1(b)）─────────────────────────
+
+_db.execute(
+    "INSERT INTO matters (title, status, lead_attorney, pleading_case_id, has_local_agent, confidential) "
+    "VALUES ('K案','open','C無token','PLD-300',0,0)"
+)
+_MID_K = _db.execute("SELECT id FROM matters WHERE pleading_case_id='PLD-300'").fetchone()["id"]
+_did_k = _mk_deadline_pii(matter_id=_MID_K, assignee="C無token", needs_review=0,
+                          trigger_event="判決送達", statutory_basis="民訴§440", calc_trace='["§440"]')
+with _configured(), _patch_urlopen(status=200, body={"id": 900}):
+    _r = wb.writeback_deadline(_did_k)
+_assert("K1 無 token → skipped（不炸）", _r["status"] == "skipped", str(_r))
+_row = _db.execute(
+    "SELECT detail FROM interaction_log WHERE action='pleading_writeback_skipped' AND target_id=? "
+    "ORDER BY id DESC LIMIT 1", (_did_k,),
+).fetchone()
+_assert("K2 半配置留一行 log 供排查", _row is not None and "選不到律師 token" in _row["detail"],
+        str(_row and _row["detail"]))
+# 純未配置：維持 inert、不留 log（與半配置區分）
+_before = _db.execute("SELECT COUNT(*) c FROM interaction_log WHERE action='pleading_writeback_skipped'").fetchone()["c"]
+_r = wb.writeback_deadline(_did_k)  # PLEADING_API_BASE 未設
+_after = _db.execute("SELECT COUNT(*) c FROM interaction_log WHERE action='pleading_writeback_skipped'").fetchone()["c"]
+_assert("K3 純未配置 inert 不留 log", _r["status"] == "not_configured" and _before == _after,
+        f"{_r} {_before}->{_after}")
+
+
+# ───────────────────────── L：type label 全量枚舉＋缺 label 即紅（F-P2-WIN-3）─────────────────────────
+
+from shared.deadlines import (  # noqa: E402
+    COURT_SET_PERIODS, LIMITATION_PERIODS, PROCEDURAL_CALENDAR_PERIODS, _GENERIC_TYPE_LABELS, type_label,
+)
+
+_all_codes = set()
+for _t in (STATUTORY_PERIODS, COURT_SET_PERIODS, LIMITATION_PERIODS, PROCEDURAL_CALENDAR_PERIODS):
+    _all_codes |= set(_t)
+# 文件/實戰出現過的非種子代碼（新增代碼請一併入 map——本測試就是「缺 label 即紅」的守門）
+_DOCUMENTED_GENERIC = {"answer", "brief", "answer_civil", "custom"}
+_all_codes |= _DOCUMENTED_GENERIC
+_missing = sorted(c for c in _all_codes if not type_label(c))
+_assert("L1 全量 type 皆有 label（缺 label 即紅）", not _missing, str(_missing))
+_assert("L2 泛型 map 涵蓋文件代碼", _DOCUMENTED_GENERIC <= set(_GENERIC_TYPE_LABELS) | _all_codes,
+        str(_DOCUMENTED_GENERIC - set(_GENERIC_TYPE_LABELS)))
+_assert("L3 未知代碼回 None（fallback 泛稱路徑）", type_label("zzz_unknown_9") is None, "")
+_assert("L4 answer_civil 標籤正確", type_label("answer_civil") == "答辯狀提出期間（民事）",
+        str(type_label("answer_civil")))
+
+
+# ───────────────────────── M：豁免欄鎖安全＋gate 鑑別力（codex R1 HIGH/LOW）─────────────────────────
+
+# M1 未知 type 含 PII → 正規化 custom、title=自訂期限、生代碼不外送
+_db.execute(
+    "INSERT INTO deadlines (matter_id, type, description, period_type, severity, trigger_event, "
+    "service_type, service_base_date, statutory_days, statutory_basis, statutory_basis_version, "
+    "statutory_deadline, internal_deadline, status, assignee, period_unit, period_value, "
+    "needs_manual_review, calc_trace) VALUES (?, '測試甲專案期限','x','court_set','red','送達',"
+    "'normal','2026-07-02',20,'法院通知','v','2026-07-22','2026-07-17','pending','C承辦','day',NULL,0,'[]')",
+    (_MID_G,),
+)
+_db.commit()
+_did_m1 = _db.execute("SELECT MAX(id) m FROM deadlines").fetchone()["m"]
+with _configured(), _patch_urlopen(status=200, body={"id": 601}):
+    _r = wb.writeback_deadline(_did_m1)
+_j = json.dumps(_cap["body"], ensure_ascii=False)
+_assert("M1a 未知 type 正規化為 custom", _cap["body"]["type"] == "custom", str(_cap["body"].get("type")))
+_assert("M1b title=自訂期限（不帶生代碼）", _cap["body"]["title"] == "自訂期限", str(_cap["body"].get("title")))
+_assert("M1c 未知 type 原字串（含 PII）不外送", "測試甲專案期限" not in _j and "測試甲" not in _j, _j[:200])
+
+# M2 assignee 非在職員工（可能是誤填的當事人名）→ 不外送
+_db.execute("UPDATE deadlines SET assignee='測試甲' WHERE id=?", (_did_m1,))
+_db.commit()
+with _configured(), _patch_urlopen(status=200, body={"id": 602}):
+    _r = wb.writeback_deadline(_did_m1)
+_assert("M2a 非員工 assignee 不外送", _cap["body"].get("assignee") is None, str(_cap["body"].get("assignee")))
+_assert("M2b 在職員工 assignee 照送（對照）", True, "")  # H8 已驗 C承辦 照送
+_db.execute("UPDATE deadlines SET assignee='C承辦' WHERE id=?", (_did_m1,))
+_db.commit()
+
+# M3 correspondence 的 doc_type 是 operator 可控字串 → 不豁免、照 gate 掃（已知當事人名被 strip）
+_db.execute(
+    "INSERT INTO pending_intakes (matter_id, matter_label, doc_type, service_base_date, "
+    "stated_period_days, document_date, extracted_summary, status) "
+    "VALUES (?, 'G案', '測試甲的判決書', '2026-07-01', 20, '2026-06-28', '摘要', 'awaiting')",
+    (_MID_G,),
+)
+_db.commit()
+_iid_m3 = _db.execute("SELECT MAX(id) m FROM pending_intakes").fetchone()["m"]
+with _configured(), _patch_urlopen(status=200, body={"id": 603}):
+    _r = wb.writeback_correspondence(_iid_m3)
+_j = json.dumps(_cap["body"], ensure_ascii=False)
+_assert("M3 correspondence doc_type 過 gate（當事人名被 strip）",
+        _r["status"] == "ok" and "測試甲" not in _j and "當事人" in _cap["body"]["doc_type"], _j[:200])
+
+# M4 長對造名（>20字、原 regex 截斷洞）→ 完整 strip
+_db.execute(
+    "INSERT INTO matters (title, client_name, status, lead_attorney, pleading_case_id, has_local_agent, confidential) "
+    "VALUES ('M案（對造：超長名稱測試環球國際物流倉儲股份有限公司台中分公司）','某人','open','C主辦','PLD-400',0,0)"
+)
+_MID_M4 = _db.execute("SELECT id FROM matters WHERE pleading_case_id='PLD-400'").fetchone()["id"]
+_did_m4 = _mk_deadline_pii(matter_id=_MID_M4,
+                           trigger_event="通知（對造 超長名稱測試環球國際物流倉儲股份有限公司台中分公司 寄出）",
+                           statutory_basis="民訴§440", calc_trace='["x"]')
+with _configured(), _patch_urlopen(status=200, body={"id": 604}):
+    _r = wb.writeback_deadline(_did_m4)
+_j = json.dumps(_cap["body"], ensure_ascii=False)
+_assert("M4 長對造名完整 strip（無截斷殘留）", "超長名稱測試" not in _j and "台中分公司" not in _j, _j[:250])
+
+# M5 gate 鑑別力（mutation 抽查）：把 _gate_payload 換成 no-op、H2 類斷言必須會紅
+_orig_gate = wb._gate_payload
+wb._gate_payload = lambda payload, m: (payload, 0)
+try:
+    with _configured(), _patch_urlopen(status=200, body={"id": 605}):
+        wb.writeback_deadline(_mk_deadline_pii())
+    _leak = json.dumps(_cap["body"], ensure_ascii=False)
+    _assert("M5 gate 拿掉時 PII 確實會漏（測試非假綠）", "測試對造商行" in _leak, _leak[:150])
+finally:
+    wb._gate_payload = _orig_gate
+
+
 # ───────────────────────── 結果 ─────────────────────────
 print("=" * 60)
 print(f"Results: {passed} passed, {failed} failed out of {passed + failed}")

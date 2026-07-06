@@ -2757,6 +2757,13 @@ _assert("deadlines: list_upcoming_deadlines 列出 pending 含雙日期+法條",
         _has(_rup, "即將到期時限", "內部", "法定", "民訴§440"))
 
 # mark_deadline_filed → 狀態轉 filed
+# F-P3-WIN-1 filed gate：本筆 needs_manual_review=1（smoke 環境年曆非整年→fail-toward 標複核）、
+# 未覆核直標應被警示擋下；覆核後才可標（=真實流程：律師覆核 calc_trace → 遞交）。
+_rgate = server.mark_deadline_filed(_did, filed_by="王律師")
+_assert("deadlines: 未覆核直標被 filed gate 警示擋下（F-P3-WIN-1）", "未標記遞交" in _rgate)
+from modules.deadlines import service as _dl_svc  # noqa: E402
+_rrev = _dl_svc.mark_deadline_reviewed(_did, reviewed_by="王律師", note="smoke 覆核")
+_assert("deadlines: 覆核留痕成功（filed gate 前置）", "覆核" in _rrev or "已解除" in _rrev, )
 _rfiled = server.mark_deadline_filed(_did, filed_by="王律師")
 _assert("deadlines: mark_deadline_filed 標記遞交", "已標記為已遞交" in _rfiled)
 _dbf = server.get_db()
@@ -2906,9 +2913,11 @@ finally:
     _ar_clear()
 
 # 全權限層（operator）：不受影響（baseline 已驗建/標 filed 皆可）
-_rh1full = server.mark_deadline_filed(_cdid, filed_by="老闆")
+# 本筆同樣 needs_review=1（年曆 fail-toward）→ 走 confirm_unreviewed 顯式二次確認路（順帶驗該路徑）
+_rh1full = server.mark_deadline_filed(_cdid, filed_by="老闆", confirm_unreviewed=True)
 _assert("H1: 全權限層 mark_deadline_filed 機密案件時限仍可標（不受 gate 影響）",
         "已標記為已遞交" in _rh1full, detail=_rh1full)
+_assert("H1: confirm_unreviewed 路徑帶未覆核警語", "遞交時仍未覆核" in _rh1full, detail=_rh1full)
 
 
 # === HIGH-2（codex）：將至提醒收件人=全所、channel_id 不被 assignee user_id 污染 ===
