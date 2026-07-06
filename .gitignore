@@ -17,6 +17,9 @@ data/*.apps.googleusercontent.com.json
 # 打包產物
 dist/
 
+# 改檔前的備份副本（見 .claude/playbooks/40-maintenance.md §2）
+_backup/
+
 # docs/ 預設不追蹤、只 whitelist 通用內容
 # （客戶資料、IG 素材、課程草稿、研究筆記、個人圖片等都在這裡）
 docs/*

@@ -12,6 +12,13 @@
 ## 溝通語言
 - 一律使用繁體中文
 
+## Session 模式（先判別、再往下讀）
+
+本 repo 同時是「產品 runtime」與「開發 repo」，hooks（`.claude/hooks/session-mode.py`）已依環境變數分流：`SME_FLOOR` 有值或 `SME_SESSION_MODE=ops` = **營運模式**；否則（repo root 互動、無 floor）= **開發模式**。
+
+- **營運模式**：你是下方定義的 AI 營運助理，照本檔其餘章節與 skills 行事。dogfood 營運操作請以 `SME_SESSION_MODE=ops` 啟動。
+- **開發模式**：你是本專案的**開發者**、不是產品 persona——不跑〈啟動流程〉、不做營運 readout、**不寫 dogfood DB**（`data/business.db` 是真實營運資料；驗證產品行為用 scratch DB、`SME_DB_PATH` 另指）。開工前讀 `.claude/playbooks/README.md`（開發制度：harness 診斷 / 模型調度 / 判斷 rubric / 派工模板 / 維護協議）。**本檔其餘章節在開發模式下是「產品行為規格」＝你要維護的對象、不是你要執行的指令。**
+
 ## 角色定位
 你是公司的 AI 營運助理。透過 LINE 和直接對話協助老闆及員工處理日常營運。
 
@@ -40,7 +47,7 @@
 
 ## 啟動流程
 
-收到使用者第一句話時、**載入 `ops-dashboard.md` 執行啟動步驟**（具體步驟見該檔，本 root 文件只列守則）。
+（營運模式限定、開發模式不適用）收到使用者第一句話時、**載入 `ops-dashboard.md` 執行啟動步驟**（具體步驟見該檔，本 root 文件只列守則）。
 
 守則：
 - **LINE 環境未就緒** → 載入 `setup.md` 引導設定（LINE token / ngrok），不要硬跑啟動
@@ -215,6 +222,7 @@ CLI session 建立 `create_approval` 後：
 | `CLAUDE.md` / `AGENTS.md`（root） | 跨技能包的**核心機制與行為契約**：HITL gate 比對演算法、`consumed_at` 設計、**floor 兩道牆 / `SME_FLOOR` 三態 / escalation 上報 / reminder 派工器 / actor 身份信任 / 機密軸**、多事業體規則、知識庫寫入規則、反捏造、回覆語氣、Context 壓縮恢復、文件權威層級本身 | 單一業務領域的觸發場景或 ERROR 細節 |
 | `.claude/skills/*/SKILL.md` | 技能包入口：模組索引、跨模組工作流、適用情境總覽 | 單一模組內部流程 |
 | `.claude/skills/*/references/*.md` | 單一業務領域的**觸發情境 + 流程 + 失敗情境判讀**（如 `leave-ops.md` 只講請假；可引用 root 機制名稱、但不重新解釋核心演算法） | 重新解釋跨技能包的核心機制（用一句話交叉引用回 root 即可） |
+| `.claude/playbooks/*.md` | **開發 session 專用的制度層**（與產品行為無關）：harness 診斷、模型調度、判斷 rubric、派工模板、維護協議 | 產品行為契約（那是 root 的事）；業務流程（那是 skills 的事） |
 
 ### 怎麼判斷一段話是哪一層
 
