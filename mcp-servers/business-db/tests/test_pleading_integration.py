@@ -831,6 +831,110 @@ finally:
     wb._gate_payload = _orig_gate
 
 
+# ───────────────────────── N：cancel_deadline（F-S2-3 業務取消）─────────────────────────
+
+from modules.deadlines import repository as repo_mod  # noqa: E402
+
+# N1 happy path：pending → cancelled + reason 稽核 + deadline_audit 快照 + 上報 enqueue
+_did_c1 = _mk_deadline_pii(needs_review=0, trigger_event="判決送達", statutory_basis="民訴§440",
+                           calc_trace='["§440"]')
+_out = svc.cancel_deadline(_did_c1, reason="建錯案件、應掛他案", cancelled_by="測試者")
+_row = _db.execute("SELECT status FROM deadlines WHERE id=?", (_did_c1,)).fetchone()
+_assert("N1a cancel → status=cancelled", _row["status"] == "cancelled" and "已取消" in _out, _out[:120])
+_log = _db.execute(
+    "SELECT detail FROM interaction_log WHERE action='deadline_cancelled' AND target_id=? "
+    "ORDER BY id DESC LIMIT 1", (_did_c1,),
+).fetchone()
+_assert("N1b 具名稽核含 reason", _log is not None and "建錯案件" in _log["detail"], str(_log and _log["detail"]))
+_aud = _db.execute(
+    "SELECT reason, changed_fields, before_snapshot, after_snapshot FROM deadline_audit "
+    "WHERE deadline_id=? ORDER BY id DESC LIMIT 1", (_did_c1,),
+).fetchone()
+_assert("N1c deadline_audit 快照（status pending→cancelled）",
+        _aud is not None and json.loads(_aud["changed_fields"]) == ["status"]
+        and json.loads(_aud["before_snapshot"])["status"] == "pending"
+        and json.loads(_aud["after_snapshot"])["status"] == "cancelled", str(_aud and dict(_aud)))
+_esc = _db.execute(
+    "SELECT summary FROM pending_escalations WHERE event_type='deadline_cancelled' ORDER BY id DESC LIMIT 1"
+).fetchone()
+_assert("N1d 同 tx enqueue deadline_cancelled 上報（含原因）",
+        _esc is not None and "時限取消" in _esc["summary"] and "建錯案件" in _esc["summary"],
+        str(_esc and _esc["summary"]))
+
+# N2 reason 必填
+_did_c2 = _mk_deadline_pii(needs_review=0)
+_out = svc.cancel_deadline(_did_c2, reason="  ", cancelled_by="測試者")
+_assert("N2 無 reason 拒絕", _out.startswith("ERROR") and "reason" in _out, _out)
+
+# N3 filed 不可直接取消（引導先 unmark、防繞過遞交撤銷稽核）
+svc.mark_deadline_filed(_did_c2, "測試者")
+_out = svc.cancel_deadline(_did_c2, reason="想取消", cancelled_by="測試者")
+_st = _db.execute("SELECT status FROM deadlines WHERE id=?", (_did_c2,)).fetchone()["status"]
+_assert("N3 filed 擋下＋引導 unmark_deadline_filed",
+        _out.startswith("ERROR") and "unmark_deadline_filed" in _out and _st == "filed", _out[:150])
+
+# N4 已取消冪等擋
+_out = svc.cancel_deadline(_did_c1, reason="再取消一次", cancelled_by="測試者")
+_assert("N4 cancelled 不可重複取消", _out.startswith("ERROR") and "已是取消" in _out, _out)
+
+# N5 cancelled 後 filed / reviewed / amend 全擋（既有 status guard 閉環）
+_out = svc.mark_deadline_filed(_did_c1, "測試者")
+_assert("N5a cancelled 後不可標遞交", _out.startswith("ERROR") and "非待處理" in _out, _out[:120])
+_out = svc.mark_deadline_reviewed(_did_c1, reviewed_by="測試者", note="")
+_assert("N5b cancelled 後不可覆核", _out.startswith("ERROR") and "已取消" in _out, _out[:120])
+_out = svc.amend_deadline(_did_c1, reason="想改日期", amended_by="測試者")
+_assert("N5c cancelled 後不可重算異動", _out.startswith("ERROR") and "非待處理" in _out, _out[:120])
+
+# N6 pleading 鏡像同步：cancel 後重觸發回寫、payload status='cancelled'（冪等 upsert 覆蓋鏡像）。
+# cancelled_by 留空＝operator 自主模式（§127：具名互動 actor 無 token 會 graceful skip＝正確不誤掛、
+# 但那樣驗不到鏡像；自主模式走 assignee C承辦 的 token）。
+_did_c6 = _mk_deadline_pii(needs_review=0, trigger_event="判決送達", statutory_basis="民訴§440",
+                           calc_trace='["§440"]')
+with _configured(), _patch_urlopen(status=200, body={"id": 701}):
+    _out = svc.cancel_deadline(_did_c6, reason="和解結案、無需上訴", cancelled_by="")
+_assert("N6a 鏡像 payload status=cancelled", _cap["body"].get("status") == "cancelled",
+        str(_cap["body"].get("status")))
+_assert("N6b 回覆帶已同步 pleading", "已同步 pleading" in _out, _out[:150])
+
+# N7 cancelled 不再進 pending 掃描（cron/scan 靠 status='pending' 篩）
+_pending_ids = [r["id"] for r in repo_mod.list_upcoming_deadlines(_db)]
+_assert("N7 cancelled 不在 pending 掃描清單", _did_c1 not in _pending_ids and _did_c6 not in _pending_ids,
+        str(_pending_ids))
+
+# N9 入口狀態 extended / missed 也可取消（codex R1 非阻擋盲區補測；與 pending 共用 WHERE IN 路徑）
+_did_c10 = _mk_deadline_pii(needs_review=0, status="missed")
+_out = svc.cancel_deadline(_did_c10, reason="逾期筆確認為建錯案、非真逾期", cancelled_by="測試者")
+_st = _db.execute("SELECT status FROM deadlines WHERE id=?", (_did_c10,)).fetchone()["status"]
+_assert("N9a missed 可取消（逾期事實已留 audit/log、取消不湮滅）", _st == "cancelled" and "已取消" in _out, _out[:100])
+_did_c11 = _mk_deadline_pii(needs_review=0, status="extended")
+_out = svc.cancel_deadline(_did_c11, reason="展延後案件和解", cancelled_by="測試者")
+_st = _db.execute("SELECT status FROM deadlines WHERE id=?", (_did_c11,)).fetchone()["status"]
+_assert("N9b extended 可取消", _st == "cancelled" and "已取消" in _out, _out[:100])
+
+# N8 機密軸＋actor fail-closed（floored session）
+_db.execute(
+    "INSERT INTO matters (title, client_name, status, lead_attorney, confidential) "
+    "VALUES ('機密N案','機密甲','open','C主辦',1)"
+)
+_db.commit()
+_MID_N = _db.execute("SELECT MAX(id) m FROM matters").fetchone()["m"]
+_did_c8 = _mk_deadline_pii(matter_id=_MID_N, needs_review=0)
+_did_c9 = _mk_deadline_pii(needs_review=0)  # 非機密、floored actor 測試用
+os.environ["SME_FLOOR"] = "general"
+try:
+    _out = svc.cancel_deadline(_did_c8, reason="受限層嘗試取消機密案時限", cancelled_by="測試者")
+    _assert("N8a 受限層對機密案時限＝泛化 not-found（存在性不洩漏）",
+            _out.startswith("ERROR") and "找不到時限" in _out, _out)
+    _out = svc.cancel_deadline(_did_c9, reason="受限層嘗試取消", cancelled_by="偽造名")
+    _assert("N8b floored 無 verified 身份拒寫（actor fail-closed）",
+            _out.startswith("ERROR") and "無法驗證操作者身份" in _out, _out)
+    _st = _db.execute("SELECT COUNT(*) c FROM deadlines WHERE id IN (?,?) AND status='cancelled'",
+                      (_did_c8, _did_c9)).fetchone()
+    _assert("N8c 兩筆皆未被取消（擋在寫入前）", _st["c"] == 0, str(_st["c"]))
+finally:
+    os.environ.pop("SME_FLOOR", None)
+
+
 # ───────────────────────── 結果 ─────────────────────────
 print("=" * 60)
 print(f"Results: {passed} passed, {failed} failed out of {passed + failed}")

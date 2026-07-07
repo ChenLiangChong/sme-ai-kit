@@ -40,6 +40,7 @@ DEFAULT_ENABLED_EVENTS = frozenset({
     "deadline_approaching",                   # T-N 將至（按 escalation_lead_days 觸發）★律所命脈
     "deadline_missed",                        # 已逾期（最高優先、每日推 + 升級合夥人/boss）
     "deadline_amended",                       # 時限被異動重算（改送達日/天數→雙日期變動，鏡像 transaction_deleted）
+    "deadline_cancelled",                     # F-S2-3：時限被業務取消（提醒消失＝同 amend 風險族，不擋但通知）
     # legal-admin 靜默失敗哨兵（時間驅動 cron、補既有設計的兩個盲區）
     "scan_stalled",                           # #H1：時限掃描器失聯（heartbeat 過期）→ 時限恐停止倒數
     "intake_unconfirmed",                     # #H2：抽出待確認的時限久未入庫（HITL 結構盲區）
@@ -461,6 +462,7 @@ ESCALATION_LABELS = {
     "deadline_approaching": "時限將至",
     "deadline_missed": "時限已逾期",
     "deadline_amended": "時限被異動重算",
+    "deadline_cancelled": "時限被取消",
     "scan_stalled": "時限掃描器失聯",
     "intake_unconfirmed": "待確認時限久未入庫",
 }

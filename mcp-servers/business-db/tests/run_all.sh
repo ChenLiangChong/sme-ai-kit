@@ -15,6 +15,7 @@ FILES=(
   tests/test_migration_safety.py
   tests/test_health_intake.py
   tests/test_office_calendar_import.py
+  tests/test_pleading_integration.py
   tests/test_audit_accounting.py
   tests/test_audit_approvals.py
   tests/test_audit_auth.py

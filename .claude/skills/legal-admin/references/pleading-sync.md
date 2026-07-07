@@ -15,7 +15,7 @@
 ## 不變式（細節見 KB 契約 `contract_sme_pleading_integration` v3）
 
 - **去識別化（邊界 gate、結構保證）**：回寫 payload **所有自由文字欄**（`trigger_event`／`statutory_basis`／`calc_trace`、新欄 default in-scope）在送出前過同一道去識別化 gate——已知當事人/對造名→「當事人」、已知法院名＋常見法院寫法→「法院」；`title` 一律由 `type` 查 `type_label` 得法定標籤、**絕不帶自由文字 description**。gate 命中會留 interaction_log（只記數量、不記名字）。誠實邊界：只擋「已知」寫法（matter 欄位可得＋常見法院 pattern）、**不可宣稱擋任意 PII**；operator 仍不應把當事人名打進自由欄。寫外部行事曆前另可用 `screen_calendar_text` 自檢。
-- **PII 事後補救**：自由欄已寫入的名字用 `redact_deadline_field(deadline_id, find_text, reason, ...)` 替換為泛稱並重觸發鏡像覆蓋（具名+稽核）；誤標遞交用 `unmark_deadline_filed` 撤銷。
+- **PII 事後補救**：自由欄已寫入的名字用 `redact_deadline_field(deadline_id, find_text, reason, ...)` 替換為泛稱並重觸發鏡像覆蓋（具名+稽核）；誤標遞交用 `unmark_deadline_filed` 撤銷；建錯/已無意義的時限用 `cancel_deadline` 取消（鏡像同步 cancelled、詳見 deadline-intake.md）。
 - **pleading 不自算**：`internal_deadline`（working）由 legal-admin 算好回寫，pleading 只顯示、永不自己推。`statutory_deadline`（法定硬底線）與 `internal_deadline` **兩個都回寫**。
 - **不蓋手填**：sme 只 upsert 自己 `source='sme_engine'` 的列（以 `external_ref` 認）；律師在 pleading 手填的列（`source='manual'`）永不碰。同一真實末日若兩來源並存 → 由 pleading UI 並陳讓律師手動併、不自動 merge。
 

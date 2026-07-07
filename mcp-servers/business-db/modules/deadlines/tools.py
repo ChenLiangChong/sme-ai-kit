@@ -338,6 +338,22 @@ def unmark_deadline_filed(deadline_id: int, reason: str, unfiled_by: str = "") -
 
 
 @mcp.tool()
+def cancel_deadline(deadline_id: int, reason: str, cancelled_by: str = "") -> str:
+    """業務取消時限（建錯案／建錯型別／案件和解等）→ 狀態轉 cancelled、cron 與掃描不再提醒
+    （具名+稽核+上報主持律師、同步 pleading 鏡像）。
+
+    已遞交（filed）不可直接取消：先 unmark_deadline_filed 撤銷誤標、再取消。
+    取消不可逆：誤取消請重新 create_deadline 建新筆重算。
+
+    Args:
+        deadline_id: 時限 ID
+        reason: 為何取消（寫進稽核、必填）
+        cancelled_by: 取消者
+    """
+    return service.cancel_deadline(deadline_id=deadline_id, reason=reason, cancelled_by=cancelled_by)
+
+
+@mcp.tool()
 def redact_deadline_field(
     deadline_id: int, find_text: str, reason: str, redacted_by: str = "", replace_with: str = "當事人"
 ) -> str:

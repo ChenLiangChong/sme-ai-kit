@@ -1133,6 +1133,97 @@ def unmark_deadline_filed(deadline_id: int, reason: str, unfiled_by: str) -> str
     )
 
 
+def cancel_deadline(deadline_id: int, reason: str, cancelled_by: str) -> str:
+    """業務取消時限（F-S2-3）：建錯案／建錯型別／案件和解等「此筆不該再倒數」的情形。
+    status→cancelled、cron 與掃描不再計入；具名（actor fail-closed）＋必填 reason＋
+    deadline_audit 快照＋interaction_log；同 tx enqueue deadline_cancelled 上報主持律師
+    （提醒消失＝同 amend 風險族、不擋但通知）；commit 後重觸發 pleading 回寫、鏡像同步 cancelled。
+
+    邊界：filed 不可直接取消——先 unmark_deadline_filed（免用 cancel 繞過遞交撤銷稽核）；
+    cancelled 後 mark_filed / mark_reviewed / amend 全擋（既有 status guard）。取消不可逆
+    （無 uncancel）：誤取消請重新 create_deadline 建新筆、由引擎重算（舊筆稽核留原地）。
+    """
+    from shared.floor_policy import is_full_access
+    from shared.escalation import enqueue_escalation
+
+    if not reason or not reason.strip():
+        return "ERROR: 取消時限必須附 reason（為何取消，寫進稽核；漏期=執業過失、取消要留痕）"
+    with transaction() as db:
+        d = repository.get_deadline(db, deadline_id)
+        if not d:
+            return f"ERROR: 找不到時限 #{deadline_id}"
+        # 機密軸 + 存在性洩漏防護（同 mark_filed / amend gate 風格）
+        m = repository.get_matter(db, d["matter_id"])
+        if m and m["confidential"] and not is_full_access():
+            return f"ERROR: 找不到時限 #{deadline_id}"
+        if d["status"] == "cancelled":
+            return f"ERROR: 時限 #{deadline_id} 已是取消狀態"
+        if d["status"] == "filed":
+            return (
+                f"ERROR: 時限 #{deadline_id} 已遞交、不可直接取消。"
+                f"若遞交是誤標請先 unmark_deadline_filed({deadline_id}, reason=...) 撤銷、再取消；"
+                "已完成的遞交事實不應以取消抹除。"
+            )
+        # actor 具名 + 防偽造 fail-closed（對齊 #10）：須在任何寫入前
+        _actor, _err = _writer_or_error(db, cancelled_by)
+        if _err:
+            return _err
+        _before_status = d["status"]
+        rows = repository.cancel(db, deadline_id)
+        if rows == 0:
+            return f"ERROR: 時限 #{deadline_id} 取消失敗（狀態已變動）"
+        repository.insert_deadline_audit(db, {
+            "deadline_id": deadline_id,
+            "matter_id": d["matter_id"],
+            "amended_by": _actor or None,
+            "amended_at": _now(),
+            "reason": reason.strip(),
+            "changed_fields": json.dumps(["status"], ensure_ascii=False),
+            "before_snapshot": json.dumps({"status": _before_status}, ensure_ascii=False),
+            "after_snapshot": json.dumps({"status": "cancelled"}, ensure_ascii=False),
+        })
+        repository.insert_interaction_log(
+            db,
+            actor=_actor or "system",
+            action="deadline_cancelled",
+            target_type="deadline",
+            target_id=deadline_id,
+            detail=f"{d['description']} 已取消（{_DEADLINE_STATUS_ZH.get(_before_status, _before_status)}→已取消、cron 不再提醒）：{reason.strip()}",
+            business_unit=None,
+        )
+        # 上報主持律師（同 tx、鏡像 deadline_amended）：取消讓提醒消失、是高風險動作、不擋但通知
+        matter_no = (m["matter_no"] if m else None) or f"#{d['matter_id']}"
+        enqueue_escalation(
+            db,
+            event_type="deadline_cancelled",
+            summary=(
+                f"【時限取消】{matter_no} {d['description']} 經 {_actor or '系統'} 取消"
+                f"（原狀態：{_DEADLINE_STATUS_ZH.get(_before_status, _before_status)}、"
+                f"法定期限 {d['statutory_deadline']}、提醒已停）。原因：{reason.strip()}。"
+            ),
+            detail={
+                "kind": "deadline_cancelled",
+                "deadline_id": str(deadline_id),
+                "status_before": str(_before_status),
+                "statutory_deadline": str(d["statutory_deadline"] or ""),
+            },
+            actor_user_id="",
+            actor_label=_actor or "系統·時限取消",
+            business_unit=(m["business_unit"] if m else "") or "",
+            channel_id=None,
+        )
+    # pleading 鏡像同步 cancelled（F-STATUS-SYNC 同款：commit 後、fresh 連線、冪等、失敗不炸）
+    _wb_actor = _actor if (_actor and _actor != "system") else ""
+    _pl_note = _pleading_writeback.note_for(
+        _pleading_writeback.writeback_deadline(deadline_id, actor_name=_wb_actor)
+    )
+    return (
+        f"時限 #{deadline_id}（{d['description']}）已取消，cron 與掃描不再提醒（已留稽核並通報主持律師）。\n"
+        f"- 取消不可逆：誤取消請重新 create_deadline 建新筆、由引擎重算。"
+        + _pl_note
+    )
+
+
 def redact_deadline_field(
     deadline_id: int, find_text: str, reason: str, redacted_by: str, replace_with: str = "當事人"
 ) -> str:

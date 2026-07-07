@@ -280,6 +280,18 @@ def unmark_filed(db: sqlite3.Connection, deadline_id: int) -> int:
     return cur.rowcount
 
 
+def cancel(db: sqlite3.Connection, deadline_id: int) -> int:
+    """業務取消（F-S2-3：建錯／已無意義的時限）：status→cancelled。只對 pending/extended/missed
+    生效——filed 不可直接取消（先 unmark_deadline_filed、免用 cancel 繞過遞交撤銷的稽核）；
+    cancelled 不重複生效（冪等擋）。狀態條件寫在 WHERE＝與讀取檢查間無 TOCTOU。回 rowcount。"""
+    cur = db.execute(
+        "UPDATE deadlines SET status='cancelled' "
+        "WHERE id=? AND status IN ('pending','extended','missed')",
+        (deadline_id,),
+    )
+    return cur.rowcount
+
+
 def redact_free_text(db: sqlite3.Connection, deadline_id: int, find_text: str, replace_with: str) -> int:
     """自由文字欄補救（redact 用）：SQL 端 replace()＝對**當前值**原子替換、無「讀舊值→盲寫」的
     lost-update race（codex R1 MED：併發 amend 的新內容不會被舊快照覆蓋）。三個自由欄一次處理、
